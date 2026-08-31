@@ -14,7 +14,7 @@ Orbit is a high-performance C++20 HTTP/3 web framework built on top of asynchron
 Clone the repository and build using CMake:
 
 ```bash
-git clone https://github.com/varuns2903/http-server.git orbit
+git clone https://github.com/varuns2903/orbit-framework.git orbit
 cd orbit
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
