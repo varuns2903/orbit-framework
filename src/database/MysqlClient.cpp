@@ -105,21 +105,33 @@ void MysqlClient::QueryAwaiter::process_result_cont() {
         if (!res) {
             // No result set (e.g. INSERT, UPDATE)
             if (mysql_field_count(client.get_mysql()) == 0) {
-                result.affected_rows = mysql_affected_rows(client.get_mysql());
+                result = ResultSet({}, mysql_affected_rows(client.get_mysql()));
             } else {
                 err = 1; // Error reading result
             }
             coro.resume();
         } else {
             unsigned int num_fields = mysql_num_fields(res);
+            MYSQL_FIELD* fields = mysql_fetch_fields(res);
+            
+            auto col_map = std::make_shared<std::unordered_map<std::string, size_t>>();
+            for (unsigned int i = 0; i < num_fields; ++i) {
+                (*col_map)[fields[i].name] = i;
+            }
+
+            std::vector<Row> rows;
             MYSQL_ROW current_row;
             while ((current_row = mysql_fetch_row(res))) {
-                Row r;
+                std::vector<std::string> vals;
+                vals.reserve(num_fields);
                 for(unsigned int i = 0; i < num_fields; i++) {
-                    r.columns.push_back(current_row[i] ? current_row[i] : "");
+                    vals.push_back(current_row[i] ? current_row[i] : "");
                 }
-                result.rows.push_back(std::move(r));
+                rows.emplace_back(std::move(vals), col_map);
             }
+            
+            result = ResultSet(std::move(rows), 0);
+            
             mysql_free_result(res);
             coro.resume();
         }
@@ -131,7 +143,7 @@ void MysqlClient::QueryAwaiter::process_result_cont() {
     }
 }
 
-MysqlClient::QueryResult MysqlClient::QueryAwaiter::await_resume() {
+ResultSet MysqlClient::QueryAwaiter::await_resume() {
     if (err != 0) {
         throw std::runtime_error(std::string("MySQL Query Error: ") + mysql_error(client.get_mysql()));
     }

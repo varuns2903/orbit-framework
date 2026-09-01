@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <functional>
 #include <orbit/network/Proactor.hpp>
+#include <orbit/database/ResultSet.hpp>
 
 namespace database {
 
@@ -26,14 +27,7 @@ public:
         std::string dbname;
     };
 
-    struct Row {
-        std::vector<std::string> columns;
-    };
 
-    struct QueryResult {
-        std::vector<Row> rows;
-        uint64_t affected_rows{0};
-    };
 
     /**
      * @brief Constructs a new MysqlClient.
@@ -68,11 +62,11 @@ public:
         int err{0};
         int status{0};
         std::coroutine_handle<> coro;
-        QueryResult result;
+        ResultSet result;
 
         bool await_ready() const { return false; }
         void await_suspend(std::coroutine_handle<> h);
-        QueryResult await_resume();
+        ResultSet await_resume();
         void resume_loop();
         void process_result_start();
         void process_result_cont();

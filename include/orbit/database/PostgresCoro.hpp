@@ -39,16 +39,16 @@ inline ConnectAwaiter connect_async(std::shared_ptr<PostgresClient> client) {
 struct QueryAwaiter {
     std::shared_ptr<PostgresClient> client;
     std::string sql;
-    PGresult* result = nullptr;
+    ResultSet result;
 
     bool await_ready() const noexcept { return false; }
     void await_suspend(std::coroutine_handle<> h) {
-        client->query(sql, [this, h](PGresult* r) {
+        client->query(sql, [this, h](const ResultSet& r) {
             result = r;
             h.resume();
         });
     }
-    PGresult* await_resume() { return result; }
+    ResultSet await_resume() { return result; }
 };
 
 /**
@@ -63,7 +63,7 @@ struct QueryAwaiter {
  * @endcode
  */
 inline QueryAwaiter query_async(std::shared_ptr<PostgresClient> client, const std::string& sql) {
-    return QueryAwaiter{std::move(client), sql};
+    return QueryAwaiter{std::move(client), sql, ResultSet{}};
 }
 
 } // namespace database

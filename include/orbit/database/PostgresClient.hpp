@@ -4,6 +4,7 @@
 #include <functional>
 #include <libpq-fe.h>
 #include <orbit/network/Proactor.hpp>
+#include <orbit/database/ResultSet.hpp>
 
 namespace database {
 
@@ -34,11 +35,11 @@ public:
      * @param sql The SQL query string.
      * @param callback A callback invoked with the query result upon completion.
      */
-    void query(const std::string& sql, std::function<void(PGresult* res)> callback);
+    void query(const std::string& sql, std::function<void(const ResultSet& res)> callback);
 
 private:
     void handle_connect(std::function<void(bool)> callback);
-    void handle_query(std::function<void(PGresult*)> callback);
+    void handle_query(std::function<void(const ResultSet&)> callback);
 
     network::Proactor* proactor_;
     std::string conninfo_;

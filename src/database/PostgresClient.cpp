@@ -45,21 +45,21 @@ void PostgresClient::handle_connect(std::function<void(bool)> callback) {
     }
 }
 
-void PostgresClient::query(const std::string& sql, std::function<void(PGresult*)> callback) {
+void PostgresClient::query(const std::string& sql, std::function<void(const ResultSet&)> callback) {
     if (!connected_) {
-        callback(nullptr);
+        callback(ResultSet{});
         return;
     }
 
     if (PQsendQuery(conn_, sql.c_str()) == 0) {
-        callback(nullptr);
+        callback(ResultSet{});
         return;
     }
 
     handle_query(std::move(callback));
 }
 
-void PostgresClient::handle_query(std::function<void(PGresult*)> callback) {
+void PostgresClient::handle_query(std::function<void(const ResultSet&)> callback) {
     int flush_res = PQflush(conn_);
     if (flush_res == 1) {
         // needs more writing
@@ -69,13 +69,13 @@ void PostgresClient::handle_query(std::function<void(PGresult*)> callback) {
         });
         return;
     } else if (flush_res == -1) {
-        callback(nullptr);
+        callback(ResultSet{});
         return;
     }
 
     // Flush done, now wait for read
     if (PQconsumeInput(conn_) == 0) {
-        callback(nullptr);
+        callback(ResultSet{});
         return;
     }
 
@@ -95,7 +95,51 @@ void PostgresClient::handle_query(std::function<void(PGresult*)> callback) {
         res = next;
     }
 
-    callback(res);
+    if (!res) {
+        callback(ResultSet{});
+        return;
+    }
+
+    ExecStatusType status = PQresultStatus(res);
+    if (status != PGRES_TUPLES_OK && status != PGRES_COMMAND_OK) {
+        PQclear(res);
+        callback(ResultSet{});
+        return;
+    }
+
+    uint64_t affected_rows = 0;
+    if (status == PGRES_COMMAND_OK) {
+        const char* cmd_tuples = PQcmdTuples(res);
+        if (cmd_tuples && cmd_tuples[0] != '\0') {
+            try { affected_rows = std::stoull(cmd_tuples); } catch (...) {}
+        }
+    }
+
+    int num_fields = PQnfields(res);
+    auto col_map = std::make_shared<std::unordered_map<std::string, size_t>>();
+    for (int i = 0; i < num_fields; ++i) {
+        (*col_map)[PQfname(res, i)] = static_cast<size_t>(i);
+    }
+
+    int num_rows = PQntuples(res);
+    std::vector<Row> rows;
+    rows.reserve(num_rows);
+
+    for (int r = 0; r < num_rows; ++r) {
+        std::vector<std::string> vals;
+        vals.reserve(num_fields);
+        for (int c = 0; c < num_fields; ++c) {
+            if (PQgetisnull(res, r, c)) {
+                vals.push_back("");
+            } else {
+                vals.push_back(PQgetvalue(res, r, c));
+            }
+        }
+        rows.emplace_back(std::move(vals), col_map);
+    }
+
+    PQclear(res);
+    callback(ResultSet(std::move(rows), affected_rows));
 }
 
 } // namespace database
