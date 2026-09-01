@@ -227,59 +227,59 @@ target_include_directories(server_core PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-# Install Rules for the Framework
-include(GNUInstallDirs)
-
-install(TARGETS server_core
-    EXPORT OrbitFrameworkTargets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
-
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    FILES_MATCHING PATTERN "*.hpp"
-)
-
-install(EXPORT OrbitFrameworkTargets
-    FILE OrbitFrameworkTargets.cmake
-    NAMESPACE OrbitFramework::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
-)
-
-include(CMakePackageConfigHelpers)
-configure_package_config_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/OrbitFrameworkConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
-)
-
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
-)
-
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfigVersion.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
-)
-
-# Doxygen Configuration
-find_package(Doxygen)
-if(DOXYGEN_FOUND)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
-    add_custom_target(docs
-        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        COMMENT "Generating API documentation with Doxygen"
-        VERBATIM
-    )
-endif()
-
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    # Install Rules for the Framework
+    include(GNUInstallDirs)
+
+    install(TARGETS server_core
+        EXPORT OrbitFrameworkTargets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.hpp"
+    )
+
+    install(EXPORT OrbitFrameworkTargets
+        FILE OrbitFrameworkTargets.cmake
+        NAMESPACE OrbitFramework::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
+    )
+
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/OrbitFrameworkConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
+    )
+
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
+
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
+    )
+
+    # Doxygen Configuration
+    find_package(Doxygen)
+    if(DOXYGEN_FOUND)
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+        add_custom_target(docs
+            COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Generating API documentation with Doxygen"
+            VERBATIM
+        )
+    endif()
+
     # Examples
     add_executable(basic_server examples/basic_server.cpp)
     target_link_libraries(basic_server PRIVATE server_core)
