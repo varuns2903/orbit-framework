@@ -11,8 +11,12 @@
     "mongo-c-driver",
     "nghttp2",
     "nghttp3",
-    "ngtcp2",
+    {
+      "name": "ngtcp2",
+      "features": ["openssl"]
+    },
     "hiredis",
+    "pkgconf",
     {
       "name": "liburing",
       "platform": "linux"
