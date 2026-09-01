@@ -27,6 +27,20 @@ cmake -DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_B
 make -j$(nproc)
 ```
 
+### Build with Conan (Alternative to vcpkg)
+
+If you prefer Conan 2.x for dependency management:
+
+```bash
+# Install dependencies using the provided conanfile.py
+conan install . --output-folder=build --build=missing
+
+# Build the framework
+cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+```
+
 ### Manual Build (Without vcpkg)
 
 If you prefer using system packages, install the prerequisites manually:

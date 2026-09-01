@@ -8,8 +8,8 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **3. Export CMake targets** (e.g., `OrbitFramework::core`)
 - [x] **4. Support CMake `FetchContent`** seamlessly
 - [x] **5. Publish to vcpkg**
-- [ ] **6. Publish to Conan**
-- [ ] **7. Automatically manage dependencies**
+- [x] **6. Publish to Conan**
+- [x] **7. Automatically manage dependencies**
 - [ ] **18. Provide prebuilt binaries/releases**
 - [ ] **20. Support both static and shared libraries**
 - [ ] **42. Keep core dependencies lightweight**
