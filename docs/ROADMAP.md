@@ -61,12 +61,12 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 ## 5. Testing & CI/CD
 - [x] **35. Automated CI/CD**
 - [x] **36. Test Linux, Windows and macOS**
-- [ ] **37. Unit tests**
-- [ ] **38. Integration tests**
+- [x] **57. Code Coverage Setup (Lcov/Gcovr & CMake Integration)**
+- [ ] **37. Unit Testing Suite Expansion (Hit 85-90% Target)**
+- [ ] **38. Integration Testing Suite Expansion**
 - [ ] **39. HTTP/protocol compliance tests**
-- [ ] **40. Performance benchmarks & Load Testing (wrk/k6)**
-- [ ] **41. Security/dependency scanning & Attack/Penetration Tests**
-- [ ] **57. Code Coverage generation & tracking (gcov/lcov/Codecov)**
+- [ ] **40. Load Testing & Benchmarking**
+- [ ] **41. Attack / Penetration Testing**
 
 ## 6. Maintenance & Lifespan
 - [ ] **30. Use semantic versioning**

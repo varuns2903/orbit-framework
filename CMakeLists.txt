@@ -22,10 +22,15 @@ option(ORBIT_ENABLE_MARIADB "Enable MariaDB database support" ON)
 option(ORBIT_ENABLE_MONGODB "Enable MongoDB database support" ON)
 option(ORBIT_ENABLE_HTTP3 "Enable HTTP/3 and QUIC support" ON)
 option(ORBIT_ENABLE_GRPC "Enable gRPC support" OFF)
+option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior Sanitizers" ON)
+option(ORBIT_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 
+if(ORBIT_ENABLE_COVERAGE)
+    add_compile_options(--coverage -O0 -g)
+    add_link_options(--coverage)
+endif()
 
 # Optional sanitizers for debug builds to catch memory leaks and UB
-option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior Sanitizers" ON)
 if(ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
 
@@ -356,6 +361,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         tests/test_threadpool.cpp
         tests/test_websocket.cpp
         tests/test_ssr.cpp
+        tests/test_middleware.cpp
     )
     target_link_libraries(http_server_tests PRIVATE gtest_main server_core)
     include(GoogleTest)
