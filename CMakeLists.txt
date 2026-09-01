@@ -25,48 +25,60 @@ endif()
 
 find_package(OpenSSL REQUIRED)
 find_package(ZLIB REQUIRED)
-find_package(PostgreSQL REQUIRED)
+if(ORBIT_ENABLE_POSTGRES)
+    find_package(PostgreSQL REQUIRED)
+endif()
 find_package(CURL REQUIRED)
 find_package(PkgConfig REQUIRED)
-find_package(unofficial-libmariadb CONFIG QUIET)
-if(unofficial-libmariadb_FOUND)
-    set(MARIADB_LIBRARIES unofficial::libmariadb)
-else()
-    pkg_search_module(MARIADB REQUIRED libmariadb mariadb)
-endif()
-find_package(mongoc-1.0 CONFIG QUIET)
-if(NOT mongoc-1.0_FOUND)
-    find_package(mongoc CONFIG QUIET)
+
+if(ORBIT_ENABLE_MARIADB)
+    find_package(unofficial-libmariadb CONFIG QUIET)
+    if(unofficial-libmariadb_FOUND)
+        set(MARIADB_LIBRARIES unofficial::libmariadb)
+    else()
+        pkg_search_module(MARIADB REQUIRED libmariadb mariadb)
+    endif()
 endif()
 
-if(TARGET mongo::shared)
-    set(MONGOC_LIBRARIES mongo::shared)
-elseif(TARGET mongo::static)
-    set(MONGOC_LIBRARIES mongo::static)
-elseif(TARGET mongo::mongoc_shared)
-    set(MONGOC_LIBRARIES mongo::mongoc_shared)
-elseif(TARGET mongo::mongoc_static)
-    set(MONGOC_LIBRARIES mongo::mongoc_static)
-else()
-    pkg_search_module(MONGOC REQUIRED libmongoc-1.0 mongoc-1.0 mongoc2)
+if(ORBIT_ENABLE_MONGODB)
+    find_package(mongoc-1.0 CONFIG QUIET)
+    if(NOT mongoc-1.0_FOUND)
+        find_package(mongoc CONFIG QUIET)
+    endif()
+
+    if(TARGET mongo::shared)
+        set(MONGOC_LIBRARIES mongo::shared)
+    elseif(TARGET mongo::static)
+        set(MONGOC_LIBRARIES mongo::static)
+    elseif(TARGET mongo::mongoc_shared)
+        set(MONGOC_LIBRARIES mongo::mongoc_shared)
+    elseif(TARGET mongo::mongoc_static)
+        set(MONGOC_LIBRARIES mongo::mongoc_static)
+    else()
+        pkg_search_module(MONGOC REQUIRED libmongoc-1.0 mongoc-1.0 mongoc2)
+    endif()
 endif()
 
-find_package(hiredis CONFIG QUIET)
-if(hiredis_FOUND)
-    set(HIREDIS_LIBRARIES hiredis::hiredis)
-else()
-    pkg_search_module(HIREDIS REQUIRED hiredis)
+if(ORBIT_ENABLE_REDIS)
+    find_package(hiredis CONFIG QUIET)
+    if(hiredis_FOUND)
+        set(HIREDIS_LIBRARIES hiredis::hiredis)
+    else()
+        pkg_search_module(HIREDIS REQUIRED hiredis)
+    endif()
 endif()
 
-pkg_check_modules(NGHTTP2 REQUIRED libnghttp2)
-pkg_check_modules(NGTCP2 REQUIRED libngtcp2)
-pkg_search_module(NGTCP2_CRYPTO REQUIRED libngtcp2_crypto_openssl libngtcp2_crypto_ossl libngtcp2_crypto_quictls)
-if(NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_ossl" OR NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_openssl")
-    add_compile_definitions(USE_NGTCP2_CRYPTO_OSSL=1)
-elseif(NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_quictls")
-    add_compile_definitions(USE_NGTCP2_CRYPTO_QUICTLS=1)
+if(ORBIT_ENABLE_HTTP3)
+    pkg_check_modules(NGHTTP2 REQUIRED libnghttp2)
+    pkg_check_modules(NGTCP2 REQUIRED libngtcp2)
+    pkg_search_module(NGTCP2_CRYPTO REQUIRED libngtcp2_crypto_openssl libngtcp2_crypto_ossl libngtcp2_crypto_quictls)
+    if(NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_ossl" OR NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_openssl")
+        add_compile_definitions(USE_NGTCP2_CRYPTO_OSSL=1)
+    elseif(NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_quictls")
+        add_compile_definitions(USE_NGTCP2_CRYPTO_QUICTLS=1)
+    endif()
+    pkg_check_modules(NGHTTP3 REQUIRED libnghttp3)
 endif()
-pkg_check_modules(NGHTTP3 REQUIRED libnghttp3)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -78,6 +90,13 @@ set(INJA_BUILD_TESTS OFF CACHE BOOL "Disable inja tests" FORCE)
 set(BUILD_BENCHMARK OFF CACHE BOOL "Disable inja benchmark" FORCE)
 FetchContent_MakeAvailable(inja)
 
+# --- Modular Features ---
+option(ORBIT_ENABLE_REDIS "Enable Redis database support" ON)
+option(ORBIT_ENABLE_POSTGRES "Enable PostgreSQL database support" ON)
+option(ORBIT_ENABLE_MARIADB "Enable MariaDB database support" ON)
+option(ORBIT_ENABLE_MONGODB "Enable MongoDB database support" ON)
+option(ORBIT_ENABLE_HTTP3 "Enable HTTP/3 and QUIC support" ON)
+
 # Core static library
 if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     set(PROACTOR_SOURCES src/network/KqueueProactor.cpp)
@@ -87,7 +106,7 @@ else()
     set(PROACTOR_SOURCES src/network/EpollProactor.cpp src/network/IoUringProactor.cpp)
 endif()
 
-add_library(server_core STATIC
+set(SERVER_SOURCES
     src/network/PlatformSocket.cpp
     src/network/Socket.cpp
     src/network/ConnectionPool.cpp
@@ -97,9 +116,6 @@ add_library(server_core STATIC
     src/utils/Logger.cpp
     src/server/EventLoop.cpp
     src/server/Connection.cpp
-    src/server/QuicConnection.cpp
-    src/server/QuicConnectionManager.cpp
-    src/server/QuicHttp3Session.cpp
     src/utils/PrometheusRegistry.cpp
     src/server/ConnectionManager.cpp
     src/server/TimerManager.cpp
@@ -126,12 +142,36 @@ add_library(server_core STATIC
     src/middleware/Metrics.cpp
     src/middleware/Csrf.cpp
     src/middleware/OAuth2.cpp
-    src/database/RedisClient.cpp
-    src/database/PostgresClient.cpp
-    src/database/MysqlClient.cpp
-    src/database/MongoClient.cpp
     src/openapi/OpenApi.cpp
 )
+
+if(ORBIT_ENABLE_HTTP3)
+    list(APPEND SERVER_SOURCES 
+        src/server/QuicConnection.cpp
+        src/server/QuicConnectionManager.cpp
+        src/server/QuicHttp3Session.cpp
+    )
+    add_compile_definitions(ORBIT_ENABLE_HTTP3=1)
+endif()
+
+if(ORBIT_ENABLE_REDIS)
+    list(APPEND SERVER_SOURCES src/database/RedisClient.cpp)
+    add_compile_definitions(ORBIT_ENABLE_REDIS=1)
+endif()
+if(ORBIT_ENABLE_POSTGRES)
+    list(APPEND SERVER_SOURCES src/database/PostgresClient.cpp)
+    add_compile_definitions(ORBIT_ENABLE_POSTGRES=1)
+endif()
+if(ORBIT_ENABLE_MARIADB)
+    list(APPEND SERVER_SOURCES src/database/MysqlClient.cpp)
+    add_compile_definitions(ORBIT_ENABLE_MARIADB=1)
+endif()
+if(ORBIT_ENABLE_MONGODB)
+    list(APPEND SERVER_SOURCES src/database/MongoClient.cpp)
+    add_compile_definitions(ORBIT_ENABLE_MONGODB=1)
+endif()
+
+add_library(server_core STATIC ${SERVER_SOURCES})
 
 add_library(OrbitFramework::core ALIAS server_core)
 

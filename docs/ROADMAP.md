@@ -12,11 +12,11 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **7. Automatically manage dependencies**
 - [ ] **18. Provide prebuilt binaries/releases**
 - [ ] **20. Support both static and shared libraries**
-- [ ] **42. Keep core dependencies lightweight**
-- [ ] **43. Avoid forcing unused features/dependencies on users**
+- [x] **42. Keep core dependencies lightweight**
+- [x] **43. Avoid forcing unused features/dependencies on users**
 
 ## 2. Platform & Modularity
-- [ ] **8. Make features modular and optional**
+- [x] **8. Make features modular and optional**
 - [ ] **19. Support Linux, Windows, and macOS** 
 - [ ] **9. HTTP/1.1** (Active)
 - [ ] **10. HTTP/2** (Active)
