@@ -193,7 +193,12 @@ target_link_libraries(server_core
 )
 
 if(ORBIT_ENABLE_POSTGRES)
-    target_link_libraries(server_core PUBLIC PostgreSQL::PostgreSQL)
+    if(TARGET PostgreSQL::PostgreSQL)
+        target_link_libraries(server_core PUBLIC PostgreSQL::PostgreSQL)
+    else()
+        target_link_libraries(server_core PUBLIC ${PostgreSQL_LIBRARIES})
+        target_include_directories(server_core PUBLIC $<BUILD_INTERFACE:${PostgreSQL_INCLUDE_DIRS}>)
+    endif()
 endif()
 if(ORBIT_ENABLE_MARIADB)
     target_link_libraries(server_core PUBLIC ${MARIADB_LIBRARIES})
