@@ -334,6 +334,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
         add_executable(fastapi_server examples/fastapi_server.cpp)
         target_link_libraries(fastapi_server PRIVATE server_core)
+
+        add_executable(websocket_event_server examples/websocket_event_server.cpp)
+        target_link_libraries(websocket_event_server PRIVATE server_core)
     endif()
 
     # Testing Setup (GoogleTest via FetchContent)
