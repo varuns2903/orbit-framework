@@ -187,26 +187,42 @@ target_link_libraries(server_core
         OpenSSL::SSL
         OpenSSL::Crypto
         ZLIB::ZLIB
-        ${PostgreSQL_LIBRARIES}
-        ${MARIADB_LIBRARIES}
-        ${MONGOC_LIBRARIES}
-        ${HIREDIS_LIBRARIES}
         PkgConfig::NGHTTP2
-        ${NGTCP2_LIBRARIES}
-        ${NGTCP2_CRYPTO_LIBRARIES}
-        ${NGHTTP3_LIBRARIES}
         inja
         CURL::libcurl
 )
 
-target_link_directories(server_core PUBLIC
-    $<BUILD_INTERFACE:${MARIADB_LIBRARY_DIRS}>
-    $<BUILD_INTERFACE:${MONGOC_LIBRARY_DIRS}>
-    $<BUILD_INTERFACE:${HIREDIS_LIBRARY_DIRS}>
-    $<BUILD_INTERFACE:${NGTCP2_LIBRARY_DIRS}>
-    $<BUILD_INTERFACE:${NGTCP2_CRYPTO_LIBRARY_DIRS}>
-    $<BUILD_INTERFACE:${NGHTTP3_LIBRARY_DIRS}>
-)
+if(ORBIT_ENABLE_POSTGRES)
+    target_link_libraries(server_core PUBLIC PostgreSQL::PostgreSQL)
+endif()
+if(ORBIT_ENABLE_MARIADB)
+    target_link_libraries(server_core PUBLIC ${MARIADB_LIBRARIES})
+    target_link_directories(server_core PUBLIC $<BUILD_INTERFACE:${MARIADB_LIBRARY_DIRS}>)
+    target_include_directories(server_core PUBLIC $<BUILD_INTERFACE:${MARIADB_INCLUDE_DIRS}>)
+endif()
+if(ORBIT_ENABLE_MONGODB)
+    target_link_libraries(server_core PUBLIC ${MONGOC_LIBRARIES})
+    target_link_directories(server_core PUBLIC $<BUILD_INTERFACE:${MONGOC_LIBRARY_DIRS}>)
+    target_include_directories(server_core PUBLIC $<BUILD_INTERFACE:${MONGOC_INCLUDE_DIRS}>)
+endif()
+if(ORBIT_ENABLE_REDIS)
+    target_link_libraries(server_core PUBLIC ${HIREDIS_LIBRARIES})
+    target_link_directories(server_core PUBLIC $<BUILD_INTERFACE:${HIREDIS_LIBRARY_DIRS}>)
+    target_include_directories(server_core PUBLIC $<BUILD_INTERFACE:${HIREDIS_INCLUDE_DIRS}>)
+endif()
+if(ORBIT_ENABLE_HTTP3)
+    target_link_libraries(server_core PUBLIC ${NGTCP2_LIBRARIES} ${NGTCP2_CRYPTO_LIBRARIES} ${NGHTTP3_LIBRARIES})
+    target_link_directories(server_core PUBLIC 
+        $<BUILD_INTERFACE:${NGTCP2_LIBRARY_DIRS}>
+        $<BUILD_INTERFACE:${NGTCP2_CRYPTO_LIBRARY_DIRS}>
+        $<BUILD_INTERFACE:${NGHTTP3_LIBRARY_DIRS}>
+    )
+    target_include_directories(server_core PUBLIC 
+        $<BUILD_INTERFACE:${NGTCP2_INCLUDE_DIRS}>
+        $<BUILD_INTERFACE:${NGTCP2_CRYPTO_INCLUDE_DIRS}>
+        $<BUILD_INTERFACE:${NGHTTP3_INCLUDE_DIRS}>
+    )
+endif()
 
 if(WIN32)
     target_link_libraries(server_core PUBLIC ws2_32 mswsock)
@@ -215,13 +231,6 @@ elseif(NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 target_include_directories(server_core PUBLIC 
-    $<BUILD_INTERFACE:${PostgreSQL_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${MARIADB_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${MONGOC_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${HIREDIS_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${NGTCP2_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${NGTCP2_CRYPTO_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${NGHTTP3_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
