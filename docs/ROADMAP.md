@@ -32,7 +32,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 ## 2.5 Database & ORM
 - [x] **51. Database Abstraction Layer (DBAL) & unified ResultSet**
 - [x] **52. Automatic JSON serialization for database queries**
-- [ ] **53. Full Object-Relational Mapper (ORM)**
+- [x] **53. Full Object-Relational Mapper (ORM)**
 - [ ] **54. Database Migrations support**
 
 ## 3. Tooling & Developer Experience
