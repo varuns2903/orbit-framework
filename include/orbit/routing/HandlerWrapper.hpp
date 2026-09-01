@@ -45,9 +45,9 @@ auto wrap_handler(Handler&& h) -> std::function<void(http::HttpRequest&, std::sh
     using traits = function_traits<Handler>;
     using Ret = typename traits::result_type;
 
-    if constexpr (std::is_same_v<Ret, void>) {
-        // It's a standard handler, we just pass it through.
-        // Assuming it takes (HttpRequest&, shared_ptr<ResponseWriter>)
+    if constexpr (std::is_same_v<Ret, void> || traits::arg_count == 2) {
+        // It's a standard handler or a Coroutine Task handling its own ResponseWriter. We just pass it through.
+        // Assumes signature: (HttpRequest&, shared_ptr<ResponseWriter>)
         return [h = std::forward<Handler>(h)](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) mutable {
             h(req, writer);
         };
