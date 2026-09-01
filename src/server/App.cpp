@@ -184,6 +184,10 @@ void App::listen() {
     listener_ = std::make_unique<Listener>(config_.port);
     listener_->start();
     
+    network::UdpSocket* pass_quic_socket = nullptr;
+    QuicConnectionManager* pass_quic_manager = nullptr;
+
+#ifdef ORBIT_ENABLE_HTTP3
     if (config_.http_version == config::HttpVersion::Http3) {
         if (!tls_context_) {
             LOG_WARN("HTTP/3 QUIC is enabled but no SSL certificates were provided. QUIC requires TLS. Disabling QUIC.");
@@ -192,11 +196,18 @@ void App::listen() {
             quic_socket_->set_non_blocking();
             quic_socket_->bind(config_.port);
             quic_manager_ = std::make_unique<QuicConnectionManager>(*quic_socket_, tls_context_->get());
+            pass_quic_socket = quic_socket_.get();
+            pass_quic_manager = quic_manager_.get();
             LOG_INFO("HTTP/3 QUIC enabled on UDP port " << config_.port);
         }
     }
+#else
+    if (config_.http_version == config::HttpVersion::Http3) {
+        LOG_WARN("HTTP/3 QUIC was requested but the framework was compiled with ORBIT_ENABLE_HTTP3=OFF. Disabling QUIC.");
+    }
+#endif
     
-    event_loop_ = std::make_unique<EventLoop>(*listener_, router_, config_, tls_context_.get(), quic_socket_.get(), quic_manager_.get());
+    event_loop_ = std::make_unique<EventLoop>(*listener_, router_, config_, tls_context_.get(), pass_quic_socket, pass_quic_manager);
     
     LOG_INFO("App started listening on port " << config_.port);
     event_loop_->run();

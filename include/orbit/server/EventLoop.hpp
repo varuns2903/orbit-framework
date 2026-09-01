@@ -8,7 +8,11 @@
 #include <orbit/config/Config.hpp>
 #include <orbit/network/TlsContext.hpp>
 #include <orbit/network/UdpSocket.hpp>
+#ifdef ORBIT_ENABLE_HTTP3
 #include <orbit/server/QuicConnectionManager.hpp>
+#else
+namespace server { class QuicConnectionManager; }
+#endif
 #include <atomic>
 
 namespace server {

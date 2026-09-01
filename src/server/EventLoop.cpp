@@ -35,9 +35,11 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
     
     do_accept();
 
+#ifdef ORBIT_ENABLE_HTTP3
     if (quic_socket_ && quic_manager_) {
         do_read_quic();
     }
+#endif
 }
 
 void EventLoop::run() {
@@ -96,6 +98,7 @@ void EventLoop::do_accept() {
     });
 }
 
+#ifdef ORBIT_ENABLE_HTTP3
 void EventLoop::do_read_quic() {
     proactor_->async_wait_read(quic_socket_->fd(), [this]() {
         char buffer[65536];
@@ -113,5 +116,6 @@ void EventLoop::do_read_quic() {
         }
     });
 }
+#endif
 
 } // namespace server

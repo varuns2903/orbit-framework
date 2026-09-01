@@ -6,7 +6,11 @@
 #include <orbit/config/Config.hpp>
 #include <orbit/network/TlsContext.hpp>
 #include <orbit/network/UdpSocket.hpp>
+#ifdef ORBIT_ENABLE_HTTP3
 #include <orbit/server/QuicConnectionManager.hpp>
+#else
+namespace server { class QuicConnectionManager; }
+#endif
 #include <memory>
 
 namespace server {
@@ -230,8 +234,10 @@ private:
     config::ServerConfig config_;
     routing::Router router_;
     std::unique_ptr<Listener> listener_;
+#ifdef ORBIT_ENABLE_HTTP3
     std::unique_ptr<network::UdpSocket> quic_socket_;
     std::unique_ptr<QuicConnectionManager> quic_manager_;
+#endif
     std::unique_ptr<network::TlsContext> tls_context_;
     std::unique_ptr<EventLoop> event_loop_;
 };
