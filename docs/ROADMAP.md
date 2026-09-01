@@ -64,8 +64,8 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [ ] **37. Unit tests**
 - [ ] **38. Integration tests**
 - [ ] **39. HTTP/protocol compliance tests**
-- [ ] **40. Performance benchmarks**
-- [ ] **41. Security/dependency scanning**
+- [ ] **40. Performance benchmarks & Load Testing (wrk/k6)**
+- [ ] **41. Security/dependency scanning & Attack/Penetration Tests**
 
 ## 6. Maintenance & Lifespan
 - [ ] **30. Use semantic versioning**
