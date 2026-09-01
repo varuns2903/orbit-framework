@@ -309,14 +309,17 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     endif()
 
     # Examples
-    add_executable(basic_server examples/basic_server.cpp)
-    target_link_libraries(basic_server PRIVATE server_core)
+    option(ORBIT_BUILD_EXAMPLES "Build example applications" ON)
+    if(ORBIT_BUILD_EXAMPLES)
+        add_executable(basic_server examples/basic_server.cpp)
+        target_link_libraries(basic_server PRIVATE server_core)
 
-    add_executable(rest_api examples/rest_api.cpp)
-    target_link_libraries(rest_api PRIVATE server_core)
+        add_executable(rest_api examples/rest_api.cpp)
+        target_link_libraries(rest_api PRIVATE server_core)
 
-    add_executable(chat_server examples/chat_server.cpp)
-    target_link_libraries(chat_server PRIVATE server_core)
+        add_executable(chat_server examples/chat_server.cpp)
+        target_link_libraries(chat_server PRIVATE server_core)
+    endif()
 
     # Testing Setup (GoogleTest via FetchContent)
     include(FetchContent)
@@ -350,3 +353,31 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         target_link_options(fuzz_http_parser PRIVATE -fsanitize=fuzzer,address)
     endif()
 endif()
+
+# --- Packaging with CPack ---
+set(CPACK_PACKAGE_NAME "OrbitFramework")
+set(CPACK_PACKAGE_VENDOR "Orbit Framework Team")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A blazing fast C++20 HTTP/3 web framework")
+set(CPACK_PACKAGE_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
+set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
+set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+
+# For Linux, build DEB and RPM by default if tools are present
+set(CPACK_GENERATOR "TGZ;ZIP")
+if(UNIX AND NOT APPLE)
+    list(APPEND CPACK_GENERATOR "DEB" "RPM")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libssl3, zlib1g")
+endif()
+
+# For macOS
+if(APPLE)
+    list(APPEND CPACK_GENERATOR "DragNDrop")
+endif()
+
+# For Windows
+if(WIN32)
+    list(APPEND CPACK_GENERATOR "NSIS")
+endif()
+
+include(CPack)
