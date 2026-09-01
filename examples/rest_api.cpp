@@ -27,10 +27,9 @@ Task coro_db_handler(HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> write
     }
 
     // 2. Await query
-    PGresult* res = co_await query_async(pg_client, "SELECT current_timestamp;");
-    if (res) {
-        std::string ts = PQgetvalue(res, 0, 0);
-        PQclear(res);
+    ResultSet res = co_await query_async(pg_client, "SELECT current_timestamp;");
+    if (!res.empty()) {
+        std::string ts = res[0].get(0).value_or("");
         
         HttpResponse out;
         out.status(HttpStatus::OK).send("{\"timestamp\": \"" + ts + "\"}");
