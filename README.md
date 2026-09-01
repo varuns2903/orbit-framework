@@ -95,7 +95,6 @@ int main() {
 
 Dive deep into the architecture and learn how to master Orbit Framework:
 
-* [🗺️ **Master Roadmap**](docs/ROADMAP.md) - *See our 50-point ultimate goal checklist*
 * [🚀 **Getting Started**](docs/getting_started.md) - *Manual builds, vcpkg, and Conan instructions*
 * [🛣️ **Routing & Streaming**](docs/routing.md)
 * [🛡️ **Middleware & Validation**](docs/middleware.md)
