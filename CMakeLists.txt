@@ -356,12 +356,12 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     enable_testing()
 
     add_executable(http_server_tests 
-        tests/test_parser.cpp
-        tests/test_router.cpp
-        tests/test_threadpool.cpp
-        tests/test_websocket.cpp
-        tests/test_ssr.cpp
-        tests/test_e2e.cpp
+        tests/unit/test_parser.cpp
+        tests/unit/test_router.cpp
+        tests/unit/test_threadpool.cpp
+        tests/unit/test_websocket.cpp
+        tests/unit/test_ssr.cpp
+        tests/integration/test_e2e.cpp
     )
     target_link_libraries(http_server_tests PRIVATE gtest_main server_core CURL::libcurl)
     include(GoogleTest)
@@ -369,8 +369,8 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
     # Fuzz Testing
     option(ENABLE_FUZZING "Build fuzz testing executables" OFF)
-    if(ENABLE_FUZZING)
-        add_executable(fuzz_http_parser tests/fuzz_http_parser.cpp)
+    if(ENABLE_FUZZING AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_executable(fuzz_http_parser tests/fuzz/fuzz_http_parser.cpp)
         target_link_libraries(fuzz_http_parser PRIVATE server_core)
         # Enable libFuzzer and AddressSanitizer
         target_compile_options(fuzz_http_parser PRIVATE -fsanitize=fuzzer,address -g -O1)

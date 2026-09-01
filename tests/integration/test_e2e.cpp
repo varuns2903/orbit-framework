@@ -9,7 +9,7 @@
 #include <orbit/middleware/RateLimiter.hpp>
 #include <orbit/middleware/StaticFiles.hpp>
 #include <orbit/middleware/Proxy.hpp>
-#include "TestClient.hpp"
+#include "../utils/TestClient.hpp"
 
 #include <thread>
 #include <chrono>
