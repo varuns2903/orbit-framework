@@ -10,7 +10,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **5. Publish to vcpkg**
 - [x] **6. Publish to Conan**
 - [x] **7. Automatically manage dependencies**
-- [ ] **18. Provide prebuilt binaries/releases**
+- [x] **18. Provide prebuilt binaries/releases**
 - [x] **20. Support both static and shared libraries**
 - [x] **42. Keep core dependencies lightweight**
 - [x] **43. Avoid forcing unused features/dependencies on users**
@@ -38,7 +38,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **22. `orbit new <project>`**
 - [x] **23. `orbit build`**
 - [x] **24. `orbit run`**
-- [ ] **17. Provide sensible default configuration**
+- [x] **17. Provide sensible default configuration**
 - [ ] **44. Provide one-command installation**
 - [x] **45. Provide one-command project creation**
 - [x] **46. Provide one-command development run**
