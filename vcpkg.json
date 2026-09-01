@@ -13,5 +13,11 @@
     "nghttp3",
     "ngtcp2",
     "hiredis"
-  ]
+  ],
+  "features": {
+    "grpc": {
+      "description": "gRPC support",
+      "dependencies": ["grpc"]
+    }
+  }
 }

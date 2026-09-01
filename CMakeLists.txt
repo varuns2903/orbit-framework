@@ -97,6 +97,7 @@ option(ORBIT_ENABLE_POSTGRES "Enable PostgreSQL database support" ON)
 option(ORBIT_ENABLE_MARIADB "Enable MariaDB database support" ON)
 option(ORBIT_ENABLE_MONGODB "Enable MongoDB database support" ON)
 option(ORBIT_ENABLE_HTTP3 "Enable HTTP/3 and QUIC support" ON)
+option(ORBIT_ENABLE_GRPC "Enable gRPC support" OFF)
 
 # Core static library
 if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
@@ -120,6 +121,7 @@ set(SERVER_SOURCES
     src/utils/PrometheusRegistry.cpp
     src/server/ConnectionManager.cpp
     src/server/TimerManager.cpp
+    src/server/GrpcServer.cpp
     ${PROACTOR_SOURCES}
     src/network/UdpSocket.cpp
     src/concurrency/ThreadPool.cpp
@@ -193,9 +195,14 @@ target_link_libraries(server_core
 )
 
 if(ORBIT_ENABLE_POSTGRES)
+    message(STATUS "PostgreSQL_FOUND = ${PostgreSQL_FOUND}")
+    message(STATUS "PostgreSQL_LIBRARIES = ${PostgreSQL_LIBRARIES}")
+    message(STATUS "PostgreSQL_INCLUDE_DIRS = ${PostgreSQL_INCLUDE_DIRS}")
     if(TARGET PostgreSQL::PostgreSQL)
+        message(STATUS "TARGET PostgreSQL::PostgreSQL is defined!")
         target_link_libraries(server_core PUBLIC PostgreSQL::PostgreSQL)
     else()
+        message(STATUS "TARGET PostgreSQL::PostgreSQL is NOT defined!")
         target_link_libraries(server_core PUBLIC ${PostgreSQL_LIBRARIES})
         target_include_directories(server_core PUBLIC $<BUILD_INTERFACE:${PostgreSQL_INCLUDE_DIRS}>)
     endif()
@@ -227,6 +234,12 @@ if(ORBIT_ENABLE_HTTP3)
         $<BUILD_INTERFACE:${NGTCP2_CRYPTO_INCLUDE_DIRS}>
         $<BUILD_INTERFACE:${NGHTTP3_INCLUDE_DIRS}>
     )
+endif()
+
+if(ORBIT_ENABLE_GRPC)
+    find_package(gRPC CONFIG REQUIRED)
+    target_link_libraries(server_core PUBLIC gRPC::grpc++)
+    add_compile_definitions(ORBIT_ENABLE_GRPC=1)
 endif()
 
 if(WIN32)
