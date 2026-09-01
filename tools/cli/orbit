@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+import argparse
+import os
+import subprocess
+import sys
+import shutil
+
+def run_command(cmd, cwd=None):
+    print(f"🚀 Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=cwd)
+    if result.returncode != 0:
+        print(f"❌ Error executing command: {' '.join(cmd)}")
+        sys.exit(result.returncode)
+
+def create_project(project_name):
+    if os.path.exists(project_name):
+        print(f"❌ Directory '{project_name}' already exists.")
+        sys.exit(1)
+        
+    os.makedirs(project_name)
+    
+    # 1. main.cpp
+    main_cpp = """#include <orbit/server/App.hpp>
+#include <orbit/http/HttpResponse.hpp>
+#include <iostream>
+
+using namespace server;
+using namespace http;
+
+int main() {
+    App app;
+
+    app.get("/", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+        res->send(HttpResponse().status(HttpStatus::OK).send("Hello from Orbit Framework!"));
+    });
+
+    app.listen(3000, []() {
+        std::cout << "🚀 Orbit Server is running on http://localhost:3000" << std::endl;
+    });
+
+    return 0;
+}
+"""
+    with open(os.path.join(project_name, "main.cpp"), "w") as f:
+        f.write(main_cpp)
+
+    # 2. CMakeLists.txt
+    cmake_lists = f"""cmake_minimum_required(VERSION 3.20)
+project({project_name} LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+FetchContent_Declare(
+  OrbitFramework
+  GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
+  GIT_TAG        main
+)
+FetchContent_MakeAvailable(OrbitFramework)
+
+add_executable({project_name} main.cpp)
+target_link_libraries({project_name} PRIVATE OrbitFramework::core)
+"""
+    with open(os.path.join(project_name, "CMakeLists.txt"), "w") as f:
+        f.write(cmake_lists)
+
+    # 3. vcpkg.json
+    vcpkg_json = """{
+  "name": "%s",
+  "version": "0.1.0",
+  "dependencies": [
+    "openssl",
+    "zlib",
+    "libpq",
+    "curl",
+    "libmariadb",
+    "mongo-c-driver",
+    "nghttp2",
+    "nghttp3",
+    "ngtcp2",
+    "hiredis"
+  ]
+}
+""" % project_name.lower()
+    with open(os.path.join(project_name, "vcpkg.json"), "w") as f:
+        f.write(vcpkg_json)
+
+    print(f"✅ Successfully created Orbit project: {project_name}")
+    print(f"👉 Next steps:")
+    print(f"   cd {project_name}")
+    print(f"   orbit build")
+    print(f"   orbit run")
+
+def build_project():
+    if not os.path.exists("CMakeLists.txt"):
+        print("❌ Error: No CMakeLists.txt found in the current directory.")
+        sys.exit(1)
+        
+    print("🔨 Building project...")
+    
+    # Try to find vcpkg root
+    vcpkg_root = os.environ.get("VCPKG_ROOT", "")
+    cmake_cmd = ["cmake", "-B", "build", "-S", ".", "-DCMAKE_BUILD_TYPE=Release"]
+    
+    if vcpkg_root:
+        toolchain = os.path.join(vcpkg_root, "scripts", "buildsystems", "vcpkg.cmake")
+        cmake_cmd.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain}")
+    else:
+        # Check if vcpkg folder exists locally
+        local_toolchain = os.path.join(os.getcwd(), "vcpkg", "scripts", "buildsystems", "vcpkg.cmake")
+        if os.path.exists(local_toolchain):
+            cmake_cmd.append(f"-DCMAKE_TOOLCHAIN_FILE={local_toolchain}")
+        else:
+            print("⚠️ VCPKG_ROOT not set and local vcpkg folder not found. Building without vcpkg toolchain...")
+            print("⚠️ If you are missing dependencies, please configure vcpkg.")
+            
+    run_command(cmake_cmd)
+    run_command(["cmake", "--build", "build", "-j", str(os.cpu_count() or 4)])
+    print("✅ Build completed successfully!")
+
+def run_project():
+    if not os.path.exists("build"):
+        print("❌ Error: 'build' directory not found. Did you run 'orbit build'?")
+        sys.exit(1)
+        
+    # Find the executable (heuristically look for the project name in CMakeLists.txt)
+    project_name = None
+    with open("CMakeLists.txt", "r") as f:
+        for line in f:
+            if line.strip().lower().startswith("project("):
+                parts = line.strip().split('(')
+                if len(parts) > 1:
+                    project_name = parts[1].split()[0].replace(')', '')
+                    break
+                    
+    if not project_name:
+        print("❌ Error: Could not determine project name from CMakeLists.txt")
+        sys.exit(1)
+        
+    exe_path = os.path.join("build", project_name)
+    if not os.path.exists(exe_path):
+        print(f"❌ Error: Executable '{exe_path}' not found. Build might have failed.")
+        sys.exit(1)
+        
+    print(f"🚀 Running {project_name}...\n")
+    subprocess.run([f"./{exe_path}"])
+
+def main():
+    parser = argparse.ArgumentParser(description="Orbit Framework CLI")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Command: new
+    parser_new = subparsers.add_parser("new", help="Create a new Orbit project")
+    parser_new.add_argument("project_name", type=str, help="Name of the new project")
+
+    # Command: build
+    parser_build = subparsers.add_parser("build", help="Build the current Orbit project")
+
+    # Command: run
+    parser_run = subparsers.add_parser("run", help="Run the current Orbit project")
+
+    args = parser.parse_args()
+
+    if args.command == "new":
+        create_project(args.project_name)
+    elif args.command == "build":
+        build_project()
+    elif args.command == "run":
+        run_project()
+    else:
+        parser.print_help()
+
+if __name__ == "__main__":
+    main()

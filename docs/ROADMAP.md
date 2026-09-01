@@ -28,20 +28,20 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [ ] **16. TLS/SSL**
 
 ## 3. Tooling & Developer Experience
-- [ ] **21. Provide a CLI** (`orbit-cli`)
-- [ ] **22. `orbit new <project>`**
-- [ ] **23. `orbit build`**
-- [ ] **24. `orbit run`**
+- [x] **21. Provide a CLI** (`orbit-cli`)
+- [x] **22. `orbit new <project>`**
+- [x] **23. `orbit build`**
+- [x] **24. `orbit run`**
 - [ ] **17. Provide sensible default configuration**
 - [ ] **44. Provide one-command installation**
-- [ ] **45. Provide one-command project creation**
-- [ ] **46. Provide one-command development run**
+- [x] **45. Provide one-command project creation**
+- [x] **46. Provide one-command development run**
 - [ ] **47. Provide one-command release/production build**
 - [ ] **50. Build the developer experience around: install → create → code → run → deploy**
 
 ## 4. Documentation & Education
-- [ ] **25. Provide project templates/scaffolding**
-- [ ] **26. Provide a 5-minute Hello World example**
+- [x] **25. Provide project templates/scaffolding**
+- [x] **26. Provide a 5-minute Hello World example**
 - [ ] **27. Provide examples for every major feature**
 - [ ] **28. Provide Docker support**
 - [ ] **29. Provide production deployment documentation**
