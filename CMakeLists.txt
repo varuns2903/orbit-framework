@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(HighPerfHttpServer VERSION 0.1.0 LANGUAGES CXX)
+project(OrbitFramework VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,7 +28,12 @@ find_package(ZLIB REQUIRED)
 find_package(PostgreSQL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(PkgConfig REQUIRED)
-pkg_search_module(MARIADB REQUIRED libmariadb mariadb)
+find_package(unofficial-libmariadb CONFIG QUIET)
+if(unofficial-libmariadb_FOUND)
+    set(MARIADB_LIBRARIES unofficial::libmariadb)
+else()
+    pkg_search_module(MARIADB REQUIRED libmariadb mariadb)
+endif()
 find_package(mongoc-1.0 CONFIG QUIET)
 if(NOT mongoc-1.0_FOUND)
     find_package(mongoc CONFIG QUIET)
@@ -44,6 +49,13 @@ elseif(TARGET mongo::mongoc_static)
     set(MONGOC_LIBRARIES mongo::mongoc_static)
 else()
     pkg_search_module(MONGOC REQUIRED libmongoc-1.0 mongoc-1.0 mongoc2)
+endif()
+
+find_package(hiredis CONFIG QUIET)
+if(hiredis_FOUND)
+    set(HIREDIS_LIBRARIES hiredis::hiredis)
+else()
+    pkg_search_module(HIREDIS REQUIRED hiredis)
 endif()
 
 pkg_check_modules(NGHTTP2 REQUIRED libnghttp2)
@@ -121,7 +133,7 @@ add_library(server_core STATIC
     src/openapi/OpenApi.cpp
 )
 
-add_library(HttpServer::core ALIAS server_core)
+add_library(OrbitFramework::core ALIAS server_core)
 
 target_link_libraries(server_core
     PUBLIC
@@ -131,6 +143,7 @@ target_link_libraries(server_core
         ${PostgreSQL_LIBRARIES}
         ${MARIADB_LIBRARIES}
         ${MONGOC_LIBRARIES}
+        ${HIREDIS_LIBRARIES}
         ${NGHTTP2_LIBRARIES}
         ${NGTCP2_LIBRARIES}
         ${NGTCP2_CRYPTO_LIBRARIES}
@@ -140,12 +153,13 @@ target_link_libraries(server_core
 )
 
 target_link_directories(server_core PUBLIC
-    ${MARIADB_LIBRARY_DIRS}
-    ${MONGOC_LIBRARY_DIRS}
-    ${NGHTTP2_LIBRARY_DIRS}
-    ${NGTCP2_LIBRARY_DIRS}
-    ${NGTCP2_CRYPTO_LIBRARY_DIRS}
-    ${NGHTTP3_LIBRARY_DIRS}
+    $<BUILD_INTERFACE:${MARIADB_LIBRARY_DIRS}>
+    $<BUILD_INTERFACE:${MONGOC_LIBRARY_DIRS}>
+    $<BUILD_INTERFACE:${HIREDIS_LIBRARY_DIRS}>
+    $<BUILD_INTERFACE:${NGHTTP2_LIBRARY_DIRS}>
+    $<BUILD_INTERFACE:${NGTCP2_LIBRARY_DIRS}>
+    $<BUILD_INTERFACE:${NGTCP2_CRYPTO_LIBRARY_DIRS}>
+    $<BUILD_INTERFACE:${NGHTTP3_LIBRARY_DIRS}>
 )
 
 if(WIN32)
@@ -155,13 +169,14 @@ elseif(NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 target_include_directories(server_core PUBLIC 
-    ${PostgreSQL_INCLUDE_DIRS}
-    ${MARIADB_INCLUDE_DIRS}
-    ${MONGOC_INCLUDE_DIRS}
-    ${NGHTTP2_INCLUDE_DIRS}
-    ${NGTCP2_INCLUDE_DIRS}
-    ${NGTCP2_CRYPTO_INCLUDE_DIRS}
-    ${NGHTTP3_INCLUDE_DIRS}
+    $<BUILD_INTERFACE:${PostgreSQL_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${MARIADB_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${MONGOC_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${HIREDIS_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${NGHTTP2_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${NGTCP2_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${NGTCP2_CRYPTO_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${NGHTTP3_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
@@ -170,7 +185,7 @@ target_include_directories(server_core PUBLIC
 include(GNUInstallDirs)
 
 install(TARGETS server_core
-    EXPORT HttpServerTargets
+    EXPORT OrbitFrameworkTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -181,29 +196,29 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.hpp"
 )
 
-install(EXPORT HttpServerTargets
-    FILE HttpServerTargets.cmake
-    NAMESPACE HttpServer::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HttpServer
+install(EXPORT OrbitFrameworkTargets
+    FILE OrbitFrameworkTargets.cmake
+    NAMESPACE OrbitFramework::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
 )
 
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/HttpServerConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/HttpServerConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HttpServer
+    ${CMAKE_CURRENT_SOURCE_DIR}/OrbitFrameworkConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
 )
 
 write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/HttpServerConfigVersion.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfigVersion.cmake
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 
 install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/HttpServerConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/HttpServerConfigVersion.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HttpServer
+    ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/OrbitFrameworkConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/OrbitFramework
 )
 
 # Doxygen Configuration
@@ -218,35 +233,46 @@ if(DOXYGEN_FOUND)
     )
 endif()
 
-# Examples
-# Examples
-add_executable(basic_server examples/basic_server.cpp)
-target_link_libraries(basic_server PRIVATE server_core)
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    # Examples
+    add_executable(basic_server examples/basic_server.cpp)
+    target_link_libraries(basic_server PRIVATE server_core)
 
-add_executable(rest_api examples/rest_api.cpp)
-target_link_libraries(rest_api PRIVATE server_core)
+    add_executable(rest_api examples/rest_api.cpp)
+    target_link_libraries(rest_api PRIVATE server_core)
 
-add_executable(chat_server examples/chat_server.cpp)
-target_link_libraries(chat_server PRIVATE server_core)
+    add_executable(chat_server examples/chat_server.cpp)
+    target_link_libraries(chat_server PRIVATE server_core)
 
-# Testing Setup (GoogleTest via FetchContent)
-include(FetchContent)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        v1.14.0
-)
-FetchContent_MakeAvailable(googletest)
+    # Testing Setup (GoogleTest via FetchContent)
+    include(FetchContent)
+    FetchContent_Declare(
+      googletest
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG        v1.14.0
+    )
+    FetchContent_MakeAvailable(googletest)
 
-enable_testing()
+    enable_testing()
 
-add_executable(http_server_tests 
-    tests/test_parser.cpp
-    tests/test_router.cpp
-    tests/test_threadpool.cpp
-    tests/test_websocket.cpp
-    tests/test_ssr.cpp
-)
-target_link_libraries(http_server_tests PRIVATE gtest_main server_core)
-include(GoogleTest)
-gtest_discover_tests(http_server_tests)
+    add_executable(http_server_tests 
+        tests/test_parser.cpp
+        tests/test_router.cpp
+        tests/test_threadpool.cpp
+        tests/test_websocket.cpp
+        tests/test_ssr.cpp
+    )
+    target_link_libraries(http_server_tests PRIVATE gtest_main server_core)
+    include(GoogleTest)
+    gtest_discover_tests(http_server_tests)
+
+    # Fuzz Testing
+    option(ENABLE_FUZZING "Build fuzz testing executables" OFF)
+    if(ENABLE_FUZZING)
+        add_executable(fuzz_http_parser tests/fuzz_http_parser.cpp)
+        target_link_libraries(fuzz_http_parser PRIVATE server_core)
+        # Enable libFuzzer and AddressSanitizer
+        target_compile_options(fuzz_http_parser PRIVATE -fsanitize=fuzzer,address -g -O1)
+        target_link_options(fuzz_http_parser PRIVATE -fsanitize=fuzzer,address)
+    endif()
+endif()

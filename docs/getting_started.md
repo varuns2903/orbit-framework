@@ -11,15 +11,50 @@ Orbit is a high-performance C++20 HTTP/3 web framework built on top of asynchron
 
 ## Installation & Build
 
-Clone the repository and build using CMake:
+We highly recommend using `vcpkg` to automatically install all required dependencies (like OpenSSL, PostgreSQL, MongoDB, ngtcp2, etc.) so you don't have to compile them from source.
 
 ```bash
 git clone https://github.com/varuns2903/orbit-framework.git orbit
 cd orbit
+
+# Clone vcpkg if you don't have it installed
+git clone https://github.com/microsoft/vcpkg.git
+./vcpkg/bootstrap-vcpkg.sh
+
+# Build Orbit Framework with vcpkg toolchain
+mkdir build && cd build
+cmake -DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+```
+
+### Manual Build (Without vcpkg)
+
+If you prefer using system packages, install the prerequisites manually:
+```bash
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc)
 ```
+
+### Integrating via CMake FetchContent (Recommended)
+
+If you have your own CMake project and want to include Orbit seamlessly without manually building it first, you can use CMake's `FetchContent`. Since Orbit manages its internal examples and tests safely, fetching it will only build the core library.
+
+Add this to your `CMakeLists.txt`:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  OrbitFramework
+  GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
+  GIT_TAG        main # Or a specific version tag
+)
+FetchContent_MakeAvailable(OrbitFramework)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE OrbitFramework::core)
+```
+*(Make sure to still pass `-DCMAKE_TOOLCHAIN_FILE=.../vcpkg.cmake` when building your own project so the dependencies resolve).*
 
 ## Your First Orbit Server
 

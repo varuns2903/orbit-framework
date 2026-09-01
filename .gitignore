@@ -8,3 +8,7 @@ compile_commands.json
 *.crt
 build_docker/
 load_test.py
+build_local/
+build_test/
+build_vcpkg/
+vcpkg/

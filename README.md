@@ -21,8 +21,8 @@
       <p><a href="#-dashboard-capability-matrix">📊 Dashboard & Matrix</a></p>
       <p><a href="#-terminal-quick-start">💻 Quick Start</a></p>
       <p><a href="#-editor-maincpp">📝 Code Example</a></p>
-      <br/>
       <h3>📖 Documentation</h3>
+      <p><a href="docs/ROADMAP.md">🗺️ Master Roadmap</a></p>
       <p><a href="docs/getting_started.md">🚀 Getting Started</a></p>
       <p><a href="docs/routing.md">🛣️ Routing & Streaming</a></p>
       <p><a href="docs/middleware.md">🛡️ Middleware & Validation</a></p>
