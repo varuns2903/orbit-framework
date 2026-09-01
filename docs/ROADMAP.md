@@ -18,14 +18,20 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 ## 2. Platform & Modularity
 - [x] **8. Make features modular and optional**
 - [ ] **19. Support Linux, Windows, and macOS** 
-- [ ] **9. HTTP/1.1** (Active)
-- [ ] **10. HTTP/2** (Active)
-- [ ] **11. HTTP/3** (Active)
-- [ ] **12. REST**
-- [ ] **13. WebSockets** (Active)
+- [x] **9. HTTP/1.1**
+- [x] **10. HTTP/2**
+- [x] **11. HTTP/3** (QUIC)
+- [x] **12. REST** (Router & Middleware)
+- [x] **13. WebSockets**
 - [ ] **14. GraphQL**
 - [ ] **15. gRPC**
-- [ ] **16. TLS/SSL**
+- [x] **16. TLS/SSL** (OpenSSL integration)
+
+## 2.5 Database & ORM
+- [ ] **51. Database Abstraction Layer (DBAL) & unified ResultSet**
+- [ ] **52. Automatic JSON serialization for database queries**
+- [ ] **53. Full Object-Relational Mapper (ORM)**
+- [ ] **54. Database Migrations support**
 
 ## 3. Tooling & Developer Experience
 - [x] **21. Provide a CLI** (`orbit-cli`)
