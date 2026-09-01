@@ -7,8 +7,9 @@ using namespace server;
 using namespace http;
 using namespace database;
 
-int main() {
-    App app;
+int main(int argc, char* argv[]) {
+    auto config = config::ServerConfig::parse(argc, argv);
+    App app(config);
     auto& proactor = app.get_event_loop().get_proactor();
 
     app.get("/postgres", [&proactor](HttpRequest&, std::shared_ptr<ResponseWriter> res) {
@@ -65,8 +66,8 @@ int main() {
 #endif
     });
 
-    std::cout << "Database server running on http://localhost:8080\n";
+    std::cout << "Database server running on http://localhost:" << config.port << "\n";
     std::cout << "Test endpoints: /postgres, /redis\n";
-    app.start();
+    app.run();
     return 0;
 }
