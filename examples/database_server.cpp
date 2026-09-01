@@ -1,73 +1,67 @@
 #include <orbit/server/App.hpp>
-#include <orbit/database/PostgresClient.hpp>
+#include <orbit/config/Config.hpp>
 #include <orbit/database/RedisClient.hpp>
 #include <iostream>
 
 using namespace server;
 using namespace http;
-using namespace database;
 
 int main(int argc, char* argv[]) {
     auto config = config::ServerConfig::parse(argc, argv);
     App app(config);
-    auto& proactor = app.get_event_loop().get_proactor();
 
-    app.get("/postgres", [&proactor](HttpRequest&, std::shared_ptr<ResponseWriter> res) {
-#ifdef ORBIT_ENABLE_POSTGRES
-        auto pg = std::make_shared<PostgresClient>(&proactor, "host=localhost user=postgres password=postgres dbname=test");
-        pg->connect([pg, res](bool success) {
-            if (!success) {
-                HttpResponse response;
-                response.status_code = HttpStatus::INTERNAL_SERVER_ERROR;
-                response.json(std::string("{\"error\": \"DB Connection Failed\"}"));
-                res->send(std::move(response));
-                return;
-            }
-            pg->query("SELECT 1 AS test", [pg, res](pg_result* db_res) {
-                HttpResponse response;
-                response.json(std::string("{\"status\": \"Postgres Query Success\"}"));
-                res->send(std::move(response));
-            });
-        });
+    // Redis example — RedisClient is synchronous, so we use it directly in handlers
+    app.get("/redis/ping", [](HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> writer) {
+#ifdef ORBIT_ENABLE_REDIS
+        database::RedisClient redis("127.0.0.1", 6379);
+        if (!redis.connect()) {
+            HttpResponse res;
+            res.status(HttpStatus::InternalServerError);
+            res.json(nlohmann::json{{"error", "Redis connection failed"}});
+            writer->send(std::move(res));
+            return;
+        }
+
+        auto pong = redis.ping();
+        HttpResponse res;
+        res.json(nlohmann::json{{"status", "ok"}, {"ping", pong}});
+        writer->send(std::move(res));
 #else
-        HttpResponse response;
-        response.json(std::string("{\"error\": \"Postgres disabled at compile time\"}"));
-        res->send(std::move(response));
+        HttpResponse res;
+        res.json(nlohmann::json{{"error", "Redis disabled at compile time"}});
+        writer->send(std::move(res));
 #endif
     });
 
-    app.get("/redis", [&proactor](HttpRequest&, std::shared_ptr<ResponseWriter> res) {
+    app.get("/redis/test", [](HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> writer) {
 #ifdef ORBIT_ENABLE_REDIS
-        auto redis = std::make_shared<RedisClient>(&proactor, "127.0.0.1", 6379);
-        redis->connect([redis, res](bool success) {
-            if (!success) {
-                HttpResponse response;
-                response.status_code = HttpStatus::INTERNAL_SERVER_ERROR;
-                response.json(std::string("{\"error\": \"Redis Connection Failed\"}"));
-                res->send(std::move(response));
-                return;
-            }
-            redis->set("test_key", "orbit_rocks", [redis, res](bool) {
-                redis->get("test_key", [redis, res](std::optional<std::string> val) {
-                    HttpResponse response;
-                    if (val) {
-                        response.json(std::string("{\"status\": \"Redis Success\", \"value\": \"") + *val + "\"}");
-                    } else {
-                        response.json(std::string("{\"error\": \"Redis key not found\"}"));
-                    }
-                    res->send(std::move(response));
-                });
-            });
+        database::RedisClient redis("127.0.0.1", 6379);
+        if (!redis.connect()) {
+            HttpResponse res;
+            res.status(HttpStatus::InternalServerError);
+            res.json(nlohmann::json{{"error", "Redis connection failed"}});
+            writer->send(std::move(res));
+            return;
+        }
+
+        redis.set("orbit_test", "hello_orbit", 60);
+        auto val = redis.get("orbit_test");
+        HttpResponse res;
+        res.json(nlohmann::json{
+            {"status", "ok"},
+            {"key", "orbit_test"},
+            {"value", val.value_or("(nil)")}
         });
+        writer->send(std::move(res));
 #else
-        HttpResponse response;
-        response.json(std::string("{\"error\": \"Redis disabled at compile time\"}"));
-        res->send(std::move(response));
+        HttpResponse res;
+        res.json(nlohmann::json{{"error", "Redis disabled at compile time"}});
+        writer->send(std::move(res));
 #endif
     });
 
     std::cout << "Database server running on http://localhost:" << config.port << "\n";
-    std::cout << "Test endpoints: /postgres, /redis\n";
+    std::cout << "Test endpoints: /redis/ping, /redis/test\n";
     app.listen();
     return 0;
 }

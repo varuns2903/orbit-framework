@@ -12,3 +12,5 @@ build_local/
 build_test/
 build_vcpkg/
 vcpkg/
+vcpkg_installed/
+ubuntu-job*.log

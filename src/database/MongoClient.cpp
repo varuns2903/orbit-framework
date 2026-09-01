@@ -48,7 +48,7 @@ void MongoClient::QueryAwaiter::await_suspend(std::coroutine_handle<> h) {
         mongoc_collection_t* collection = mongoc_client_get_collection(mclient, client.get_config().dbname.c_str(), client.get_config().collection_name.c_str());
         
         bson_error_t error;
-        bson_t* query = bson_new_from_json(reinterpret_cast<const uint8_t*>(query_json.c_str()), query_json.length(), &error);
+        bson_t* query = bson_new_from_json(reinterpret_cast<const uint8_t*>(query_json.c_str()), static_cast<ssize_t>(query_json.length()), &error);
         
         if (!query) {
             error_msg = std::string("BSON Parse Error: ") + error.message;
