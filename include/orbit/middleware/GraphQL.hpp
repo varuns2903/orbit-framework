@@ -27,8 +27,8 @@ inline std::function<bool(http::HttpRequest&, std::shared_ptr<http::ResponseWrit
         std::string operation_name;
         nlohmann::json variables = nlohmann::json::object();
 
-        if (req.method == "POST") {
-            if (req.headers["Content-Type"].find("application/json") != std::string::npos) {
+        if (req.method == http::HttpMethod::POST) {
+            if (req.headers.count("Content-Type") && req.headers.at("Content-Type").find("application/json") != std::string::npos) {
                 auto body = req.json();
                 if (body.contains("query") && body["query"].is_string()) {
                     query = body["query"].get<std::string>();
@@ -39,19 +39,19 @@ inline std::function<bool(http::HttpRequest&, std::shared_ptr<http::ResponseWrit
                 if (body.contains("variables") && body["variables"].is_object()) {
                     variables = body["variables"];
                 }
-            } else if (req.headers["Content-Type"].find("application/graphql") != std::string::npos) {
+            } else if (req.headers.count("Content-Type") && req.headers.at("Content-Type").find("application/graphql") != std::string::npos) {
                 query = req.body;
             }
-        } else if (req.method == "GET") {
+        } else if (req.method == http::HttpMethod::GET) {
             // Parse from URL parameters
-            auto it_query = req.query_params.find("query");
-            if (it_query != req.query_params.end()) query = it_query->second;
+            auto it_query = req.query.find("query");
+            if (it_query != req.query.end()) query = it_query->second;
 
-            auto it_op = req.query_params.find("operationName");
-            if (it_op != req.query_params.end()) operation_name = it_op->second;
+            auto it_op = req.query.find("operationName");
+            if (it_op != req.query.end()) operation_name = it_op->second;
 
-            auto it_vars = req.query_params.find("variables");
-            if (it_vars != req.query_params.end()) {
+            auto it_vars = req.query.find("variables");
+            if (it_vars != req.query.end()) {
                 try {
                     variables = nlohmann::json::parse(it_vars->second);
                 } catch (...) {
