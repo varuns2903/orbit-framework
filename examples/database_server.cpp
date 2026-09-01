@@ -68,6 +68,6 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Database server running on http://localhost:" << config.port << "\n";
     std::cout << "Test endpoints: /postgres, /redis\n";
-    app.run();
+    app.listen();
     return 0;
 }

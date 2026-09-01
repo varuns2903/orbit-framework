@@ -171,6 +171,10 @@ void QuicHttp3Session::handle_request(std::shared_ptr<Http3Stream> stream) {
     // Set up data reader
     nghttp3_data_reader dr;
     dr.read_data = [](nghttp3_conn *conn, int64_t stream_id, nghttp3_vec *vec, size_t veccnt, uint32_t *pflags, void *conn_user_data, void *stream_user_data) -> nghttp3_ssize {
+        (void)conn;
+        (void)stream_id;
+        (void)veccnt;
+        (void)conn_user_data;
         auto s = static_cast<Http3Stream*>(stream_user_data);
         if (s->response_body.empty()) {
             *pflags |= NGHTTP3_DATA_FLAG_EOF;

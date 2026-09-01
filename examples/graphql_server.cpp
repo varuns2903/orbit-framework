@@ -34,6 +34,6 @@ int main(int argc, char* argv[]) {
     std::cout << "Test it with:\n";
     std::cout << "  curl -X POST -H \"Content-Type: application/json\" -d '{\"query\": \"query { hello }\", \"variables\": {\"id\": 1}}' http://localhost:" << config.port << "/graphql\n";
     
-    app.run();
+    app.listen();
     return 0;
 }

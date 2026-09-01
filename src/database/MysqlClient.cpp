@@ -46,7 +46,7 @@ void MysqlClient::ConnectAwaiter::await_suspend(std::coroutine_handle<> h) {
                                       client.config_.user.c_str(), 
                                       client.config_.password.c_str(), 
                                       client.config_.dbname.c_str(), 
-                                      client.config_.port, 
+                                      static_cast<unsigned int>(client.config_.port), 
                                       nullptr, 0);
     resume_loop();
 }
