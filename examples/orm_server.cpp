@@ -50,9 +50,9 @@ int main() {
             User new_user{0, "john_doe", 28, true};
             co_await query_User(pg_client).insert_async(new_user);
 
-            // ORM SELECT with WHERE clause
+            // ORM SELECT with Expression Templates (C++ DSL)
             std::vector<User> active_users = co_await query_User(pg_client)
-                                                .where("is_active", "=", "true")
+                                                .where(orm::Col("is_active") == true && orm::Col("age") > 18)
                                                 .get_async();
 
             nlohmann::json response = active_users;
