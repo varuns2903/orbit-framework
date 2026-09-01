@@ -68,14 +68,21 @@ public:
      * @param callback Callback invoked with a shared pointer to a ready client when available.
      */
     void acquire(std::function<void(std::shared_ptr<ClientType>)> callback) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!idle_connections_.empty()) {
-            auto client = idle_connections_.front();
-            idle_connections_.pop();
+        std::shared_ptr<ClientType> client = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!idle_connections_.empty()) {
+                client = idle_connections_.front();
+                idle_connections_.pop();
+            } else {
+                // Queue the request
+                wait_queue_.push(std::move(callback));
+                return;
+            }
+        }
+        // Invoke callback outside the lock to prevent deadlocks
+        if (client) {
             callback(client);
-        } else {
-            // Queue the request
-            wait_queue_.push(std::move(callback));
         }
     }
 
@@ -85,14 +92,20 @@ public:
      * @param client The client to return to the pool.
      */
     void release(std::shared_ptr<ClientType> client) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!wait_queue_.empty()) {
-            auto next_callback = std::move(wait_queue_.front());
-            wait_queue_.pop();
-            // Dispatch immediately to next waiter
+        std::function<void(std::shared_ptr<ClientType>)> next_callback;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!wait_queue_.empty()) {
+                next_callback = std::move(wait_queue_.front());
+                wait_queue_.pop();
+            } else {
+                idle_connections_.push(client);
+                return;
+            }
+        }
+        // Dispatch immediately to next waiter outside the lock
+        if (next_callback) {
             next_callback(client);
-        } else {
-            idle_connections_.push(client);
         }
     }
 

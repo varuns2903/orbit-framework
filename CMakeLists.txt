@@ -357,10 +357,18 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
     add_executable(http_server_tests 
         tests/unit/test_parser.cpp
+        tests/unit/test_http.cpp
         tests/unit/test_router.cpp
         tests/unit/test_threadpool.cpp
         tests/unit/test_websocket.cpp
         tests/unit/test_ssr.cpp
+        tests/unit/test_orm.cpp
+        tests/unit/test_config.cpp
+        tests/unit/test_eventrouter.cpp
+        tests/unit/test_tls.cpp
+        tests/unit/test_database.cpp
+        tests/unit/test_multipart.cpp
+        tests/integration/test_e2e.cpp
         tests/integration/test_e2e.cpp
     )
     target_link_libraries(http_server_tests PRIVATE gtest_main server_core CURL::libcurl)
