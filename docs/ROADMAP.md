@@ -17,7 +17,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 
 ## 2. Platform & Modularity
 - [x] **8. Make features modular and optional**
-- [ ] **19. Support Linux, Windows, and macOS** 
+- [x] **19. Support Linux, Windows, and macOS** 
 - [x] **9. HTTP/1.1**
 - [x] **10. HTTP/2**
 - [x] **11. HTTP/3** (QUIC)
@@ -57,8 +57,8 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [ ] **49. Provide comprehensive documentation**
 
 ## 5. Testing & CI/CD
-- [ ] **35. Automated CI/CD**
-- [ ] **36. Test Linux, Windows and macOS**
+- [x] **35. Automated CI/CD**
+- [x] **36. Test Linux, Windows and macOS**
 - [ ] **37. Unit tests**
 - [ ] **38. Integration tests**
 - [ ] **39. HTTP/protocol compliance tests**
