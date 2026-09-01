@@ -3,6 +3,7 @@
 #include <orbit/server/Listener.hpp>
 #include <orbit/server/EventLoop.hpp>
 #include <orbit/routing/Router.hpp>
+#include <orbit/routing/HandlerWrapper.hpp>
 #include <orbit/config/Config.hpp>
 #include <orbit/network/TlsContext.hpp>
 #include <orbit/network/UdpSocket.hpp>
@@ -168,6 +169,24 @@ public:
      */
     App& options(const std::string& path, std::vector<routing::Middleware> mws, routing::RouteHandler handler);
     
+#define ORBIT_DEFINE_ROUTER_TEMPLATES(METHOD) \
+    template <typename Handler> \
+    App& METHOD(const std::string& path, Handler&& handler) { \
+        return METHOD(path, routing::wrap_handler(std::forward<Handler>(handler))); \
+    } \
+    template <typename Handler> \
+    App& METHOD(const std::string& path, std::vector<routing::Middleware> mws, Handler&& handler) { \
+        return METHOD(path, std::move(mws), routing::wrap_handler(std::forward<Handler>(handler))); \
+    }
+
+    ORBIT_DEFINE_ROUTER_TEMPLATES(get)
+    ORBIT_DEFINE_ROUTER_TEMPLATES(post)
+    ORBIT_DEFINE_ROUTER_TEMPLATES(put)
+    ORBIT_DEFINE_ROUTER_TEMPLATES(patch)
+    ORBIT_DEFINE_ROUTER_TEMPLATES(del)
+    ORBIT_DEFINE_ROUTER_TEMPLATES(options)
+#undef ORBIT_DEFINE_ROUTER_TEMPLATES
+
     // WebSockets
     /**
      * @brief Registers a WebSocket route.
