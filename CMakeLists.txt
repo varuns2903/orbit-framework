@@ -15,11 +15,20 @@ else()
         -Wconversion -Wsign-conversion -Wcast-align
     )
 endif()
+# --- Modular Features ---
+option(ORBIT_ENABLE_REDIS "Enable Redis database support" ON)
+option(ORBIT_ENABLE_POSTGRES "Enable PostgreSQL database support" ON)
+option(ORBIT_ENABLE_MARIADB "Enable MariaDB database support" ON)
+option(ORBIT_ENABLE_MONGODB "Enable MongoDB database support" ON)
+option(ORBIT_ENABLE_HTTP3 "Enable HTTP/3 and QUIC support" ON)
+option(ORBIT_ENABLE_GRPC "Enable gRPC support" OFF)
+
 
 # Optional sanitizers for debug builds to catch memory leaks and UB
 option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior Sanitizers" ON)
 if(ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+
     add_link_options(-fsanitize=address,undefined)
 endif()
 
@@ -91,13 +100,6 @@ set(INJA_BUILD_TESTS OFF CACHE BOOL "Disable inja tests" FORCE)
 set(BUILD_BENCHMARK OFF CACHE BOOL "Disable inja benchmark" FORCE)
 FetchContent_MakeAvailable(inja)
 
-# --- Modular Features ---
-option(ORBIT_ENABLE_REDIS "Enable Redis database support" ON)
-option(ORBIT_ENABLE_POSTGRES "Enable PostgreSQL database support" ON)
-option(ORBIT_ENABLE_MARIADB "Enable MariaDB database support" ON)
-option(ORBIT_ENABLE_MONGODB "Enable MongoDB database support" ON)
-option(ORBIT_ENABLE_HTTP3 "Enable HTTP/3 and QUIC support" ON)
-option(ORBIT_ENABLE_GRPC "Enable gRPC support" OFF)
 
 # Core static library
 if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
