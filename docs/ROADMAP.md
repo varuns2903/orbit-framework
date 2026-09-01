@@ -22,6 +22,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **10. HTTP/2**
 - [x] **11. HTTP/3** (QUIC)
 - [x] **12. REST** (Router & Middleware)
+- [ ] **56. Magic Return Values & Auto-JSON HTTP Handlers (FastAPI-style)**
 - [x] **13. WebSockets**
 - [ ] **55. Strongly-Typed WebSocket EventRouter (Auto-JSON mapping, Rooms & Session State)**
 - [x] **14. GraphQL** (HTTP adapter middleware)
