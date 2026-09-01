@@ -171,7 +171,13 @@ if(ORBIT_ENABLE_MONGODB)
     add_compile_definitions(ORBIT_ENABLE_MONGODB=1)
 endif()
 
-add_library(server_core STATIC ${SERVER_SOURCES})
+add_library(server_core ${SERVER_SOURCES})
+
+# If building as a shared library, define exports
+if(BUILD_SHARED_LIBS)
+    target_compile_definitions(server_core PRIVATE ORBIT_EXPORTS)
+    set_target_properties(server_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+endif()
 
 add_library(OrbitFramework::core ALIAS server_core)
 

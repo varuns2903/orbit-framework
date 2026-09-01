@@ -11,7 +11,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **6. Publish to Conan**
 - [x] **7. Automatically manage dependencies**
 - [ ] **18. Provide prebuilt binaries/releases**
-- [ ] **20. Support both static and shared libraries**
+- [x] **20. Support both static and shared libraries**
 - [x] **42. Keep core dependencies lightweight**
 - [x] **43. Avoid forcing unused features/dependencies on users**
 
