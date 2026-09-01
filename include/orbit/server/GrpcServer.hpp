@@ -1,8 +1,8 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <vector>
 
-// Forward declare grpc::Server to avoid dragging gRPC headers into Orbit headers
 namespace grpc {
     class Server;
     class Service;
@@ -20,8 +20,10 @@ public:
     void stop();
 
 private:
+#ifdef ORBIT_ENABLE_GRPC
     std::unique_ptr<grpc::Server> server_;
     std::vector<grpc::Service*> services_;
+#endif
 };
 
 } // namespace server
