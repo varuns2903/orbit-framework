@@ -68,16 +68,17 @@ if(ORBIT_ENABLE_REDIS)
     endif()
 endif()
 
+pkg_check_modules(NGHTTP2 REQUIRED IMPORTED_TARGET libnghttp2)
+
 if(ORBIT_ENABLE_HTTP3)
-    pkg_check_modules(NGHTTP2 REQUIRED libnghttp2)
-    pkg_check_modules(NGTCP2 REQUIRED libngtcp2)
-    pkg_search_module(NGTCP2_CRYPTO REQUIRED libngtcp2_crypto_openssl libngtcp2_crypto_ossl libngtcp2_crypto_quictls)
+    pkg_check_modules(NGTCP2 REQUIRED IMPORTED_TARGET libngtcp2)
+    pkg_search_module(NGTCP2_CRYPTO REQUIRED IMPORTED_TARGET libngtcp2_crypto_openssl libngtcp2_crypto_ossl libngtcp2_crypto_quictls)
     if(NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_ossl" OR NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_openssl")
         add_compile_definitions(USE_NGTCP2_CRYPTO_OSSL=1)
     elseif(NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_quictls")
         add_compile_definitions(USE_NGTCP2_CRYPTO_QUICTLS=1)
     endif()
-    pkg_check_modules(NGHTTP3 REQUIRED libnghttp3)
+    pkg_check_modules(NGHTTP3 REQUIRED IMPORTED_TARGET libnghttp3)
 endif()
 
 include(FetchContent)
@@ -190,7 +191,7 @@ target_link_libraries(server_core
         ${MARIADB_LIBRARIES}
         ${MONGOC_LIBRARIES}
         ${HIREDIS_LIBRARIES}
-        ${NGHTTP2_LIBRARIES}
+        PkgConfig::NGHTTP2
         ${NGTCP2_LIBRARIES}
         ${NGTCP2_CRYPTO_LIBRARIES}
         ${NGHTTP3_LIBRARIES}
@@ -202,7 +203,6 @@ target_link_directories(server_core PUBLIC
     $<BUILD_INTERFACE:${MARIADB_LIBRARY_DIRS}>
     $<BUILD_INTERFACE:${MONGOC_LIBRARY_DIRS}>
     $<BUILD_INTERFACE:${HIREDIS_LIBRARY_DIRS}>
-    $<BUILD_INTERFACE:${NGHTTP2_LIBRARY_DIRS}>
     $<BUILD_INTERFACE:${NGTCP2_LIBRARY_DIRS}>
     $<BUILD_INTERFACE:${NGTCP2_CRYPTO_LIBRARY_DIRS}>
     $<BUILD_INTERFACE:${NGHTTP3_LIBRARY_DIRS}>
@@ -219,7 +219,6 @@ target_include_directories(server_core PUBLIC
     $<BUILD_INTERFACE:${MARIADB_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${MONGOC_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${HIREDIS_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${NGHTTP2_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${NGTCP2_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${NGTCP2_CRYPTO_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${NGHTTP3_INCLUDE_DIRS}>
