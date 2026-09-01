@@ -28,8 +28,8 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **16. TLS/SSL** (OpenSSL integration)
 
 ## 2.5 Database & ORM
-- [ ] **51. Database Abstraction Layer (DBAL) & unified ResultSet**
-- [ ] **52. Automatic JSON serialization for database queries**
+- [x] **51. Database Abstraction Layer (DBAL) & unified ResultSet**
+- [x] **52. Automatic JSON serialization for database queries**
 - [ ] **53. Full Object-Relational Mapper (ORM)**
 - [ ] **54. Database Migrations support**
 
