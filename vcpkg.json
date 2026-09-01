@@ -12,7 +12,11 @@
     "nghttp2",
     "nghttp3",
     "ngtcp2",
-    "hiredis"
+    "hiredis",
+    {
+      "name": "liburing",
+      "platform": "linux"
+    }
   ],
   "features": {
     "grpc": {

@@ -13,125 +13,65 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
     steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: recursive
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-    - name: Install Dependencies (Ubuntu)
+    - name: Export GitHub Actions cache environment variables
+      uses: actions/github-script@v6
+      with:
+        script: |
+          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+    - name: Install Additional Tools (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
-      env:
-        PKG_CONFIG_PATH: /usr/local/ssl/lib/pkgconfig
-        OPENSSL_ROOT_DIR: /usr/local/ssl
-        LD_LIBRARY_PATH: /usr/local/ssl/lib
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake g++ libpq-dev libhiredis-dev pkg-config zlib1g-dev valgrind wrk
-        sudo apt-get install -y libnghttp2-dev liburing-dev libmariadb-dev libmongoc-dev libbson-dev libcurl4-openssl-dev
+        sudo apt-get install -y valgrind wrk
 
-        # Ubuntu's system OpenSSL lacks QUIC support, and ngtcp2 requires the quictls fork.
-        git clone --depth 1 --branch openssl-3.1.4-quic1 https://github.com/quictls/openssl.git quictls
-        cd quictls
-        ./config --prefix=/usr/local/quictls --libdir=lib no-tests
-        make -j$(nproc)
-        sudo make install_sw
-        cd ..
-        echo "/usr/local/quictls/lib" | sudo tee /etc/ld.so.conf.d/quictls.conf
-        sudo ldconfig
-        
-        echo "LD_LIBRARY_PATH=/usr/local/quictls/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-        echo "PKG_CONFIG_PATH=/usr/local/quictls/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-        echo "OPENSSL_ROOT_DIR=/usr/local/quictls" >> $GITHUB_ENV
-
-        # Build nghttp3
-        git clone --depth 1 --branch v1.6.0 https://github.com/ngtcp2/nghttp3.git
-        cd nghttp3
-        git submodule update --init
-        mkdir build && cd build
-        cmake -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_LIB_ONLY=ON -DCMAKE_BUILD_TYPE=Release ..
-        make -j$(nproc)
-        sudo make install
-        cd ../..
-
-        # Build ngtcp2 with quictls
-        git clone --depth 1 --branch v1.25.0 https://github.com/ngtcp2/ngtcp2.git
-        cd ngtcp2
-        git submodule update --init
-        mkdir build && cd build
-        PKG_CONFIG_PATH="/usr/local/quictls/lib/pkgconfig:$PKG_CONFIG_PATH" \
-        CFLAGS="-I/usr/local/quictls/include" \
-        CXXFLAGS="-I/usr/local/quictls/include" \
-        LDFLAGS="-L/usr/local/quictls/lib -Wl,-rpath,/usr/local/quictls/lib" \
-        cmake -DCMAKE_INSTALL_PREFIX=/usr \
-              -DENABLE_LIB_ONLY=ON \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DENABLE_OPENSSL=ON \
-              -DOPENSSL_ROOT_DIR=/usr/local/quictls \
-              -DOPENSSL_INCLUDE_DIR=/usr/local/quictls/include \
-              -DOPENSSL_CRYPTO_LIBRARY=/usr/local/quictls/lib/libcrypto.so \
-              -DOPENSSL_SSL_LIBRARY=/usr/local/quictls/lib/libssl.so \
-              ..
-        make -j$(nproc)
-        sudo make install
-        cd ../..
-
-        # Debug: verify .pc files installed
-        echo "--- Installed ngtcp2 .pc files ---"
-        find /usr -name "libngtcp2*.pc" 2>/dev/null
-
-    - name: Install Dependencies (macOS)
-      if: matrix.os == 'macos-latest'
+    - name: Setup vcpkg (Unix)
+      if: runner.os != 'Windows'
       run: |
-        brew install cmake openssl libpq hiredis pkg-config nghttp2 libngtcp2 libnghttp3 zlib mariadb-connector-c mongo-c-driver curl
+        git clone --depth 1 https://github.com/microsoft/vcpkg.git
+        cd vcpkg
+        ./bootstrap-vcpkg.sh -disableMetrics
 
-
-    - name: Configure CMake (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
+    - name: Setup vcpkg (Windows)
+      if: runner.os == 'Windows'
       run: |
-        mkdir -p build && cd build
-        export PKG_CONFIG_PATH="/usr/local/quictls/lib/pkgconfig:$PKG_CONFIG_PATH"
-        cmake -DCMAKE_BUILD_TYPE=Release \
-              -DOPENSSL_ROOT_DIR=/usr/local/quictls \
-              ..
+        git clone --depth 1 https://github.com/microsoft/vcpkg.git
+        cd vcpkg
+        .\bootstrap-vcpkg.bat -disableMetrics
 
-    - name: Configure CMake (macOS)
-      if: matrix.os == 'macos-latest'
+    - name: Configure CMake
       run: |
-        mkdir -p build && cd build
-        export PKG_CONFIG_PATH="$(brew --prefix openssl)/lib/pkgconfig:$(brew --prefix libpq)/lib/pkgconfig:$(brew --prefix libngtcp2)/lib/pkgconfig:$(brew --prefix libnghttp3)/lib/pkgconfig:$(brew --prefix nghttp2)/lib/pkgconfig:$(brew --prefix hiredis)/lib/pkgconfig:$(brew --prefix mariadb-connector-c)/lib/pkgconfig:$(brew --prefix mongo-c-driver)/lib/pkgconfig:$PKG_CONFIG_PATH"
-        cmake -DCMAKE_BUILD_TYPE=Release \
-          -DOPENSSL_ROOT_DIR=$(brew --prefix openssl) \
-          -DPostgreSQL_ROOT=$(brew --prefix libpq) \
-          -DCMAKE_PREFIX_PATH="$(brew --prefix openssl);$(brew --prefix libpq);$(brew --prefix libngtcp2);$(brew --prefix libnghttp3);$(brew --prefix nghttp2);$(brew --prefix hiredis);$(brew --prefix zlib);$(brew --prefix mariadb-connector-c);$(brew --prefix mongo-c-driver)" \
-          ..
-
+        cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_GRPC=OFF
 
     - name: Build Framework
-      run: |
-        cd build
-        cmake --build . --config Release --parallel
+      run: cmake --build build --config Release --parallel 4
 
     - name: Run Tests
-      run: |
-        cd build
-        ctest -C Release --output-on-failure
+      working-directory: build
+      run: ctest -C Release --output-on-failure
 
     - name: Run Memory Leak Detection (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
-      run: |
-        cd build
-        export LD_LIBRARY_PATH="/usr/local/quictls/lib:$LD_LIBRARY_PATH"
-        valgrind --leak-check=full --error-exitcode=1 ./http_server_tests
+      working-directory: build
+      run: valgrind --leak-check=full --error-exitcode=1 ./http_server_tests
 
     - name: Run Load Test (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
+      working-directory: build
       run: |
-        cd build
-        export LD_LIBRARY_PATH="/usr/local/quictls/lib:$LD_LIBRARY_PATH"
         ./basic_server &
         SERVER_PID=$!
         sleep 2
-        wrk -t2 -c100 -d10s http://127.0.0.1:8080/
+        wrk -t2 -c100 -d5s http://127.0.0.1:8080/
         kill $SERVER_PID

@@ -247,7 +247,8 @@ endif()
 if(WIN32)
     target_link_libraries(server_core PUBLIC ws2_32 mswsock)
 elseif(NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-    target_link_libraries(server_core PUBLIC uring)
+    pkg_check_modules(URING REQUIRED IMPORTED_TARGET liburing)
+    target_link_libraries(server_core PUBLIC PkgConfig::URING)
 endif()
 
 target_include_directories(server_core PUBLIC 
