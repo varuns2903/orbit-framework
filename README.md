@@ -47,44 +47,60 @@ target_link_libraries(my_app PRIVATE OrbitFramework::core)
 ## 📝 Code Example
 
 ```cpp
-#include "server/App.hpp"
-#include "middleware/Validation.hpp"
-#include "database/PostgresCoro.hpp"
-#include "concurrency/Task.hpp"
+#include <orbit/server/App.hpp>
+#include <orbit/orm/Model.hpp>
+#include <orbit/http/json.hpp>
 
 using namespace server;
 using namespace http;
-using namespace middleware;
+
+// 1. Define standard C++ structs
+struct User {
+    int id;
+    std::string username;
+    int age;
+};
+
+// 2. Tell the JSON library how to serialize them automatically!
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(User, id, username, age)
+
+// 3. Register as a strongly-typed Database ORM Model
+ORBIT_REGISTER_MODEL(User, "users")
 
 int main() {
-    App app;
+    config::ServerConfig cfg;
+    cfg.port = 3000;
+    App app(cfg);
 
-    // 🛡️ Global Error Handler
-    app.on_error([](const std::exception& e, HttpRequest& req, std::shared_ptr<ResponseWriter> writer) {
-        writer->send(HttpResponse().status(HttpStatus::InternalServerError).send("Crash prevented!"));
+    // ✨ Magic Returns: Just return a struct! Orbit handles 200 OK and JSON serialization.
+    app.get("/profile", []() -> User {
+        return User{1, "Alice", 28};
     });
 
-    // ⚡ Automated JSON Validation
-    std::vector<SchemaField> user_schema = {
-        {"username", JsonType::STRING, true},
-        {"age", JsonType::NUMBER, true}
-    };
-
-    app.post("/users", {validate_json(user_schema)}, [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
-        std::string username = req.json()["username"];
-        res->json({{"status", "created"}, {"username", username}});
+    // ✨ Returns strings automatically with 'text/plain'
+    app.get("/hello", []() -> std::string {
+        return "Hello from Orbit!";
     });
 
-    // 🚀 C++20 Coroutines (Non-Blocking async/await)
-    app.get("/db", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) -> concurrency::Task {
-        auto pg = std::make_shared<database::PostgresClient>(&res->proactor(), "dbname=postgres");
-        if (co_await database::connect_async(pg)) {
-            PGresult* db_res = co_await database::query_async(pg, "SELECT current_timestamp;");
-            res->send(HttpResponse().status(HttpStatus::OK).send("DB Time: " + std::string(PQgetvalue(db_res, 0, 0))));
-        }
+    // 🚀 Non-Blocking C++20 Coroutines & Expression Template ORM
+    app.get("/active_users", [](HttpRequest& req, std::shared_ptr<ResponseWriter> writer) {
+        auto coro = [writer]() -> concurrency::Task {
+            auto db = std::make_shared<database::PostgresClient>(&writer->proactor(), "dbname=postgres");
+            co_await connect_async(db);
+
+            // Fully type-safe C++ DSL compiled into SQL!
+            std::vector<User> adults = co_await query_User(db)
+                .where(orm::Col("age") >= 18)
+                .get_async();
+
+            // Send vector (automatically serialized as JSON array)
+            nlohmann::json j = adults;
+            writer->send(HttpResponse().status(200).send(j.dump()));
+        };
+        coro();
     });
 
-    app.listen(3000, []() { std::cout << "Listening on port 3000!" << std::endl; });
+    app.listen();
     return 0;
 }
 ```
