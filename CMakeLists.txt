@@ -361,9 +361,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         tests/test_threadpool.cpp
         tests/test_websocket.cpp
         tests/test_ssr.cpp
-        tests/test_middleware.cpp
+        tests/test_e2e.cpp
     )
-    target_link_libraries(http_server_tests PRIVATE gtest_main server_core)
+    target_link_libraries(http_server_tests PRIVATE gtest_main server_core CURL::libcurl)
     include(GoogleTest)
     gtest_discover_tests(http_server_tests)
 
