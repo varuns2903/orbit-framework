@@ -1,6 +1,6 @@
 <div align="center">
   
-  # 🚀 Orbit Server Control Panel
+  <h1>🚀 Orbit Framework</h1>
   
   <p><b>A blazing fast, asynchronous, and middleware-driven C++20 HTTP/3 web framework</b></p>
   
@@ -12,60 +12,40 @@
   </p>
 </div>
 
-<br/>
+---
 
-<table>
-  <tr>
-    <td width="300" valign="top">
-      <h3>🧭 Quick Links</h3>
-      <p><a href="#-dashboard-capability-matrix">📊 Dashboard & Matrix</a></p>
-      <p><a href="#-terminal-quick-start">💻 Quick Start</a></p>
-      <p><a href="#-editor-maincpp">📝 Code Example</a></p>
-      <h3>📖 Documentation</h3>
-      <p><a href="docs/ROADMAP.md">🗺️ Master Roadmap</a></p>
-      <p><a href="docs/getting_started.md">🚀 Getting Started</a></p>
-      <p><a href="docs/routing.md">🛣️ Routing & Streaming</a></p>
-      <p><a href="docs/middleware.md">🛡️ Middleware & Validation</a></p>
-      <p><a href="docs/database.md">💾 Postgres & C++20 Coroutines</a></p>
-      <p><a href="docs/proxy.md">🔀 API Gateway & LB</a></p>
-      <p><a href="docs/websockets.md">🔌 WebSockets</a></p>
-      <p><a href="docs/http3.md">⚡ HTTP/3 & QUIC</a></p>
-    </td>
-    <td valign="top">
+Orbit brings modern web development ergonomics (like Express.js) to C++20, powered by raw kernel performance (`io_uring`/`epoll`) and modern protocols (HTTP/3 + QUIC).
 
-### 📊 Dashboard: Capability Matrix
+## ✨ Features at a Glance
 
-| Core Network | Status | Framework Modules | Status |
-| :--- | :---: | :--- | :---: |
-| **HTTP/1.1 & HTTP/2** | 🟢 Active | **Routing (Express-style)** | 🟢 Active |
-| **HTTP/3 & QUIC** | 🟢 Active | **WebSockets (RFC-compliant)**| 🟢 Active |
-| **Zero-Downtime Reload**| 🟢 Active | **Middleware Stack** | 🟢 Active |
-| **Prometheus Metrics** | 🟢 Active | **Database (Redis/PG/Coro)** | 🟢 Active |
-| **TLS/SSL Encryption** | 🟢 Active | **Static File Server** | 🟢 Active |
-| **Connection Pooling** | 🟢 Active | **JSON Schema Validation** | 🟢 Active |
+* **⚡ Blazing Fast**: Asynchronous kernel event loops with a highly scalable Proactor pattern.
+* **🌐 Next-Gen Protocols**: Native support for HTTP/1.1, HTTP/2, and **HTTP/3 & QUIC**.
+* **🛡️ Express-Style Middleware**: Routing, JWT Auth, CORS, Rate Limiting, and automated JSON validation built-in.
+* **🔌 Real-Time**: Fully RFC-compliant WebSockets.
+* **💾 Async Databases**: C++20 Coroutine-based PostgreSQL, Redis, and MongoDB clients natively integrated.
+* **📦 Drop-in Ready**: Seamless support for `vcpkg`, `Conan`, and CMake `FetchContent` out of the box.
 
-### 💻 Terminal: Quick Start
+---
 
-```bash
-root@orbit-server:~# mkdir build && cd build
-root@orbit-server:~/build# cmake -DCMAKE_BUILD_TYPE=Release ..
-root@orbit-server:~/build# make -j$(nproc)
-root@orbit-server:~/build# ./basic_server --port 3000 --engine io_uring
+## 💻 Quick Start
 
-[INFO] TLS Context initialized successfully
-[INFO] HTTP/3 QUIC enabled on UDP port 3000
-[INFO] Event loop started (io_uring). Listening on 3000...
+Fetching Orbit into your own project is ridiculously easy using CMake:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  OrbitFramework
+  GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
+  GIT_TAG        main
+)
+FetchContent_MakeAvailable(OrbitFramework)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE OrbitFramework::core)
 ```
 
-    </td>
-  </tr>
-</table>
+## 📝 Code Example
 
-<table>
-  <tr>
-    <td>
-      <h3>📝 Editor: <code>main.cpp</code></h3>
-      
 ```cpp
 #include "server/App.hpp"
 #include "middleware/Validation.hpp"
@@ -109,35 +89,24 @@ int main() {
 }
 ```
 
-    </td>
-  </tr>
-</table>
+---
 
-<details>
-<summary><b>⚙️ Advanced Configurations & Architecture Details</b></summary>
-<br/>
+## 📖 Master Documentation
 
-Orbit is designed around a highly scalable, multi-threaded **Proactor pattern**:
+Dive deep into the architecture and learn how to master Orbit Framework:
 
-- **Event Loop**: Listens for socket readiness natively using `io_uring` (or `epoll` fallback) for maximum kernel-level asynchronous throughput.
-- **Connection Manager**: Handles TCP/QUIC socket lifecycles, HTTP Keep-Alive, and connection draining during hot-reloads.
-- **Thread Pool**: Offloads HTTP request parsing, middleware execution, and route handling to worker threads, preventing event loop blocking.
-- **Router**: Resolves API endpoints rapidly with `O(1)` or `O(log N)` complexity.
-- **Middleware Pluggability**: Features built-in modules like global rate-limiting, Redis-backed distributed sessions, zero-copy static file serving, and JWT authentication.
+* [🗺️ **Master Roadmap**](docs/ROADMAP.md) - *See our 50-point ultimate goal checklist*
+* [🚀 **Getting Started**](docs/getting_started.md) - *Manual builds, vcpkg, and Conan instructions*
+* [🛣️ **Routing & Streaming**](docs/routing.md)
+* [🛡️ **Middleware & Validation**](docs/middleware.md)
+* [💾 **Postgres & C++20 Coroutines**](docs/database.md)
+* [🔀 **API Gateway & Load Balancing**](docs/proxy.md)
+* [🔌 **WebSockets**](docs/websockets.md)
+* [⚡ **HTTP/3 & QUIC**](docs/http3.md)
 
-</details>
-
-### ⚙️ System Requirements
-- `C++20 Compiler (GCC/Clang)`
-- `Linux 5.6+ (io_uring)`
-- `CMake 3.15+`
-- `OpenSSL`, `Hiredis`, `libpq`, `liburing`
-
-### 🧪 Diagnostics
-- `make e2e-test` (End-to-End Tests)
-- `make benchmark` (Performance Testing)
+---
 
 <div align="center">
   <br/>
-  <i>Distributed under the MIT License.</i>
+  <i>Distributed under the MIT License. Built with ❤️ for the C++ Community.</i>
 </div>
