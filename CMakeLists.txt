@@ -328,6 +328,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
         add_executable(database_server examples/database_server.cpp)
         target_link_libraries(database_server PRIVATE server_core)
+
+        add_executable(orm_server examples/orm_server.cpp)
+        target_link_libraries(orm_server PRIVATE server_core)
     endif()
 
     # Testing Setup (GoogleTest via FetchContent)
