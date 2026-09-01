@@ -319,6 +319,12 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
         add_executable(chat_server examples/chat_server.cpp)
         target_link_libraries(chat_server PRIVATE server_core)
+
+        add_executable(graphql_server examples/graphql_server.cpp)
+        target_link_libraries(graphql_server PRIVATE server_core)
+
+        add_executable(database_server examples/database_server.cpp)
+        target_link_libraries(database_server PRIVATE server_core)
     endif()
 
     # Testing Setup (GoogleTest via FetchContent)

@@ -48,7 +48,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 ## 4. Documentation & Education
 - [x] **25. Provide project templates/scaffolding**
 - [x] **26. Provide a 5-minute Hello World example**
-- [ ] **27. Provide examples for every major feature**
+- [x] **27. Provide examples for every major feature**
 - [ ] **28. Provide Docker support**
 - [ ] **29. Provide production deployment documentation**
 - [ ] **32. Provide API documentation**
