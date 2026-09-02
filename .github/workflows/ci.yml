@@ -23,12 +23,15 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Export GitHub Actions cache environment variables
-      uses: actions/github-script@v6
+    - name: Cache vcpkg dependencies
+      uses: actions/cache@v4
       with:
-        script: |
-          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+        path: |
+          vcpkg/installed
+          vcpkg/downloads
+        key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-
 
     - name: Install Additional Tools (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
@@ -39,15 +42,27 @@ jobs:
     - name: Setup vcpkg (Unix)
       if: runner.os != 'Windows'
       run: |
-        git clone --depth 1 https://github.com/microsoft/vcpkg.git
+        mkdir -p vcpkg
         cd vcpkg
+        if [ ! -d ".git" ]; then
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+          git fetch --depth 1 origin master
+          git checkout FETCH_HEAD
+        fi
         ./bootstrap-vcpkg.sh -disableMetrics
 
     - name: Setup vcpkg (Windows)
       if: runner.os == 'Windows'
       run: |
-        git clone --depth 1 https://github.com/microsoft/vcpkg.git
+        if (!(Test-Path -Path "vcpkg")) { New-Item -ItemType Directory -Path "vcpkg" }
         cd vcpkg
+        if (!(Test-Path -Path ".git")) {
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+          git fetch --depth 1 origin master
+          git checkout FETCH_HEAD
+        }
         .\bootstrap-vcpkg.bat -disableMetrics
 
     - name: Configure CMake
