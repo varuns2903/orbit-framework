@@ -334,6 +334,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         add_executable(database_server examples/database_server.cpp)
         target_link_libraries(database_server PRIVATE server_core)
 
+        add_executable(benchmark_server examples/benchmark_server.cpp)
+        target_link_libraries(benchmark_server PRIVATE server_core)
+
         add_executable(migration_server examples/migration_server.cpp)
         target_link_libraries(migration_server PRIVATE server_core)
 
