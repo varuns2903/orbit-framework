@@ -21,7 +21,8 @@ public:
         last_response = std::move(response);
     }
     void send_headers(HttpResponse& response) override {
-        last_response = response;
+        last_response.status_code = response.status_code;
+        last_response.headers = response.headers;
     }
     void write_chunk(std::string_view chunk) override {}
     void end() override { ended = true; }
