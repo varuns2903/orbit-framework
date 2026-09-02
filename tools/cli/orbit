@@ -12,7 +12,7 @@ def run_command(cmd, cwd=None):
         print(f"❌ Error executing command: {' '.join(cmd)}")
         sys.exit(result.returncode)
 
-def create_project(project_name):
+def create_project(project_name, use_fetch):
     if os.path.exists(project_name):
         print(f"❌ Directory '{project_name}' already exists.")
         sys.exit(1)
@@ -24,14 +24,13 @@ def create_project(project_name):
 #include <orbit/http/HttpResponse.hpp>
 #include <iostream>
 
-using namespace server;
-using namespace http;
+using namespace orbit;
 
 int main() {
-    App app;
+    server::App app;
 
-    app.get("/", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
-        res->send(HttpResponse().status(HttpStatus::OK).send("Hello from Orbit Framework!"));
+    app.get("/", [](const http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> res) {
+        res->send(http::HttpResponse().status(http::HttpStatus::OK).send("Hello from Orbit Framework!"));
     });
 
     app.listen(3000, []() {
@@ -51,16 +50,23 @@ project({project_name} LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include(FetchContent)
+"""
+    if use_fetch:
+        cmake_lists += """include(FetchContent)
 FetchContent_Declare(
   OrbitFramework
   GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
   GIT_TAG        main
 )
 FetchContent_MakeAvailable(OrbitFramework)
+"""
+    else:
+        cmake_lists += """find_package(OrbitFramework REQUIRED)
+"""
 
+    cmake_lists += f"""
 add_executable({project_name} main.cpp)
-target_link_libraries({project_name} PRIVATE OrbitFramework::core)
+target_link_libraries({project_name} PRIVATE OrbitFramework::server_core)
 """
     with open(os.path.join(project_name, "CMakeLists.txt"), "w") as f:
         f.write(cmake_lists)
@@ -92,7 +98,7 @@ target_link_libraries({project_name} PRIVATE OrbitFramework::core)
     print(f"   orbit build")
     print(f"   orbit run")
 
-def build_project():
+def build_project(release):
     if not os.path.exists("CMakeLists.txt"):
         print("❌ Error: No CMakeLists.txt found in the current directory.")
         sys.exit(1)
@@ -101,8 +107,16 @@ def build_project():
     
     # Try to find vcpkg root
     vcpkg_root = os.environ.get("VCPKG_ROOT", "")
-    cmake_cmd = ["cmake", "-B", "build", "-S", ".", "-DCMAKE_BUILD_TYPE=Release"]
     
+    build_type = "Release" if release else "Debug"
+    cmake_cmd = ["cmake", "-B", "build", "-S", ".", f"-DCMAKE_BUILD_TYPE={build_type}"]
+    
+    if release:
+        print("🚀 Compiling with Release mode and Interprocedural Optimization (LTO) enabled...")
+        cmake_cmd.append("-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON")
+    else:
+        print("🐛 Compiling in Debug mode. Use `orbit build --release` for production.")
+        
     if vcpkg_root:
         toolchain = os.path.join(vcpkg_root, "scripts", "buildsystems", "vcpkg.cmake")
         cmake_cmd.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain}")
@@ -153,9 +167,11 @@ def main():
     # Command: new
     parser_new = subparsers.add_parser("new", help="Create a new Orbit project")
     parser_new.add_argument("project_name", type=str, help="Name of the new project")
+    parser_new.add_argument("--fetch", action="store_true", help="Use CMake FetchContent instead of find_package")
 
     # Command: build
     parser_build = subparsers.add_parser("build", help="Build the current Orbit project")
+    parser_build.add_argument("--release", action="store_true", help="Compile an optimized release build (LTO enabled)")
 
     # Command: run
     parser_run = subparsers.add_parser("run", help="Run the current Orbit project")
@@ -163,9 +179,9 @@ def main():
     args = parser.parse_args()
 
     if args.command == "new":
-        create_project(args.project_name)
+        create_project(args.project_name, args.fetch)
     elif args.command == "build":
-        build_project()
+        build_project(args.release)
     elif args.command == "run":
         run_project()
     else:

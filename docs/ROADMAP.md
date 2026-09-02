@@ -41,11 +41,11 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **23. `orbit build`**
 - [x] **24. `orbit run`**
 - [x] **17. Provide sensible default configuration**
-- [ ] **44. Provide one-command installation**
+- [x] **44. Provide one-command installation**
 - [x] **45. Provide one-command project creation**
 - [x] **46. Provide one-command development run**
-- [ ] **47. Provide one-command release/production build**
-- [ ] **50. Build the developer experience around: install → create → code → run → deploy**
+- [x] **47. Provide one-command release/production build**
+- [x] **50. Build the developer experience around: install → create → code → run → deploy**
 
 ## 4. Documentation & Education
 - [x] **25. Provide project templates/scaffolding**
