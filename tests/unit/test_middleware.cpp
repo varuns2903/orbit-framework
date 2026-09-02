@@ -12,13 +12,19 @@
 using namespace middleware;
 using namespace http;
 
-class MockResponseWriter : public ResponseWriter {
+class MiddlewareMockResponseWriter : public ResponseWriter {
 public:
     HttpResponse last_response;
     bool ended = false;
+    std::unordered_map<std::string, std::string> default_headers_;
     
     void send(HttpResponse&& response) override {
         last_response = std::move(response);
+        for (const auto& [k, v] : default_headers_) {
+            if (last_response.headers.find(k) == last_response.headers.end()) {
+                last_response.headers[k] = v;
+            }
+        }
     }
     void send_headers(HttpResponse& response) override {
         last_response.status_code = response.status_code;
@@ -28,7 +34,7 @@ public:
     void end() override { ended = true; }
     void add_interceptor(std::function<void(HttpResponse&)> interceptor) override {}
     void set_header(const std::string& key, const std::string& value) override {
-        last_response.headers[key] = value;
+        default_headers_[key] = value;
     }
     network::Proactor& proactor() override { throw std::runtime_error("Not implemented"); }
     concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("Not implemented"); }
@@ -42,7 +48,7 @@ TEST(MiddlewareTest, CorsMiddleware) {
     HttpRequest req;
     req.method = HttpMethod::OPTIONS;
     req.headers["Origin"] = "http://example.com";
-    auto writer = std::make_shared<MockResponseWriter>();
+    auto writer = std::make_shared<MiddlewareMockResponseWriter>();
     
     bool continue_chain = m(req, writer);
     EXPECT_FALSE(continue_chain);
@@ -58,7 +64,7 @@ TEST(MiddlewareTest, RateLimiterAllowsRequests) {
     auto m = rate_limit(2, std::chrono::seconds(60));
     HttpRequest req;
     req.client_ip = "127.0.0.1";
-    auto writer = std::make_shared<MockResponseWriter>();
+    auto writer = std::make_shared<MiddlewareMockResponseWriter>();
     
     // First request
     EXPECT_TRUE(m(req, writer));
