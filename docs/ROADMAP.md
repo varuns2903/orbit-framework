@@ -33,7 +33,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **51. Database Abstraction Layer (DBAL) & unified ResultSet**
 - [x] **52. Automatic JSON serialization for database queries**
 - [x] **53. Full Object-Relational Mapper (ORM)**
-- [ ] **54. Database Migrations support**
+- [x] **54. Database Migrations support**
 
 ## 3. Tooling & Developer Experience
 - [x] **21. Provide a CLI** (`orbit-cli`)
@@ -51,11 +51,11 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **25. Provide project templates/scaffolding**
 - [x] **26. Provide a 5-minute Hello World example**
 - [x] **27. Provide examples for every major feature**
-- [ ] **28. Provide Docker support**
-- [ ] **29. Provide production deployment documentation**
+- [x] **28. Provide Docker support**
+- [x] **29. Provide production deployment documentation**
 - [ ] **32. Provide API documentation**
 - [ ] **33. Provide migration guides**
-- [ ] **48. Provide clear README: Install → Create → Run → Deploy**
+- [x] **48. Provide clear README: Install → Create → Run → Deploy**
 - [ ] **49. Provide comprehensive documentation**
 
 ## 5. Testing & CI/CD
@@ -69,6 +69,6 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [ ] **41. Attack / Penetration Testing**
 
 ## 6. Maintenance & Lifespan
-- [ ] **30. Use semantic versioning**
+- [x] **30. Use semantic versioning**
 - [ ] **31. Maintain API/ABI compatibility where possible**
-- [ ] **34. Maintain a detailed changelog**
+- [x] **34. Maintain a detailed changelog**

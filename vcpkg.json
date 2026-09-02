@@ -1,6 +1,6 @@
 {
   "name": "orbit-framework",
-  "version-string": "0.1.0",
+  "version-string": "1.4.0",
   "description": "A blazing fast, asynchronous, and middleware-driven C++20 HTTP/3 web framework",
   "dependencies": [
     "openssl",

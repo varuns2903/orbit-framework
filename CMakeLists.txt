@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OrbitFramework VERSION 0.1.0 LANGUAGES CXX)
+project(OrbitFramework VERSION 1.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -333,6 +333,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
         add_executable(database_server examples/database_server.cpp)
         target_link_libraries(database_server PRIVATE server_core)
+
+        add_executable(migration_server examples/migration_server.cpp)
+        target_link_libraries(migration_server PRIVATE server_core)
 
         add_executable(orm_server examples/orm_server.cpp)
         target_link_libraries(orm_server PRIVATE server_core)
