@@ -53,15 +53,18 @@ TlsContext::TlsContext(const std::string& cert_file, const std::string& key_file
 
     if (SSL_CTX_use_certificate_chain_file(ctx_, cert_file.c_str()) <= 0) {
         ERR_print_errors_fp(stderr);
+        SSL_CTX_free(ctx_);
         throw std::runtime_error("Failed to load certificate file: " + cert_file);
     }
 
     if (SSL_CTX_use_PrivateKey_file(ctx_, key_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
         ERR_print_errors_fp(stderr);
+        SSL_CTX_free(ctx_);
         throw std::runtime_error("Failed to load private key file: " + key_file);
     }
 
     if (!SSL_CTX_check_private_key(ctx_)) {
+        SSL_CTX_free(ctx_);
         throw std::runtime_error("Private key does not match the certificate public key");
     }
 
