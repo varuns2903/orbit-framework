@@ -110,7 +110,7 @@ TEST_F(E2EServerTest, JsonPostRequest) {
 
 TEST_F(E2EServerTest, JwtAuthBlocksUnauthorized) {
     auto res = test::send_request("GET", "http://127.0.0.1:8089/secure/data");
-    EXPECT_EQ(res.status_code, 200); // FIXME: Orbit Router group middleware isn't executing properly yet! Should be 401.
+    EXPECT_EQ(res.status_code, 401); // Middleware now properly executes and rejects unauthorized requests
 }
 
 TEST_F(E2EServerTest, NonExistentRoute) {
