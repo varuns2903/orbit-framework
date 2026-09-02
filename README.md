@@ -7,7 +7,7 @@
   <p>
     <a href="https://github.com/varuns2903/orbit-framework/actions"><img src="https://img.shields.io/github/actions/workflow/status/varuns2903/orbit-framework/ci.yml?style=for-the-badge&label=CI&logo=github" /></a>
     <img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg?style=for-the-badge&logo=c%2B%2B" />
-    <img src="https://img.shields.io/badge/Protocol-HTTP%2F3%20%7C%20QUIC-purple.svg?style=for-the-badge" />
+    <img src="https://img.shields.io/badge/Protocols-HTTP%2F1.1%20%7C%20HTTP%2F2%20%7C%20HTTP%2F3-purple.svg?style=for-the-badge" />
     <a href="https://github.com/varuns2903/orbit-framework/releases"><img src="https://img.shields.io/github/v/release/varuns2903/orbit-framework?style=for-the-badge&logo=github&label=Release" /></a>
     <img src="https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg?style=for-the-badge" />
   </p>
