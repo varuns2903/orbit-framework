@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/data/Projects/orbit-framework/build_asan/_deps/inja-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

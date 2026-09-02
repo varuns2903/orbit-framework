@@ -17,7 +17,7 @@ struct QuicConnectionIdHash {
     std::size_t operator()(const ngtcp2_cid& cid) const {
         std::size_t hash = 0;
         for (size_t i = 0; i < cid.datalen; ++i) {
-            hash ^= (cid.data[i] << (i % 8));
+            hash ^= (static_cast<std::size_t>(cid.data[i]) << (i % 8));
         }
         return hash;
     }

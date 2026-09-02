@@ -106,33 +106,36 @@ public:
      * @param code The HttpStatus code to set.
      * @return A reference to this HttpResponse for method chaining.
      */
-    HttpResponse& status(HttpStatus code) {
-        status_code = code;
-        return *this;
-    }
+    HttpResponse& status(HttpStatus code) & { status_code = code; return *this; }
+    HttpResponse&& status(HttpStatus code) && { status_code = code; return std::move(*this); }
+
     /**
      * @brief Sets the response body as plain text.
      * @param b The text content to send.
      */
-    void send(const std::string& b) { set_body(b, "text/plain"); }
+    HttpResponse& send(const std::string& b) & { set_body(b, "text/plain"); return *this; }
+    HttpResponse&& send(const std::string& b) && { set_body(b, "text/plain"); return std::move(*this); }
     
     /**
      * @brief Sets the response body as JSON from a string.
      * @param j The JSON string content.
      */
-    void json(const std::string& j) { set_body(j, "application/json"); }
+    HttpResponse& json(const std::string& j) & { set_body(j, "application/json"); return *this; }
+    HttpResponse&& json(const std::string& j) && { set_body(j, "application/json"); return std::move(*this); }
     
     /**
      * @brief Sets the response body as JSON from a nlohmann::json object.
      * @param j The nlohmann::json object to send.
      */
-    void json(const nlohmann::json& j) { set_body(j.dump(), "application/json"); }
+    HttpResponse& json(const nlohmann::json& j) & { set_body(j.dump(), "application/json"); return *this; }
+    HttpResponse&& json(const nlohmann::json& j) && { set_body(j.dump(), "application/json"); return std::move(*this); }
     
     /**
      * @brief Sets the response body as HTML.
      * @param h The HTML string content.
      */
-    void html(const std::string& h) { set_body(h, "text/html"); }
+    HttpResponse& html(const std::string& h) & { set_body(h, "text/html"); return *this; }
+    HttpResponse&& html(const std::string& h) && { set_body(h, "text/html"); return std::move(*this); }
     
     // Server-Side Rendering
     /**

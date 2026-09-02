@@ -30,7 +30,7 @@ int main() {
     config.port = 8082;
     App app(config);
 
-    app.get("/users", [](HttpRequest& req, std::shared_ptr<ResponseWriter> writer) {
+    app.get("/users", [](HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> writer) {
         auto pg_client = std::make_shared<PostgresClient>(&writer->proactor(), "dbname=postgres user=postgres");
         
         // C++20 Coroutine lambda

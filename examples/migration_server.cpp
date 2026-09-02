@@ -21,17 +21,15 @@ int main(int argc, char* argv[]) {
     std::ofstream("migrations/001_create_users.sql") << "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(255));\n";
 
     // Run migrations on startup!
-    app.get("/migrate", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+    app.get("/migrate", [](HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> res) {
         auto coro = [res]() -> concurrency::Task {
             auto db = std::make_shared<PostgresClient>(&res->proactor(), "dbname=postgres");
             bool connected = co_await connect_async(db);
             
             if (connected) {
-                MigrationRunner<PostgresClient> runner(db);
-                co_await runner.run_migrations("migrations");
-                res->send(HttpResponse().send("Migrations executed successfully!"));
+                MigrationRunner<PostgresClient>::run_migrations(db, "migrations", res);
             } else {
-                res->send(HttpResponse().status(500).send("DB Connection Failed"));
+                res->send(HttpResponse().status(HttpStatus::InternalServerError).send("DB Connection Failed"));
             }
         };
         coro();

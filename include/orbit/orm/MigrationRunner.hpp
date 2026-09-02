@@ -21,11 +21,9 @@ namespace orm {
 template <typename DbClient>
 class MigrationRunner {
 public:
-    MigrationRunner(std::shared_ptr<DbClient> db) : db_(db) {}
-
-    concurrency::Task run_migrations(const std::string& migrations_dir = "migrations") {
+    static concurrency::Task run_migrations(std::shared_ptr<DbClient> db, const std::string& migrations_dir, std::shared_ptr<http::ResponseWriter> res) {
         // 1. Create tracking table
-        co_await database::query_async(db_, 
+        co_await database::query_async(db, 
             "CREATE TABLE IF NOT EXISTS orbit_migrations ("
             "id SERIAL PRIMARY KEY, "
             "version VARCHAR(255) UNIQUE NOT NULL, "
@@ -33,18 +31,19 @@ public:
         );
 
         // 2. Fetch applied migrations
-        database::ResultSet applied_res = co_await database::query_async(db_, 
+        database::ResultSet applied_res = co_await database::query_async(db, 
             "SELECT version FROM orbit_migrations ORDER BY version ASC;"
         );
 
         std::vector<std::string> applied_versions;
-        for (size_t i = 0; i < applied_res.row_count(); ++i) {
+        for (size_t i = 0; i < applied_res.size(); ++i) {
             applied_versions.push_back(applied_res[i].get(0).value_or(""));
         }
 
         // 3. Scan directory
         if (!std::filesystem::exists(migrations_dir)) {
             std::cout << "[Migrations] Directory '" << migrations_dir << "' not found. Skipping migrations.\n";
+            res->send(http::HttpResponse().status(http::HttpStatus::OK).send("Migrations skipped - no directory"));
             co_return;
         }
 
@@ -73,25 +72,22 @@ public:
                 std::string sql((std::istreambuf_iterator<char>(ifs)), (std::istreambuf_iterator<char>()));
                 
                 // Run the migration SQL
-                co_await database::query_async(db_, sql);
+                co_await database::query_async(db, sql);
 
                 // Record it in the tracking table
                 std::string insert_tracking = "INSERT INTO orbit_migrations (version) VALUES ('" + filename + "');";
-                co_await database::query_async(db_, insert_tracking);
+                co_await database::query_async(db, insert_tracking);
                 
                 executed++;
             }
         }
 
         if (executed == 0) {
-            std::cout << "[Migrations] Database is up to date." << std::endl;
+            res->send(http::HttpResponse().status(http::HttpStatus::OK).send("Database is up to date"));
         } else {
-            std::cout << "[Migrations] Successfully applied " << executed << " migrations." << std::endl;
+            res->send(http::HttpResponse().status(http::HttpStatus::OK).send("Successfully applied " + std::to_string(executed) + " migrations."));
         }
     }
-
-private:
-    std::shared_ptr<DbClient> db_;
 };
 
 } // namespace orm
