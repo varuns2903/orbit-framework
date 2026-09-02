@@ -22,9 +22,9 @@ jobs:
         path: |
           build_asan/vcpkg_installed
           vcpkg/downloads
-        key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}
+        key: ${{ runner.os }}-vcpkg-manifest-v1-${{ hashFiles('vcpkg.json') }}
         restore-keys: |
-          ${{ runner.os }}-vcpkg-
+          ${{ runner.os }}-vcpkg-manifest-v1-
 
     - name: Install Additional Tools
       run: |
