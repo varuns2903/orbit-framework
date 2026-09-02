@@ -264,6 +264,7 @@ cmake -B build \
 | Guide | Description |
 |-------|-------------|
 | [🚀 Getting Started](docs/getting_started.md) | Installation, vcpkg, Conan, and FetchContent |
+| [📚 API Reference](https://varuns2903.github.io/orbit-framework/) | Auto-generated Doxygen API Documentation |
 | [🛣️ Routing & Streaming](docs/routing.md) | Routes, parameters, groups, and chunked responses |
 | [🛡️ Middleware](docs/middleware.md) | Built-in middleware and custom middleware authoring |
 | [💾 Database & Coroutines](docs/database.md) | PostgreSQL, Redis, and C++20 async/await |
