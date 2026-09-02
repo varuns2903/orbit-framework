@@ -163,7 +163,33 @@ events.attach(app, "/ws/game");
 
 ## 📦 Integration
 
-### CMake FetchContent (Recommended)
+### System-wide Installation (find_package)
+
+Orbit fully supports standard CMake installation, allowing you to install the framework to your system library paths (`/usr/local/lib` and `/usr/local/include`) so that it is automatically picked up by your C++ linker and loader. This is highly recommended for faster compilation times compared to compiling a header-only library.
+
+```bash
+git clone https://github.com/varuns2903/orbit-framework.git && cd orbit-framework
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake ..
+make -j$(nproc)
+sudo make install
+```
+
+Once installed, include it in your own project's `CMakeLists.txt`:
+
+```cmake
+cmake_minimum_required(VERSION 3.15)
+project(my_app)
+
+find_package(OrbitFramework REQUIRED)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE OrbitFramework::server_core)
+```
+
+### CMake FetchContent (Alternative)
+
+If you prefer building Orbit directly alongside your project:
 
 ```cmake
 include(FetchContent)
@@ -174,7 +200,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(OrbitFramework)
 
-target_link_libraries(my_app PRIVATE OrbitFramework::core)
+target_link_libraries(my_app PRIVATE OrbitFramework::server_core)
 ```
 
 ### vcpkg & Conan

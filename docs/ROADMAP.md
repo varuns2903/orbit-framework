@@ -65,8 +65,8 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [ ] **37. Unit Testing Suite Expansion (Hit 85-90% Target)**
 - [ ] **38. Integration Testing Suite Expansion**
 - [ ] **39. HTTP/protocol compliance tests**
-- [ ] **40. Load Testing & Benchmarking**
-- [ ] **41. Attack / Penetration Testing**
+- [x] **40. Load Testing & Benchmarking**
+- [x] **41. Attack / Penetration Testing**
 
 ## 6. Maintenance & Lifespan
 - [x] **30. Use semantic versioning**
