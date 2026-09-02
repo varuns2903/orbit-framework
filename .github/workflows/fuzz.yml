@@ -1,0 +1,60 @@
+name: Fuzz Testing
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 2 * * *' # Run nightly
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Export GitHub Actions cache environment variables
+      uses: actions/github-script@v6
+      with:
+        script: |
+          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+    - name: Install Additional Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake clang libssl-dev libpq-dev
+
+    - name: Setup vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        ./vcpkg/bootstrap-vcpkg.sh
+      env:
+        VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    - name: Configure CMake for Fuzzing
+      run: |
+        # We need to compile with Clang to use libFuzzer and ASan
+        export CC=clang
+        export CXX=clang++
+        
+        mkdir build_fuzz
+        cd build_fuzz
+        cmake -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
+              -DVCPKG_TARGET_TRIPLET=x64-linux \
+              -DENABLE_FUZZING=ON \
+              ..
+
+    - name: Build Fuzz Targets
+      run: |
+        cd build_fuzz
+        make fuzz_http_parser -j$(nproc)
+
+    - name: Run libFuzzer on HTTP Parser
+      run: |
+        # Run the fuzzer for 30 seconds
+        ./build_fuzz/fuzz_http_parser -max_total_time=30
