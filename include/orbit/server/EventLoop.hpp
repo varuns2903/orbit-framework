@@ -64,8 +64,8 @@ private:
     void do_read_quic();
 
     Listener& listener_;
-    std::unique_ptr<network::Proactor> proactor_;
     TimerManager timer_manager_;
+    std::unique_ptr<network::Proactor> proactor_;
     concurrency::ThreadPool thread_pool_;
     ConnectionManager connection_manager_;
     network::UdpSocket* quic_socket_;
