@@ -37,13 +37,19 @@ Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performan
 
 ### 1. Install (One-Command)
 
-The fastest way to install Orbit and its CLI globally is via our installer script:
+The fastest way to install Orbit and its CLI globally is via our installer scripts.
 
+**For Linux and macOS:**
 ```bash
 curl -sL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh | bash
 ```
 
-This will automatically download the framework, configure `vcpkg`, compile the core library, and install the `orbit` CLI to your system path.
+**For Windows (Run in PowerShell as Administrator):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.ps1 | iex
+```
+
+This will automatically download the framework, configure `vcpkg`, compile the core library in Release mode, and install the `orbit` CLI to your system path.
 
 ### 2. Create a Server
 
