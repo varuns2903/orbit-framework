@@ -375,7 +375,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         tests/unit/test_database.cpp
         tests/unit/test_multipart.cpp
         tests/integration/test_e2e.cpp
-        tests/integration/test_e2e.cpp
+        tests/unit/test_proxy.cpp
+        tests/unit/test_middleware.cpp
+        tests/unit/test_timer.cpp
     )
     target_link_libraries(http_server_tests PRIVATE gtest_main server_core CURL::libcurl)
     include(GoogleTest)
