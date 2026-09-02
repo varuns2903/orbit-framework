@@ -39,7 +39,7 @@ public:
 TEST(MiddlewareTest, CorsMiddleware) {
     auto m = cors();
     HttpRequest req;
-    req.method = "OPTIONS";
+    req.method = HttpMethod::OPTIONS;
     req.headers["Origin"] = "http://example.com";
     auto writer = std::make_shared<MockResponseWriter>();
     
@@ -48,7 +48,7 @@ TEST(MiddlewareTest, CorsMiddleware) {
     EXPECT_EQ(writer->last_response.status_code, HttpStatus::NoContent);
     EXPECT_EQ(writer->last_response.headers["Access-Control-Allow-Origin"], "*");
     
-    req.method = "GET";
+    req.method = HttpMethod::GET;
     continue_chain = m(req, writer);
     EXPECT_TRUE(continue_chain);
 }
