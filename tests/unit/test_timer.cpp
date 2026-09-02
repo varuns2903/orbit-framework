@@ -1,44 +1,44 @@
 #include <gtest/gtest.h>
 #include <orbit/server/TimerManager.hpp>
-#include <orbit/network/Proactor.hpp>
 #include <thread>
 
 using namespace server;
 
 TEST(TimerManagerTest, BasicTimerExecution) {
-    network::Proactor proactor(10);
-    TimerManager tm(proactor);
+    TimerManager tm;
     
-    bool timer_fired = false;
-    uint64_t id = tm.add_timer(std::chrono::milliseconds(10), [&]() {
-        timer_fired = true;
-    });
+    int dummy_fd = 42;
+    uint64_t id = tm.add_timer(dummy_fd, std::chrono::milliseconds(10));
     EXPECT_GT(id, 0);
     
-    // Process proactor for a short while
-    auto start = std::chrono::steady_clock::now();
-    while (!timer_fired && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500)) {
-        proactor.poll(10);
-    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    
+    bool timer_fired = false;
+    tm.handle_expired_timers([&](int fd) {
+        if (fd == dummy_fd) {
+            timer_fired = true;
+        }
+    });
     
     EXPECT_TRUE(timer_fired);
 }
 
 TEST(TimerManagerTest, CancelTimer) {
-    network::Proactor proactor(10);
-    TimerManager tm(proactor);
+    TimerManager tm;
     
-    bool timer_fired = false;
-    uint64_t id = tm.add_timer(std::chrono::milliseconds(50), [&]() {
-        timer_fired = true;
-    });
-    
+    int dummy_fd = 99;
+    uint64_t id = tm.add_timer(dummy_fd, std::chrono::milliseconds(50));
     tm.cancel_timer(id);
     
-    auto start = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(100)) {
-        proactor.poll(10);
-    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(55));
+    
+    bool timer_fired = false;
+    tm.handle_expired_timers([&](int fd) {
+        if (fd == dummy_fd) {
+            timer_fired = true;
+        }
+    });
     
     EXPECT_FALSE(timer_fired); // Should not have fired
 }
+

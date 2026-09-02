@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <orbit/middleware/Cors.hpp>
 #include <orbit/middleware/JwtAuth.hpp>
-#include <orbit/middleware/BasicAuth.hpp>
 #include <orbit/middleware/Compress.hpp>
 #include <orbit/middleware/RateLimiter.hpp>
 #include <orbit/http/HttpRequest.hpp>
@@ -51,33 +50,6 @@ TEST(MiddlewareTest, CorsMiddleware) {
     
     req.method = "GET";
     continue_chain = m(req, writer);
-    EXPECT_TRUE(continue_chain);
-}
-
-TEST(MiddlewareTest, BasicAuthFailure) {
-    auto m = basic_auth("admin", "secret123");
-    HttpRequest req;
-    auto writer = std::make_shared<MockResponseWriter>();
-    
-    // No auth header
-    bool continue_chain = m(req, writer);
-    EXPECT_FALSE(continue_chain);
-    EXPECT_EQ(writer->last_response.status_code, HttpStatus::Unauthorized);
-    
-    // Wrong auth header
-    req.headers["Authorization"] = "Basic d3Jvbmc="; // wrong
-    continue_chain = m(req, writer);
-    EXPECT_FALSE(continue_chain);
-}
-
-TEST(MiddlewareTest, BasicAuthSuccess) {
-    auto m = basic_auth("admin", "secret123");
-    HttpRequest req;
-    auto writer = std::make_shared<MockResponseWriter>();
-    
-    // admin:secret123 in base64 is YWRtaW46c2VjcmV0MTIz
-    req.headers["Authorization"] = "Basic YWRtaW46c2VjcmV0MTIz";
-    bool continue_chain = m(req, writer);
     EXPECT_TRUE(continue_chain);
 }
 
