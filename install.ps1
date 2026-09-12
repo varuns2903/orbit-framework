@@ -22,6 +22,12 @@ Write-Host "📦 Setting up vcpkg..." -ForegroundColor Green
 git clone --depth 1 https://github.com/microsoft/vcpkg.git
 .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 
+# Reuse already-built dependency binaries across installer runs instead of
+# recompiling OpenSSL/curl/mongo-c-driver/etc. from source every time.
+$BinaryCacheDir = if ($env:VCPKG_DEFAULT_BINARY_CACHE) { $env:VCPKG_DEFAULT_BINARY_CACHE } else { Join-Path $env:LOCALAPPDATA "vcpkg-binary-cache" }
+New-Item -ItemType Directory -Force -Path $BinaryCacheDir | Out-Null
+$env:VCPKG_BINARY_SOURCES = "clear;files,$BinaryCacheDir,readwrite"
+
 # 3. Build the framework
 Write-Host "🔨 Building Orbit Framework (this may take a few minutes)..." -ForegroundColor Green
 $Cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors

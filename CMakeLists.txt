@@ -351,37 +351,40 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     endif()
 
     # Testing Setup (GoogleTest via FetchContent)
-    include(FetchContent)
-    FetchContent_Declare(
-      googletest
-      GIT_REPOSITORY https://github.com/google/googletest.git
-      GIT_TAG        v1.14.0
-    )
-    FetchContent_MakeAvailable(googletest)
+    option(ORBIT_BUILD_TESTS "Build the GoogleTest suite (fetches googletest over the network)" ON)
+    if(ORBIT_BUILD_TESTS)
+        include(FetchContent)
+        FetchContent_Declare(
+          googletest
+          GIT_REPOSITORY https://github.com/google/googletest.git
+          GIT_TAG        v1.14.0
+        )
+        FetchContent_MakeAvailable(googletest)
 
-    enable_testing()
+        enable_testing()
 
-    add_executable(http_server_tests 
-        tests/unit/test_parser.cpp
-        tests/unit/test_http.cpp
-        tests/unit/test_router.cpp
-        tests/unit/test_threadpool.cpp
-        tests/unit/test_websocket.cpp
-        tests/unit/test_ssr.cpp
-        tests/unit/test_orm.cpp
-        tests/unit/test_config.cpp
-        tests/unit/test_eventrouter.cpp
-        tests/unit/test_tls.cpp
-        tests/unit/test_database.cpp
-        tests/unit/test_multipart.cpp
-        tests/integration/test_e2e.cpp
-        tests/unit/test_proxy.cpp
-        tests/unit/test_middleware.cpp
-        tests/unit/test_timer.cpp
-    )
-    target_link_libraries(http_server_tests PRIVATE gtest_main server_core CURL::libcurl)
-    include(GoogleTest)
-    gtest_discover_tests(http_server_tests)
+        add_executable(http_server_tests
+            tests/unit/test_parser.cpp
+            tests/unit/test_http.cpp
+            tests/unit/test_router.cpp
+            tests/unit/test_threadpool.cpp
+            tests/unit/test_websocket.cpp
+            tests/unit/test_ssr.cpp
+            tests/unit/test_orm.cpp
+            tests/unit/test_config.cpp
+            tests/unit/test_eventrouter.cpp
+            tests/unit/test_tls.cpp
+            tests/unit/test_database.cpp
+            tests/unit/test_multipart.cpp
+            tests/integration/test_e2e.cpp
+            tests/unit/test_proxy.cpp
+            tests/unit/test_middleware.cpp
+            tests/unit/test_timer.cpp
+        )
+        target_link_libraries(http_server_tests PRIVATE gtest_main server_core CURL::libcurl)
+        include(GoogleTest)
+        gtest_discover_tests(http_server_tests)
+    endif()
 
     # Fuzz Testing
     option(ENABLE_FUZZING "Build fuzz testing executables" OFF)

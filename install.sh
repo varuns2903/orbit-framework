@@ -52,6 +52,11 @@ else
     ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
 fi
 
+# Reuse already-built dependency binaries across installer runs instead of
+# recompiling OpenSSL/curl/mongo-c-driver/etc. from source every time.
+export VCPKG_BINARY_SOURCES="clear;files,${VCPKG_DEFAULT_BINARY_CACHE:-$HOME/.cache/vcpkg-binary-cache},readwrite"
+mkdir -p "${VCPKG_DEFAULT_BINARY_CACHE:-$HOME/.cache/vcpkg-binary-cache}"
+
 # 3. Build the framework
 echo "🔨 Building Orbit Framework (this may take a few minutes)..."
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake .
