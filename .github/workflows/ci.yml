@@ -39,7 +39,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y valgrind wrk
 
-    - name: Setup vcpkg (Unix)
+    - name: Setup vcpkg (Unix, pinned to builtin-baseline)
       if: runner.os != 'Windows'
       run: |
         mkdir -p vcpkg
@@ -47,22 +47,34 @@ jobs:
         if [ ! -d ".git" ]; then
           git init
           git remote add origin https://github.com/microsoft/vcpkg.git
-          git fetch --depth 1 origin master
-          git checkout FETCH_HEAD
         fi
+        # Fetch the exact commit named by builtin-baseline in vcpkg.json.
+        # Fetching "master" only works while the pin happens to be master's
+        # tip; once upstream moves, the baseline commit is missing from the
+        # shallow history and vcpkg fails to resolve any dependency version.
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        echo "Pinning vcpkg to builtin-baseline $BASELINE"
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
         ./bootstrap-vcpkg.sh -disableMetrics
 
-    - name: Setup vcpkg (Windows)
+    - name: Setup vcpkg (Windows, pinned to builtin-baseline)
       if: runner.os == 'Windows'
       run: |
-        if (!(Test-Path -Path "vcpkg")) { New-Item -ItemType Directory -Path "vcpkg" }
+        if (!(Test-Path -Path "vcpkg")) { New-Item -ItemType Directory -Path "vcpkg" | Out-Null }
         cd vcpkg
         if (!(Test-Path -Path ".git")) {
           git init
           git remote add origin https://github.com/microsoft/vcpkg.git
-          git fetch --depth 1 origin master
-          git checkout FETCH_HEAD
         }
+        # Same pin as the Unix job: resolve builtin-baseline from vcpkg.json and
+        # fetch that exact commit, so Windows builds are reproducible instead of
+        # drifting with whatever vcpkg master happens to be that day.
+        $baseline = (Get-Content -Raw ..\vcpkg.json | ConvertFrom-Json).'builtin-baseline'
+        Write-Host "Pinning vcpkg to builtin-baseline $baseline"
+        git fetch --depth 1 origin $baseline
+        if ($LASTEXITCODE -ne 0) { throw "failed to fetch vcpkg baseline $baseline" }
+        git checkout --detach FETCH_HEAD
         .\bootstrap-vcpkg.bat -disableMetrics
 
     - name: Configure CMake

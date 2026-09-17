@@ -13,8 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Cache vcpkg dependencies
       uses: actions/cache@v4
@@ -29,18 +27,24 @@ jobs:
     - name: Install Additional Tools
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake clang libssl-dev libpq-dev
+        sudo apt-get install -y build-essential cmake clang libssl-dev libpq-dev
 
-    - name: Setup vcpkg
+    - name: Setup vcpkg (pinned to builtin-baseline)
       run: |
         mkdir -p vcpkg
         cd vcpkg
         if [ ! -d ".git" ]; then
           git init
           git remote add origin https://github.com/microsoft/vcpkg.git
-          git fetch --depth 1 origin master
-          git checkout FETCH_HEAD
         fi
+        # Fetch the exact commit named by builtin-baseline in vcpkg.json.
+        # Fetching "master" only works while the pin happens to be master's
+        # tip; once upstream moves, the baseline commit is missing from the
+        # shallow history and vcpkg fails to resolve any dependency version.
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        echo "Pinning vcpkg to builtin-baseline $BASELINE"
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
         ./bootstrap-vcpkg.sh -disableMetrics
       env:
         VCPKG_ROOT: ${{ github.workspace }}/vcpkg
