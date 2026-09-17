@@ -2,7 +2,7 @@
   
   <h1>🚀 Orbit Framework</h1>
   
-  <p><b>A blazing fast, asynchronous C++20 web framework with HTTP/3, WebSockets, and a built-in ORM</b></p>
+  <p><b>A fast, asynchronous C++20 web framework with HTTP/3, WebSockets, and a built-in ORM</b></p>
   
   <p>
     <a href="https://github.com/varuns2903/orbit-framework/actions"><img src="https://img.shields.io/github/actions/workflow/status/varuns2903/orbit-framework/ci.yml?style=for-the-badge&label=CI&logo=github" /></a>
@@ -21,7 +21,7 @@ Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performan
 
 | Feature | Details |
 |---------|---------|
-| **Blazing Fast** | Asynchronous Proactor pattern with `io_uring`, `epoll`, `kqueue`, and Windows IOCP |
+| **Fast** | ~61k req/s on a trivial keep-alive workload ([measured](docs/benchmarks.md)); asynchronous Proactor pattern over `io_uring`, `epoll`, `kqueue`, and Windows IOCP |
 | **Modern Protocols** | HTTP/1.1, HTTP/2, **HTTP/3 & QUIC** — no external proxy needed |
 | **Express-Style API** | Routing, middleware chains, route groups, and dynamic parameters |
 | **Magic Returns** | Return `std::string`, structs, or `nlohmann::json` from handlers — Orbit auto-serializes |
@@ -319,6 +319,7 @@ cmake -B build \
 | [⚡ HTTP/3 & QUIC](docs/http3.md) | Enabling and using HTTP/3 |
 | [📋 Changelog](CHANGELOG.md) | Release history and breaking changes |
 | [📊 Test Coverage](docs/coverage.md) | Measured coverage, per-file gaps, and how to reproduce |
+| [⚡ Benchmarks](docs/benchmarks.md) | Throughput figures, methodology, and their limits |
 
 ---
 
