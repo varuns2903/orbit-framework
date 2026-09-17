@@ -90,9 +90,9 @@ if(ORBIT_ENABLE_HTTP3)
     pkg_check_modules(NGTCP2 REQUIRED IMPORTED_TARGET libngtcp2)
     pkg_search_module(NGTCP2_CRYPTO REQUIRED IMPORTED_TARGET libngtcp2_crypto_openssl libngtcp2_crypto_ossl libngtcp2_crypto_quictls)
     if(NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_ossl" OR NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_openssl")
-        add_compile_definitions(USE_NGTCP2_CRYPTO_OSSL=1)
+        list(APPEND ORBIT_PUBLIC_DEFINITIONS USE_NGTCP2_CRYPTO_OSSL=1)
     elseif(NGTCP2_CRYPTO_MODULE_NAME STREQUAL "libngtcp2_crypto_quictls")
-        add_compile_definitions(USE_NGTCP2_CRYPTO_QUICTLS=1)
+        list(APPEND ORBIT_PUBLIC_DEFINITIONS USE_NGTCP2_CRYPTO_QUICTLS=1)
     endif()
     pkg_check_modules(NGHTTP3 REQUIRED IMPORTED_TARGET libnghttp3)
 endif()
@@ -163,27 +163,38 @@ if(ORBIT_ENABLE_HTTP3)
         src/server/QuicConnectionManager.cpp
         src/server/QuicHttp3Session.cpp
     )
-    add_compile_definitions(ORBIT_ENABLE_HTTP3=1)
+    list(APPEND ORBIT_PUBLIC_DEFINITIONS ORBIT_ENABLE_HTTP3=1)
 endif()
 
 if(ORBIT_ENABLE_REDIS)
     list(APPEND SERVER_SOURCES src/database/RedisClient.cpp)
-    add_compile_definitions(ORBIT_ENABLE_REDIS=1)
+    list(APPEND ORBIT_PUBLIC_DEFINITIONS ORBIT_ENABLE_REDIS=1)
 endif()
 if(ORBIT_ENABLE_POSTGRES)
     list(APPEND SERVER_SOURCES src/database/PostgresClient.cpp)
-    add_compile_definitions(ORBIT_ENABLE_POSTGRES=1)
+    list(APPEND ORBIT_PUBLIC_DEFINITIONS ORBIT_ENABLE_POSTGRES=1)
 endif()
 if(ORBIT_ENABLE_MARIADB)
     list(APPEND SERVER_SOURCES src/database/MysqlClient.cpp)
-    add_compile_definitions(ORBIT_ENABLE_MARIADB=1)
+    list(APPEND ORBIT_PUBLIC_DEFINITIONS ORBIT_ENABLE_MARIADB=1)
 endif()
 if(ORBIT_ENABLE_MONGODB)
     list(APPEND SERVER_SOURCES src/database/MongoClient.cpp)
-    add_compile_definitions(ORBIT_ENABLE_MONGODB=1)
+    list(APPEND ORBIT_PUBLIC_DEFINITIONS ORBIT_ENABLE_MONGODB=1)
 endif()
 
 add_library(server_core ${SERVER_SOURCES})
+
+# These macros gate conditional members in public headers — App.hpp declares
+# quic_socket_ and quic_manager_ only under ORBIT_ENABLE_HTTP3, for instance.
+# They were set with add_compile_definitions(), which is directory-scoped and
+# therefore never reached anything consuming Orbit. A consumer compiled
+# App.hpp without ORBIT_ENABLE_HTTP3 while libserver_core.a was built with it,
+# so sizeof(App) disagreed by 16 bytes and App's constructor wrote past the
+# end of the caller's object. PUBLIC puts them on the target, so they
+# propagate through the build tree, the installed export, and FetchContent
+# alike, and the two sides always agree on layout.
+target_compile_definitions(server_core PUBLIC ${ORBIT_PUBLIC_DEFINITIONS})
 
 # If building as a shared library, define exports
 if(BUILD_SHARED_LIBS)
@@ -259,7 +270,9 @@ endif()
 if(ORBIT_ENABLE_GRPC)
     find_package(gRPC CONFIG REQUIRED)
     target_link_libraries(server_core PUBLIC gRPC::grpc++)
-    add_compile_definitions(ORBIT_ENABLE_GRPC=1)
+    # Applied directly: this block runs after the target_compile_definitions
+    # call above, so appending to ORBIT_PUBLIC_DEFINITIONS here would be lost.
+    target_compile_definitions(server_core PUBLIC ORBIT_ENABLE_GRPC=1)
 endif()
 
 if(WIN32)
