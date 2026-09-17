@@ -7,8 +7,8 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **2. Provide clean `find_package()` support**
 - [x] **3. Export CMake targets** (e.g., `OrbitFramework::core`)
 - [x] **4. Support CMake `FetchContent`** seamlessly
-- [x] **5. Publish to vcpkg**
-- [x] **6. Publish to Conan**
+- [ ] **5. Publish to vcpkg** — a registry port is drafted at `packaging/vcpkg-port/`, but it has not been submitted to the upstream vcpkg registry. `vcpkg install orbit-framework` does not work yet. Consuming Orbit through vcpkg *manifest mode* (the root `vcpkg.json`) does work. **Help wanted.**
+- [ ] **6. Publish to Conan** — `conanfile.py` builds Orbit locally via `conan install`/`conan create`, but the package has not been submitted to ConanCenter. **Help wanted.**
 - [x] **7. Automatically manage dependencies**
 - [x] **18. Provide prebuilt binaries/releases**
 - [x] **20. Support both static and shared libraries**
@@ -66,7 +66,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [ ] **38. Integration Testing Suite Expansion**
 - [ ] **39. HTTP/protocol compliance tests**
 - [x] **40. Load Testing & Benchmarking**
-- [x] **41. Attack / Penetration Testing**
+- [ ] **41. Attack / Penetration Testing** — the HTTP parser is fuzzed nightly in CI and the suite runs under ASan/UBSan plus Valgrind, but Orbit has had no third-party security audit or structured penetration test. See [loopholes_and_drawbacks.md](loopholes_and_drawbacks.md) and [SECURITY.md](../SECURITY.md). **Help wanted.**
 
 ## 6. Maintenance & Lifespan
 - [x] **30. Use semantic versioning**
