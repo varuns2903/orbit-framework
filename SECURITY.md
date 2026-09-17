@@ -94,10 +94,10 @@ discussion.
   A request context destroyed before a suspended coroutine resumes is a
   use-after-free. Reports in this area are especially welcome.
 - **Development certificates.** `cert.pem` / `key.pem` referenced in examples
-  and docs are self-signed development material. Never deploy with them. The
-  repository's git history contains a self-signed development keypair that was
-  committed early in the project and later removed from tracking; it was never
-  used for anything but local testing and is not valid for any domain.
+  and docs are self-signed development material generated locally. They are
+  gitignored and are not distributed with Orbit. Never deploy with them —
+  generate your own, and see [docs/deployment.md](docs/deployment.md) for
+  terminating TLS in production.
 - **Defaults.** TLS, rate limiting, CSRF, and body-size limits are opt-in
   middleware, not defaults. Deploying Orbit without them is deploying an
   unhardened server. See [docs/deployment.md](docs/deployment.md).
