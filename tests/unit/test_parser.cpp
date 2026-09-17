@@ -40,3 +40,54 @@ TEST(HttpParserTest, MalformedRequestMissingCRLF) {
     auto req = HttpParser::parse(raw);
     EXPECT_FALSE(req.has_value());
 }
+
+// --- Connection header option parsing (RFC 9110 section 7.6.1) ---
+
+TEST(ConnectionOptionTest, MatchesSingleToken) {
+    EXPECT_TRUE(http::connection_option_present("close", "close"));
+    EXPECT_TRUE(http::connection_option_present("keep-alive", "keep-alive"));
+}
+
+TEST(ConnectionOptionTest, IsCaseInsensitive) {
+    EXPECT_TRUE(http::connection_option_present("Close", "close"));
+    EXPECT_TRUE(http::connection_option_present("CLOSE", "close"));
+    EXPECT_TRUE(http::connection_option_present("Keep-Alive", "keep-alive"));
+}
+
+TEST(ConnectionOptionTest, FindsTokenInCommaSeparatedList) {
+    EXPECT_TRUE(http::connection_option_present("keep-alive, TE", "keep-alive"));
+    EXPECT_TRUE(http::connection_option_present("TE, close", "close"));
+    EXPECT_TRUE(http::connection_option_present("upgrade, close, TE", "close"));
+}
+
+TEST(ConnectionOptionTest, TolerateSurroundingWhitespace) {
+    EXPECT_TRUE(http::connection_option_present("  close  ", "close"));
+    EXPECT_TRUE(http::connection_option_present("TE,\tclose", "close"));
+}
+
+TEST(ConnectionOptionTest, DoesNotMatchSubstrings) {
+    // "close" must not be found inside a longer token.
+    EXPECT_FALSE(http::connection_option_present("closer", "close"));
+    EXPECT_FALSE(http::connection_option_present("not-close", "close"));
+    EXPECT_FALSE(http::connection_option_present("keep-alive", "close"));
+}
+
+TEST(ConnectionOptionTest, HandlesEmptyAndDegenerateInput) {
+    EXPECT_FALSE(http::connection_option_present("", "close"));
+    EXPECT_FALSE(http::connection_option_present(",", "close"));
+    EXPECT_FALSE(http::connection_option_present(" , , ", "close"));
+}
+
+// --- HTTP version parsing, which drives connection persistence ---
+
+TEST(HttpParserTest, RecordsHttpVersionOneZero) {
+    auto req = http::HttpParser::parse("GET / HTTP/1.0\r\nHost: x\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_EQ(req->http_version, "HTTP/1.0");
+}
+
+TEST(HttpParserTest, RecordsHttpVersionOneOne) {
+    auto req = http::HttpParser::parse("GET / HTTP/1.1\r\nHost: x\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_EQ(req->http_version, "HTTP/1.1");
+}

@@ -291,9 +291,28 @@ void Connection::process_request() {
             }
         }
 
-        // Set should_close based on request headers
+        // Decide whether the connection persists after this response.
+        //
+        // RFC 9112 section 9.3: HTTP/1.1 is persistent by default and closes
+        // only when a "close" connection option is present. HTTP/1.0 is the
+        // other way round — it closes by default and persists only when the
+        // client explicitly sends "keep-alive". Treating an HTTP/1.0 request
+        // with no Connection header as persistent leaves the client waiting
+        // for an end-of-message it will never see; ApacheBench without -k is
+        // exactly this case and hangs until it times out.
+        //
+        // The connection option is a comma-separated list of case-insensitive
+        // tokens, so compare tokens rather than the whole field value.
         auto it = req.headers.find("Connection");
-        if (it != req.headers.end() && it->second == "close") {
+        const bool has_close = (it != req.headers.end()) &&
+                               http::connection_option_present(it->second, "close");
+        const bool has_keep_alive = (it != req.headers.end()) &&
+                                    http::connection_option_present(it->second, "keep-alive");
+        const bool is_http_10 = (req.http_version == "HTTP/1.0");
+
+        if (has_close) {
+            should_close_ = true;
+        } else if (is_http_10 && !has_keep_alive) {
             should_close_ = true;
         }
         

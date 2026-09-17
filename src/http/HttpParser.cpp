@@ -1,7 +1,41 @@
 #include <orbit/http/HttpParser.hpp>
 #include <sstream>
 
+#include <cctype>
+
 namespace http {
+
+bool connection_option_present(std::string_view field_value, std::string_view option) {
+    size_t pos = 0;
+    while (pos <= field_value.size()) {
+        size_t comma = field_value.find(',', pos);
+        std::string_view token = field_value.substr(
+            pos, comma == std::string_view::npos ? std::string_view::npos : comma - pos);
+
+        // Trim optional whitespace around the token.
+        while (!token.empty() && (token.front() == ' ' || token.front() == '\t')) {
+            token.remove_prefix(1);
+        }
+        while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) {
+            token.remove_suffix(1);
+        }
+
+        if (token.size() == option.size()) {
+            bool equal = true;
+            for (size_t i = 0; i < token.size(); ++i) {
+                if (static_cast<char>(std::tolower(static_cast<unsigned char>(token[i]))) != option[i]) {
+                    equal = false;
+                    break;
+                }
+            }
+            if (equal) return true;
+        }
+
+        if (comma == std::string_view::npos) break;
+        pos = comma + 1;
+    }
+    return false;
+}
 
 HttpMethod HttpParser::parse_method(std::string_view method_str) {
     if (method_str == "GET") return HttpMethod::GET;
