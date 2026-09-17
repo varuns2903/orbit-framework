@@ -1,16 +1,77 @@
+# --- Build output ---
 build/
-.cache/
+build-*/
+build_*/
+cmake-build-*/
+out/
+_deps/
+CMakeFiles/
+CMakeCache.txt
 compile_commands.json
-.DS_Store
+install_manifest.txt
+CPackConfig.cmake
+CPackSourceConfig.cmake
+
+# --- Package managers ---
+vcpkg/
+vcpkg_installed/
+conan_toolchain.cmake
+conandata.yml
+CMakeUserPresets.json
+.conan2/
+
+# --- Generated documentation ---
+docs/html/
+docs/latex/
+docs/xml/
+Doxyfile.local
+
+# --- Logs and scratch output ---
 *.log
+*.out
+full_log.txt
+ci_*.txt
+core
+core.*
+perf.data*
+callgrind.out.*
+massif.out.*
+*.gcda
+*.gcno
+*.gcov
+coverage/
+*.profraw
+*.profdata
+
+# --- Credentials and certificates ---
+# Never commit key material. Development certificates are generated locally;
+# see docs/deployment.md.
 *.pem
 *.key
 *.crt
-build_docker/
+*.pfx
+*.p12
+.env
+.env.*
+
+# --- Fuzzing artifacts ---
+crash-*
+leak-*
+timeout-*
+oom-*
+fuzz-*.log
+
+# --- Editor and OS ---
+.cache/
+.vscode/
+.idea/
+.vs/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Local scratch ---
 load_test.py
-build_local/
-build_test/
-build_vcpkg/
-vcpkg/
-vcpkg_installed/
-ubuntu-job*.log
+test_git/
