@@ -69,7 +69,7 @@ and [CONTRIBUTING.md](../CONTRIBUTING.md).
 - [x] **35. Automated CI/CD**
 - [x] **36. Test Linux, Windows and macOS**
 - [x] **57. Code Coverage Setup (Lcov/Gcovr & CMake Integration)** — measured on every push by the [Code Coverage workflow](../.github/workflows/coverage.yml); current figures in [coverage.md](coverage.md).
-- [ ] **37. Unit Testing Suite Expansion (Hit 85-90% Target)** — measured at **27.7% lines / 35.4% functions / 14.1% branches** across 101 tests; see [coverage.md](coverage.md) for the per-file breakdown and how to reproduce it. **Help wanted: [#14](https://github.com/varuns2903/orbit-framework/issues/14) (QUIC), [#15](https://github.com/varuns2903/orbit-framework/issues/15) (fuzzing), [#16](https://github.com/varuns2903/orbit-framework/issues/16) (integration).**
+- [ ] **37. Unit Testing Suite Expansion (Hit 85-90% Target)** — measured at **27.1% lines / 33.5% functions / 13.7% branches** across 109 tests; see [coverage.md](coverage.md) for the per-file breakdown and how to reproduce it. **Help wanted: [#14](https://github.com/varuns2903/orbit-framework/issues/14) (QUIC), [#15](https://github.com/varuns2903/orbit-framework/issues/15) (fuzzing), [#16](https://github.com/varuns2903/orbit-framework/issues/16) (integration).**
 - [ ] **38. Integration Testing Suite Expansion** — **Help wanted: [#16](https://github.com/varuns2903/orbit-framework/issues/16).**
 - [ ] **39. HTTP/protocol compliance tests** — **Help wanted: [#17](https://github.com/varuns2903/orbit-framework/issues/17).**
 - [x] **40. Load Testing & Benchmarking** — ApacheBench figures are in [benchmarks.md](benchmarks.md); no comparison against other frameworks yet, see [#19](https://github.com/varuns2903/orbit-framework/issues/19).

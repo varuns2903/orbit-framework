@@ -5,16 +5,16 @@ project actually is, so the gap is visible rather than assumed.
 
 ## Current baseline
 
-Measured on 2026-09-17 against commit `6088bcd`, over Orbit's own sources
-(third-party, tests, and examples excluded):
+Produced by the [Code Coverage workflow](../.github/workflows/coverage.yml) on
+2026-09-17, with every subsystem enabled, over Orbit's own sources only:
 
 | Metric | Covered | Total | Percentage |
 |--------|---------|-------|------------|
-| Lines | 1,180 | 4,259 | **27.7%** |
-| Functions | 173 | 489 | **35.4%** |
-| Branches | 963 | 6,854 | **14.1%** |
+| Lines | 1,184 | 4,362 | **27.1%** |
+| Functions | 162 | 484 | **33.5%** |
+| Branches | 974 | 7,104 | **13.7%** |
 
-The suite is 101 tests and they all pass — but passing tests and covered code
+The suite is 109 tests and they all pass — but passing tests and covered code
 are different things, and the second number is the one that says how much of
 Orbit is actually exercised.
 
@@ -57,8 +57,9 @@ effect:
 | File | Lines | Covered |
 |------|-------|---------|
 | `src/server/QuicConnection.cpp` | 170 | 0% |
-| `src/network/IoUringProactor.cpp` | 154 | 0% |
-| `src/server/QuicHttp3Session.cpp` | 119 | 0% |
+| `src/network/IoUringProactor.cpp` | 152 | 0% |
+| `src/server/QuicHttp3Session.cpp` | 118 | 0% |
+| `src/database/RedisClient.cpp` | 111 | 0% |
 | `src/database/MysqlClient.cpp` | 104 | 0% |
 | `src/database/PostgresClient.cpp` | 98 | 0% |
 | `src/middleware/OAuth2.cpp` | 94 | 0% |
@@ -68,19 +69,24 @@ effect:
 | `src/middleware/StaticFiles.cpp` | 48 | 0% |
 | `src/server/QuicConnectionManager.cpp` | 46 | 0% |
 | `src/config/Config.cpp` | 44 | 0% |
-| `src/network/ConnectionPool.cpp` | 43 | 0% |
-| `src/openapi/OpenApi.cpp` | 124 | 3.2% |
+| `src/network/ConnectionPool.cpp` | 44 | 0% |
+
+`src/openapi/OpenApi.cpp` (124 lines) sits just above zero at 3%.
 
 Best covered today:
 
 | File | Lines | Covered |
 |------|-------|---------|
-| `src/http/MultipartStreamParser.cpp` | 112 | 83.9% |
-| `include/orbit/database/ConnectionPool.hpp` | 45 | 80.0% |
-| `src/http/HttpParser.cpp` | 74 | 75.7% |
-| `src/network/EpollProactor.cpp` | 186 | 59.1% |
-| `src/server/EventLoop.cpp` | 62 | 56.5% |
-| `src/routing/Router.cpp` | 207 | 50.7% |
+| `src/http/MultipartStreamParser.cpp` | 112 | 83% |
+| `src/http/HttpParser.cpp` | 93 | 78% |
+| `src/network/EpollProactor.cpp` | 184 | 58% |
+| `src/server/EventLoop.cpp` | 62 | 56% |
+| `src/routing/Router.cpp` | 207 | 50% |
+| `src/http/HttpResponse.cpp` | 96 | 50% |
+
+`src/server/Connection.cpp` deserves its own mention: at 593 lines it is the
+largest file in the project and sits at 33%, so it contributes more uncovered
+lines than any other single file.
 
 ## Reading these numbers fairly
 
@@ -98,7 +104,9 @@ Some of the zeroes are easier to fix than others:
   straightforward to test directly.
 
 Also note that a file compiled out of the build does not appear in the
-denominator at all. Run the measurement with the same feature flags you intend
-to compare against, or the totals will move for reasons unrelated to tests.
+denominator at all — measuring with `ORBIT_ENABLE_REDIS=OFF` drops
+`RedisClient.cpp` and its 111 uncovered lines, which *raises* the percentage
+without a single new test. The figures above come from a CI build with every
+subsystem enabled, so use the same flags if you want a comparable number.
 
 Tracked in [#21](https://github.com/varuns2903/orbit-framework/issues/21).
