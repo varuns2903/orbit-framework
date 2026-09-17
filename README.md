@@ -339,6 +339,11 @@ Found a security issue? **Do not open a public issue** — follow
 
 Distributed under the MIT License. See [LICENSE](LICENSE) for details.
 
+Orbit bundles and links third-party components under their own licenses —
+including a vendored copy of nlohmann/json. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full list and for
+guidance if your project already uses nlohmann/json.
+
 ---
 
 <div align="center">
