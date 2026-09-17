@@ -1,5 +1,60 @@
+# Build output. The Dockerfile does `COPY . .`, so anything left here is
+# uploaded as build context and then baked into a layer. Without these the
+# context is over 3 GB for a project whose sources are ~12k lines.
 build/
-build_docker/
-build_asan/
+build-*/
+build_*/
+cmake-build-*/
+out/
+_deps/
+CMakeFiles/
+CMakeCache.txt
+
+# Package manager trees — the image installs its own dependencies.
+vcpkg/
+vcpkg_installed/
+conan_toolchain.cmake
+CMakeUserPresets.json
+
+# Version control and CI
 .git/
+.github/
+.gitignore
+.dockerignore
+
+# Logs, coverage, profiling
 *.log
+*.out
+*.gcda
+*.gcno
+*.gcov
+coverage/
+*.profraw
+*.profdata
+
+# Credentials — never bake these into an image layer
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+.env
+.env.*
+
+# Fuzzing artifacts
+crash-*
+leak-*
+timeout-*
+oom-*
+
+# Editor and OS
+.cache/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Docs and packaging not needed to build the image
+docs/
+benchmarks/
+test_git/

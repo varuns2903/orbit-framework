@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     git \
     pkg-config \
     libpq-dev \
+    libcurl4-openssl-dev \
     libhiredis-dev \
     zlib1g-dev \
     libnghttp2-dev \
@@ -58,7 +59,11 @@ RUN git clone --depth 1 --branch v1.25.0 https://github.com/ngtcp2/ngtcp2.git &&
 WORKDIR /app
 COPY . .
 RUN mkdir -p build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR=/usr/local/quictls .. && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DOPENSSL_ROOT_DIR=/usr/local/quictls \
+          -DORBIT_BUILD_TESTS=OFF \
+          -DENABLE_SANITIZERS=OFF \
+          .. && \
     make -j$(nproc)
 
 # Stage 2: Runtime Environment
@@ -71,6 +76,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     libpq5 \
     libpq-dev \
+    libcurl4 \
     libhiredis-dev \
     zlib1g \
     libnghttp2-14 \
@@ -80,10 +86,16 @@ RUN apt-get update && apt-get install -y \
     libbson-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy compiled QUIC/HTTP3 libraries from builder
+# Copy compiled QUIC/HTTP3 libraries from builder.
+# nghttp3 and ngtcp2 are installed with CMAKE_INSTALL_PREFIX=/usr, and CMake's
+# GNUInstallDirs puts libraries in the multiarch directory on Debian-derived
+# distributions — so these live in /usr/lib/x86_64-linux-gnu, not /usr/lib.
+# The previous globs matched nothing and the build failed with
+# "COPY failed: no source files were specified". Adjust the path if you build
+# for an architecture other than amd64.
 COPY --from=builder /usr/local/quictls/lib /usr/local/quictls/lib
-COPY --from=builder /usr/lib/libnghttp3* /usr/lib/
-COPY --from=builder /usr/lib/libngtcp2* /usr/lib/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libnghttp3* /usr/lib/x86_64-linux-gnu/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libngtcp2* /usr/lib/x86_64-linux-gnu/
 
 # Setup dynamic linker for quictls
 RUN echo "/usr/local/quictls/lib" > /etc/ld.so.conf.d/quictls.conf && ldconfig
