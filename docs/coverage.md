@@ -31,18 +31,20 @@ cmake --build build_cov --parallel
 cd build_cov && ctest
 
 gcovr -r .. . \
-  --exclude '.*/_deps/.*' \
-  --exclude '.*/tests/.*' \
+  --filter "$(cd .. && pwd)/src/" \
+  --filter "$(cd .. && pwd)/include/orbit/" \
   --exclude '.*json\.hpp' \
-  --exclude '.*/examples/.*' \
   --html-details coverage.html \
   --print-summary
 ```
 
 Sanitizers are disabled because they interfere with gcov instrumentation.
-The exclusions matter: `_deps/` holds GoogleTest and inja, and
-`include/orbit/http/json.hpp` is a 24,765-line vendored copy of nlohmann/json.
-Counting those would produce a flattering number that says nothing about Orbit.
+
+The filters matter. Allow-listing `src/` and `include/orbit/` is deliberate:
+an exclude list looks equivalent but quietly lets libstdc++ headers, pulled in
+through templates, into the denominator. `include/orbit/http/json.hpp` is then
+dropped explicitly, because it sits inside the allow-listed tree but is a
+24,765-line vendored copy of nlohmann/json that would dominate the result.
 
 The [Code Coverage workflow](../.github/workflows/coverage.yml) runs this on
 every push to `main` and attaches the HTML report as a build artifact.

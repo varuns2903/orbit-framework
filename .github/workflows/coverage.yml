@@ -66,17 +66,18 @@ jobs:
       working-directory: build_cov
       run: ctest --output-on-failure
 
-    # Third-party and test code is excluded so the figure reflects Orbit's own
-    # sources. The vendored nlohmann amalgamation alone is ~24k lines and would
-    # otherwise dominate the result.
+    # Count only Orbit's own sources. An exclude list is the wrong tool here —
+    # it silently let libstdc++ headers pulled in through templates into the
+    # denominator. Allow-listing src/ and include/orbit/ is exact, and the
+    # vendored nlohmann amalgamation is dropped explicitly because it lives
+    # under include/orbit/ but is ~24k lines of third-party code.
     - name: Generate coverage report
       working-directory: build_cov
       run: |
         gcovr -r .. . \
-          --exclude '.*/_deps/.*' \
-          --exclude '.*/tests/.*' \
+          --filter "${GITHUB_WORKSPACE}/src/" \
+          --filter "${GITHUB_WORKSPACE}/include/orbit/" \
           --exclude '.*json\.hpp' \
-          --exclude '.*/examples/.*' \
           --html-details coverage.html \
           --xml coverage.xml \
           --txt coverage.txt \
