@@ -1,10 +1,26 @@
+import os
+import re
+
 from conan import ConanFile
+from conan.errors import ConanException
 from conan.tools.cmake import CMakeToolchain, CMake, cmake_layout, CMakeDeps
+
 
 class OrbitFrameworkRecipe(ConanFile):
     name = "orbit-framework"
-    version = "0.1.0"
     package_type = "library"
+
+    def set_version(self):
+        # Read the version straight out of CMakeLists.txt rather than repeating
+        # it here. The hardcoded value had drifted to 0.1.0 while the project
+        # shipped 1.4.0, so every `conan create` produced a package claiming a
+        # version three releases old.
+        cmakelists = os.path.join(self.recipe_folder, "CMakeLists.txt")
+        with open(cmakelists, "r", encoding="utf-8") as handle:
+            match = re.search(r"project\s*\([^)]*VERSION\s+([0-9]+(?:\.[0-9]+)*)", handle.read())
+        if not match:
+            raise ConanException("could not read project VERSION from CMakeLists.txt")
+        self.version = match.group(1)
 
     # Metadata
     license = "MIT"
@@ -12,6 +28,18 @@ class OrbitFrameworkRecipe(ConanFile):
     url = "https://github.com/varuns2903/orbit-framework"
     description = "A blazing fast, asynchronous, and middleware-driven C++20 HTTP/3 web framework"
     topics = ("http3", "framework", "cpp20", "io_uring", "coroutine", "quic")
+
+    # set_version reads CMakeLists.txt, so it has to be exported with the
+    # recipe itself, not only with the sources.
+    exports = "CMakeLists.txt"
+    exports_sources = (
+        "CMakeLists.txt",
+        "LICENSE",
+        "OrbitFrameworkConfig.cmake.in",
+        "Doxyfile.in",
+        "include/*",
+        "src/*",
+    )
 
     # Binary configuration
     settings = "os", "compiler", "build_type", "arch"
@@ -45,6 +73,13 @@ class OrbitFrameworkRecipe(ConanFile):
         deps = CMakeDeps(self)
         deps.generate()
         tc = CMakeToolchain(self)
+        # Tests pull GoogleTest in with FetchContent at configure time, and
+        # examples are not part of the installed package. Neither belongs in a
+        # package build, which may well run without network access.
+        tc.cache_variables["ORBIT_BUILD_TESTS"] = False
+        tc.cache_variables["ORBIT_BUILD_EXAMPLES"] = False
+        tc.cache_variables["ENABLE_SANITIZERS"] = False
+        tc.cache_variables["ORBIT_ENABLE_COVERAGE"] = False
         tc.generate()
 
     def build(self):
