@@ -35,21 +35,16 @@ Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performan
 
 ## 🚀 Quick Start
 
-### 1. Install (One-Command)
+### 1. Install
 
-The fastest way to install Orbit and its CLI globally is via our installer scripts.
-
-**For Linux and macOS:**
 ```bash
 curl -sL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh | bash
 ```
 
-**For Windows (Run in PowerShell as Administrator):**
-```powershell
-iwr -useb https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.ps1 | iex
-```
-
-This will automatically download the framework, configure `vcpkg`, compile the core library in Release mode, and install the `orbit` CLI to your system path.
+Windows, and every other way to get Orbit — FetchContent, vcpkg, Conan, Docker,
+`find_package` — are covered under [Installation](#-installation). If you would
+rather not install anything system-wide, [FetchContent](#cmake-fetchcontent)
+drops Orbit straight into an existing CMake project.
 
 ### 2. Create a Project
 
@@ -115,32 +110,309 @@ $ curl http://localhost:8080/users/42
 
 ---
 
-## 🔧 Building Orbit From Source
+## 📦 Installation
 
-If you would rather build the framework itself — to contribute, or to run the
-examples — clone it along with `vcpkg`, which supplies the dependencies:
+Orbit can be consumed in several ways. Pick by what you are doing:
+
+| You want to… | Use | Needs a system install? |
+|---|---|---|
+| Try Orbit quickly on Linux/macOS/Windows | [One-command installer](#one-command-installer) | Yes |
+| Start a new app from a template | [Orbit CLI](#orbit-cli) | Yes (installer provides it) |
+| Add Orbit to an existing CMake project | [CMake FetchContent](#cmake-fetchcontent) | **No** |
+| Link a system-wide build | [find_package](#system-wide-install-find_package) | Yes |
+| Manage deps with vcpkg | [vcpkg](#vcpkg) | No |
+| Manage deps with Conan | [Conan 2.x](#conan-2x) | No |
+| Ship a container | [Docker](#docker) | No |
+| Hack on Orbit itself | [Build from source](#build-from-source) | No |
+| Produce `.deb` / `.rpm` / `.tar.gz` | [CPack packages](#building-distributable-packages) | No |
+
+> **Version note.** The examples below pin `main`. Release `v1.4.0` predates
+> several correctness fixes — including a CMake defect that corrupted the stack
+> of *every* consuming application — so prefer `main` until the next tag.
+> See [API Stability](#-api-stability).
+
+### Prerequisites
+
+Common to every method that builds from source:
+
+- **C++20 compiler** — GCC 11+, Clang 14+, or MSVC 19.30+
+- **CMake** 3.20+
+- **Linux kernel 5.6+** for the `io_uring` backend (falls back to `epoll`)
+
+Orbit links OpenSSL, zlib, libcurl, nghttp2, and — depending on enabled
+features — ngtcp2, nghttp3, libpq, MariaDB Connector/C, mongo-c-driver,
+hiredis, and liburing. Let vcpkg or Conan supply them rather than installing by
+hand. Full list and licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+---
+
+### One-Command Installer
+
+Builds Orbit in Release mode, installs the library to `/usr/local`, and puts the
+`orbit` CLI on your `PATH`.
+
+**Linux / macOS**
+```bash
+curl -sL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh | bash
+```
+
+**Windows (PowerShell as Administrator)**
+```powershell
+iwr -useb https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.ps1 | iex
+```
+
+The script clones Orbit, bootstraps its own vcpkg, compiles every dependency,
+and installs. Expect 20–40 minutes on first run; a binary cache under
+`~/.cache/vcpkg-binary-cache` makes repeat runs far quicker.
+
+> Piping a script into a shell runs arbitrary code as you, with `sudo` for the
+> install step. Read [install.sh](install.sh) first if that matters to you, or
+> use [FetchContent](#cmake-fetchcontent), which needs no system install at all.
+
+---
+
+### Orbit CLI
+
+Available once the installer has run.
+
+```bash
+orbit new myapp          # scaffold main.cpp, CMakeLists.txt, vcpkg.json
+orbit new myapp --fetch  # scaffold using FetchContent instead of find_package
+cd myapp
+orbit build              # Debug
+orbit build --release    # Release with LTO
+orbit run
+```
+
+`orbit build` picks up `VCPKG_ROOT` if set, otherwise a `vcpkg/` directory beside
+your project, and warns if it finds neither.
+
+---
+
+### CMake FetchContent
+
+The lightest option: no system install, and the version is pinned in your own
+build files. Orbit skips its examples, tests, and install rules when built as a
+subproject, so you get just the library.
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my_app LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+FetchContent_Declare(
+  OrbitFramework
+  GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
+  GIT_TAG        main          # pin a tag once one includes the fixes above
+)
+FetchContent_MakeAvailable(OrbitFramework)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE OrbitFramework::core)
+```
+
+Configure with a vcpkg toolchain so Orbit's own dependencies resolve:
+
+```bash
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build --parallel
+```
+
+Turn off what you do not need to cut build time substantially:
+
+```bash
+cmake -B build -DORBIT_ENABLE_MONGODB=OFF -DORBIT_ENABLE_MARIADB=OFF
+```
+
+---
+
+### System-Wide Install (find_package)
+
+Build and install once, then link from any project.
 
 ```bash
 git clone https://github.com/varuns2903/orbit-framework.git
 cd orbit-framework
-
-# vcpkg provides OpenSSL, ngtcp2, the database drivers, and the rest
 git clone https://github.com/microsoft/vcpkg.git
 ./vcpkg/bootstrap-vcpkg.sh          # bootstrap-vcpkg.bat on Windows
 
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
-      -DCMAKE_BUILD_TYPE=Release
+cmake -B build \
+  -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DORBIT_BUILD_TESTS=OFF \
+  -DORBIT_BUILD_EXAMPLES=OFF
 cmake --build build --parallel
-
-./build/basic_server
+sudo cmake --install build          # honours CMAKE_INSTALL_PREFIX
 ```
 
-> The first configure builds every dependency from source and takes roughly
-> 20-40 minutes. Later builds reuse the vcpkg binary cache.
+Then, in your own project:
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and
-[docs/getting_started.md](docs/getting_started.md) for the Conan and
-`FetchContent` alternatives.
+```cmake
+find_package(OrbitFramework REQUIRED)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE OrbitFramework::core)
+```
+
+If you installed to a custom prefix, point CMake at it:
+
+```bash
+cmake -B build -DCMAKE_PREFIX_PATH=/opt/orbit
+```
+
+The installed package records which subsystems it was built with and asks only
+for those dependencies, so an Orbit built with `-DORBIT_ENABLE_MONGODB=OFF`
+will not demand mongo-c-driver from your project.
+
+> `OrbitFramework::server_core` also resolves, as older examples used that name.
+> `OrbitFramework::core` is canonical.
+
+---
+
+### vcpkg
+
+**Manifest mode** — Orbit's own `vcpkg.json` lists its dependencies, and this is
+how CI builds:
+
+```bash
+git clone https://github.com/microsoft/vcpkg.git
+./vcpkg/bootstrap-vcpkg.sh
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
+```
+
+The dependency set is pinned with `builtin-baseline`, so everyone resolves the
+same versions.
+
+**As a vcpkg port** — a port is drafted under `packaging/vcpkg-port/` but has
+**not** been submitted upstream, so `vcpkg install orbit-framework` does not
+resolve yet. To try the draft as an overlay:
+
+```bash
+vcpkg install orbit-framework --overlay-ports=packaging/vcpkg-port
+```
+
+This path is unvalidated — see [#20](https://github.com/varuns2903/orbit-framework/issues/20).
+
+---
+
+### Conan 2.x
+
+```bash
+conan install . --output-folder=build --build=missing
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+Or export Orbit into your local Conan cache and depend on it by name:
+
+```bash
+conan create .
+```
+
+The recipe reads its version from `CMakeLists.txt`, so it always matches the
+project. Orbit is **not** on ConanCenter — see
+[#6 on the roadmap](docs/ROADMAP.md).
+
+> `ngtcp2` and `nghttp3` have no ConanCenter recipes, so the Conan path builds
+> without HTTP/3 unless you supply them yourself. Use vcpkg if you need QUIC.
+
+---
+
+### Docker
+
+A multi-stage `Dockerfile` builds quictls, nghttp3, and ngtcp2 from source for
+full HTTP/3 support, then ships a slim runtime image.
+
+```bash
+docker build -t orbit-app .
+docker run -p 8080:8080 -p 8443:8443 -p 8443:8443/udp orbit-app
+```
+
+`docker-compose.yml` brings up Orbit alongside PostgreSQL and Redis with
+health-gated startup:
+
+```bash
+docker compose up --build
+```
+
+Use it as a base for your own service by copying your sources in and building
+against the installed framework. The build is long — the QUIC stack is compiled
+from source — so lean on Docker layer caching.
+
+---
+
+### Build From Source
+
+For working on Orbit itself. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full
+workflow.
+
+```bash
+git clone https://github.com/varuns2903/orbit-framework.git
+cd orbit-framework
+git clone https://github.com/microsoft/vcpkg.git
+./vcpkg/bootstrap-vcpkg.sh
+
+cmake -B build \
+  -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
+  -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel
+
+cd build && ctest --output-on-failure
+./benchmark_server
+```
+
+Debug builds enable AddressSanitizer and UndefinedBehaviorSanitizer by default.
+
+**Without vcpkg**, using system packages — you are responsible for satisfying
+every dependency, and distribution packages are often too old for HTTP/3:
+
+```bash
+# Debian / Ubuntu
+sudo apt install build-essential cmake pkg-config libssl-dev zlib1g-dev \
+     libcurl4-openssl-dev libnghttp2-dev liburing-dev libpq-dev \
+     libmariadb-dev libmongoc-dev libhiredis-dev
+
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_HTTP3=OFF
+cmake --build build --parallel
+```
+
+### Build Options
+
+| Option | Default | Effect |
+|--------|---------|--------|
+| `ORBIT_ENABLE_HTTP3` | `ON` | HTTP/3 and QUIC (needs ngtcp2 + nghttp3) |
+| `ORBIT_ENABLE_REDIS` | `ON` | Redis client |
+| `ORBIT_ENABLE_POSTGRES` | `ON` | PostgreSQL client |
+| `ORBIT_ENABLE_MARIADB` | `ON` | MySQL/MariaDB client |
+| `ORBIT_ENABLE_MONGODB` | `ON` | MongoDB client |
+| `ORBIT_ENABLE_GRPC` | `OFF` | gRPC server wrapper |
+| `ORBIT_BUILD_TESTS` | `ON` | Test suite (downloads GoogleTest) |
+| `ORBIT_BUILD_EXAMPLES` | `ON` | Example servers |
+| `ENABLE_SANITIZERS` | `ON` | ASan + UBSan in Debug builds |
+| `ORBIT_ENABLE_COVERAGE` | `OFF` | gcov instrumentation |
+| `BUILD_SHARED_LIBS` | `OFF` | Shared instead of static library |
+| `ENABLE_FUZZING` | `OFF` | libFuzzer targets (requires Clang) |
+
+These flags change the layout of public headers, and they propagate to your
+project automatically through `OrbitFramework::core` — do not set them by hand
+in a consuming project.
+
+### Building Distributable Packages
+
+CPack is configured, so you can produce native packages from a build tree:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DORBIT_BUILD_TESTS=OFF
+cmake --build build --parallel
+cd build && cpack
+```
+
+Generates `.tar.gz` and `.zip` everywhere, plus `.deb` and `.rpm` on Linux,
+a `.dmg` on macOS, and an NSIS installer on Windows. No prebuilt packages are
+attached to GitHub Releases yet, so build your own for now.
 
 ---
 
@@ -209,66 +481,6 @@ events.on_connect([](auto& ws) {
 });
 
 events.attach(app, "/ws/game");
-```
-
----
-
-## 📦 Integration
-
-### System-wide Installation (find_package)
-
-Orbit fully supports standard CMake installation, allowing you to install the framework to your system library paths (`/usr/local/lib` and `/usr/local/include`) so that it is automatically picked up by your C++ linker and loader. This is highly recommended for faster compilation times compared to compiling a header-only library.
-
-```bash
-git clone https://github.com/varuns2903/orbit-framework.git && cd orbit-framework
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake ..
-make -j$(nproc)
-sudo make install
-```
-
-Once installed, include it in your own project's `CMakeLists.txt`:
-
-```cmake
-cmake_minimum_required(VERSION 3.20)
-project(my_app LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(OrbitFramework REQUIRED)
-
-add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE OrbitFramework::core)
-```
-
-### CMake FetchContent (Alternative)
-
-If you prefer building Orbit directly alongside your project:
-
-```cmake
-include(FetchContent)
-FetchContent_Declare(
-  OrbitFramework
-  GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
-  GIT_TAG        v1.4.0
-)
-FetchContent_MakeAvailable(OrbitFramework)
-
-target_link_libraries(my_app PRIVATE OrbitFramework::core)
-```
-
-### vcpkg & Conan
-
-Orbit supports both `vcpkg` (via `vcpkg.json`) and Conan 2.x (via `conanfile.py`). See [Getting Started](docs/getting_started.md) for detailed instructions.
-
-### Orbit CLI
-
-```bash
-./tools/cli/orbit new my_project   # Scaffold a new project
-cd my_project
-orbit build                        # Build with vcpkg
-orbit run                          # Start the server
 ```
 
 ---

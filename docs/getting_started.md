@@ -61,7 +61,7 @@ include(FetchContent)
 FetchContent_Declare(
   OrbitFramework
   GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
-  GIT_TAG        main # Or a specific version tag
+  GIT_TAG        main # Pin a release tag once one carries the current fixes
 )
 FetchContent_MakeAvailable(OrbitFramework)
 
@@ -75,31 +75,38 @@ target_link_libraries(my_app PRIVATE OrbitFramework::core)
 Create a `main.cpp` file:
 
 ```cpp
-#include "server/App.hpp"
-#include "http/HttpResponse.hpp"
+#include <orbit/server/App.hpp>
+#include <orbit/config/Config.hpp>
+#include <orbit/http/json.hpp>
 #include <iostream>
 
-using namespace server;
-using namespace http;
-
 int main() {
-    App app;
+    config::ServerConfig config;
+    config.port = 8080;
 
-    // Define a simple GET route
-    app.get("/", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
-        res->send(HttpResponse().status(HttpStatus::OK).send("Hello from Orbit!"));
+    server::App app(config);
+
+    // Return a string — Orbit builds the HTTP response for you
+    app.get("/", []() -> std::string {
+        return "Hello from Orbit!";
     });
 
-    // Start the server on port 8080
-    app.listen(8080, []() {
-        std::cout << "Server started on port 8080!" << std::endl;
+    // Return JSON
+    app.get("/api/status", []() -> nlohmann::json {
+        return {{"status", "ok"}};
     });
+
+    std::cout << "Server starting on port 8080\n";
+    app.listen();
 
     return 0;
 }
 ```
 
-Compile it and link against `libserver_core.a`. Run it and test:
+Build it against Orbit (see the [Installation section](../README.md#-installation)
+for every available method) and test:
+
 ```bash
 curl http://localhost:8080
+curl http://localhost:8080/api/status
 ```
