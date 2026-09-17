@@ -3,7 +3,7 @@
 #include <orbit/http/HttpResponse.hpp>
 #include <functional>
 #include <string>
-#include <nlohmann/json.hpp>
+#include <orbit/http/json.hpp>
 
 namespace middleware {
 

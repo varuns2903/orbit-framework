@@ -3,7 +3,7 @@
 #include <vector>
 #include <memory>
 #include <coroutine>
-#include <nlohmann/json.hpp>
+#include <orbit/http/json.hpp>
 #include <orbit/database/ResultSet.hpp>
 
 namespace orm {

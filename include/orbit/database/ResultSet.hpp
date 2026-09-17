@@ -5,7 +5,7 @@
 #include <optional>
 #include <memory>
 #include <stdexcept>
-#include <nlohmann/json.hpp>
+#include <orbit/http/json.hpp>
 
 namespace database {
 

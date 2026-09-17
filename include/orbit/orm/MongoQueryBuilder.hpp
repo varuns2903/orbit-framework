@@ -2,7 +2,7 @@
 #include <string>
 #include <memory>
 #include <vector>
-#include <nlohmann/json.hpp>
+#include <orbit/http/json.hpp>
 #include <orbit/database/MongoClient.hpp>
 
 namespace orm {

@@ -1,7 +1,7 @@
 #pragma once
 #include <orbit/server/App.hpp>
 #include <orbit/http/WebSocketConnection.hpp>
-#include <nlohmann/json.hpp>
+#include <orbit/http/json.hpp>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>

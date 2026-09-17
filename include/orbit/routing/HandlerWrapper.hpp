@@ -2,7 +2,7 @@
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/http/ResponseWriter.hpp>
-#include <nlohmann/json.hpp>
+#include <orbit/http/json.hpp>
 #include <type_traits>
 #include <functional>
 #include <memory>
