@@ -363,24 +363,20 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
         enable_testing()
 
-        add_executable(http_server_tests
-            tests/unit/test_parser.cpp
-            tests/unit/test_http.cpp
-            tests/unit/test_router.cpp
-            tests/unit/test_threadpool.cpp
-            tests/unit/test_websocket.cpp
-            tests/unit/test_ssr.cpp
-            tests/unit/test_orm.cpp
-            tests/unit/test_config.cpp
-            tests/unit/test_eventrouter.cpp
-            tests/unit/test_tls.cpp
-            tests/unit/test_database.cpp
-            tests/unit/test_multipart.cpp
-            tests/integration/test_e2e.cpp
-            tests/unit/test_proxy.cpp
-            tests/unit/test_middleware.cpp
-            tests/unit/test_timer.cpp
+        # Collected with CONFIGURE_DEPENDS so a new test file is picked up by the
+        # next build instead of silently never being compiled, which is how
+        # test_http2.cpp and test_websocket_conn.cpp sat outside the build.
+        file(GLOB ORBIT_TEST_SOURCES CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/*.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/*.cpp"
         )
+        if(NOT ORBIT_TEST_SOURCES)
+            message(FATAL_ERROR "ORBIT_BUILD_TESTS is ON but no test sources were found under tests/")
+        endif()
+        list(LENGTH ORBIT_TEST_SOURCES ORBIT_TEST_SOURCE_COUNT)
+        message(STATUS "Orbit: building ${ORBIT_TEST_SOURCE_COUNT} test translation units")
+
+        add_executable(http_server_tests ${ORBIT_TEST_SOURCES})
         target_link_libraries(http_server_tests PRIVATE gtest_main server_core CURL::libcurl)
         include(GoogleTest)
         gtest_discover_tests(http_server_tests)

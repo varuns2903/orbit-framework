@@ -62,7 +62,7 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 - [x] **35. Automated CI/CD**
 - [x] **36. Test Linux, Windows and macOS**
 - [x] **57. Code Coverage Setup (Lcov/Gcovr & CMake Integration)**
-- [x] **37. Unit Testing Suite Expansion (Hit 85-90% Target)**
+- [ ] **37. Unit Testing Suite Expansion (Hit 85-90% Target)** — in progress; the suite covers routing, parsing, middleware, ORM, WebSocket framing, and HTTP/2 header encoding, but is well short of 85-90% line coverage. Run `cmake -DORBIT_ENABLE_COVERAGE=ON` to measure. **Help wanted.**
 - [ ] **38. Integration Testing Suite Expansion**
 - [ ] **39. HTTP/protocol compliance tests**
 - [x] **40. Load Testing & Benchmarking**

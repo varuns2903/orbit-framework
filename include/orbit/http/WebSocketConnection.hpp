@@ -13,6 +13,43 @@ namespace server {
 namespace http {
 namespace websocket {
 
+namespace detail {
+
+/**
+ * @brief A decoded RFC 6455 frame header.
+ */
+struct FrameHeader {
+    bool fin;
+    uint8_t opcode;
+    bool masked;
+    uint64_t payload_length;
+    uint8_t mask_key[4];
+    size_t header_length;
+};
+
+/**
+ * @brief Decodes an RFC 6455 frame header from the front of a buffer.
+ *
+ * Returns false when the buffer does not yet hold the complete header *and*
+ * payload, so the caller can wait for more data. On success, header_length is
+ * the number of bytes preceding the payload, including the extended length and
+ * masking key when present.
+ *
+ * @param buffer The raw bytes received so far.
+ * @param header Populated on success.
+ * @return True if a complete frame is available at the front of the buffer.
+ */
+bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header);
+
+/**
+ * @brief Unmasks a frame payload in place using the frame's masking key.
+ * @param payload The masked payload bytes.
+ * @param mask_key The 4-byte masking key from the frame header.
+ */
+void unmask_payload(std::string& payload, const uint8_t mask_key[4]);
+
+} // namespace detail
+
 /**
  * @brief Represents an active WebSocket connection.
  */
@@ -56,17 +93,6 @@ private:
     
     bool is_closed_{false};
 
-    struct FrameHeader {
-        bool fin;
-        uint8_t opcode;
-        bool masked;
-        uint64_t payload_length;
-        uint8_t mask_key[4];
-        size_t header_length;
-    };
-
-    bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header);
-    
     bool deflate_enabled_{false};
     z_stream inflate_stream_{};
     z_stream deflate_stream_{};

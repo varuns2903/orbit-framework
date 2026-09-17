@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <string_view>
 
 namespace server {
     class Connection;
@@ -19,6 +20,49 @@ namespace server {
 
 namespace http {
 namespace h2 {
+
+namespace detail {
+
+/**
+ * @brief Owns the header name/value strings backing an nghttp2_nv list.
+ *
+ * nghttp2_nv stores borrowed pointers, so every string it references must
+ * outlive the nghttp2_submit_* call that consumes the list. Building the list
+ * through this type keeps that storage alive in one place instead of relying
+ * on incidental lifetimes at the call site.
+ */
+struct HeaderBlock {
+    std::vector<std::string> storage;
+    std::vector<nghttp2_nv> nvs;
+};
+
+/**
+ * @brief Builds the HTTP/2 response header list for a response.
+ *
+ * Emits the mandatory `:status` pseudo-header first, then each response
+ * header with its name lowercased as HTTP/2 requires. Connection-specific
+ * headers that are forbidden in HTTP/2 (RFC 9113 section 8.2.2) are dropped.
+ *
+ * @param response The response whose headers should be encoded.
+ * @return A HeaderBlock owning the encoded names/values and the nv list.
+ */
+HeaderBlock build_response_headers(const http::HttpResponse& response);
+
+/**
+ * @brief Maps an HTTP/2 `:method` pseudo-header value to an HttpMethod.
+ * @param value The `:method` value as received on the wire.
+ * @param out Set to the parsed method on success; untouched on failure.
+ * @return True if the method was recognised.
+ */
+bool parse_method(std::string_view value, http::HttpMethod& out);
+
+/**
+ * @brief True if a header is forbidden in HTTP/2 and must not be forwarded.
+ * @param name The header name, in any case.
+ */
+bool is_connection_specific_header(std::string_view name);
+
+} // namespace detail
 
 /**
  * @brief Manages an HTTP/2 session over a connection.

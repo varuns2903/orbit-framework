@@ -163,7 +163,15 @@ void WebSocketConnection::close() {
     }
 }
 
-bool WebSocketConnection::parse_frame_header(const std::vector<char>& buffer, FrameHeader& header) {
+namespace detail {
+
+void unmask_payload(std::string& payload, const uint8_t mask_key[4]) {
+    for (size_t i = 0; i < payload.size(); ++i) {
+        payload[i] = static_cast<char>(static_cast<uint8_t>(payload[i]) ^ mask_key[i % 4]);
+    }
+}
+
+bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header) {
     if (buffer.size() < 2) return false;
 
     uint8_t byte0 = static_cast<uint8_t>(buffer[0]);
@@ -210,10 +218,12 @@ bool WebSocketConnection::parse_frame_header(const std::vector<char>& buffer, Fr
     return true;
 }
 
+} // namespace detail
+
 void WebSocketConnection::process_raw_data(std::vector<char>& buffer) {
     while (!buffer.empty()) {
-        FrameHeader header;
-        if (!parse_frame_header(buffer, header)) {
+        detail::FrameHeader header;
+        if (!detail::parse_frame_header(buffer, header)) {
             // Need more data
             break;
         }
@@ -234,9 +244,8 @@ void WebSocketConnection::process_raw_data(std::vector<char>& buffer) {
             
             const char* payload_data = buffer.data() + header.header_length;
             if (header.masked) {
-                for (size_t i = 0; i < header.payload_length; ++i) {
-                    payload[i] = static_cast<char>(static_cast<uint8_t>(payload_data[i]) ^ header.mask_key[i % 4]);
-                }
+                payload.assign(payload_data, static_cast<size_t>(header.payload_length));
+                detail::unmask_payload(payload, header.mask_key);
             } else {
                 std::memcpy(&payload[0], payload_data, header.payload_length);
             }

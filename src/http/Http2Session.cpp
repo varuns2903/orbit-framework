@@ -20,8 +20,87 @@ inline ssize_t pread(int fd, void* buf, size_t count, long offset) {
 #undef ERROR
 #endif
 
+#include <cctype>
+
 namespace http {
 namespace h2 {
+
+namespace detail {
+
+bool is_connection_specific_header(std::string_view name) {
+    // RFC 9113 section 8.2.2: connection-specific header fields must not be
+    // used in HTTP/2. An endpoint that receives them must treat the message
+    // as malformed, so we never emit them.
+    static constexpr std::string_view forbidden[] = {
+        "connection", "transfer-encoding", "keep-alive",
+        "proxy-connection", "upgrade"
+    };
+    std::string lowered;
+    lowered.reserve(name.size());
+    for (char c : name) lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    for (std::string_view f : forbidden) {
+        if (lowered == f) return true;
+    }
+    return false;
+}
+
+bool parse_method(std::string_view value, http::HttpMethod& out) {
+    if (value == "GET") { out = http::HttpMethod::GET; return true; }
+    if (value == "POST") { out = http::HttpMethod::POST; return true; }
+    if (value == "PUT") { out = http::HttpMethod::PUT; return true; }
+    if (value == "DELETE") { out = http::HttpMethod::DELETE; return true; }
+    if (value == "PATCH") { out = http::HttpMethod::PATCH; return true; }
+    if (value == "OPTIONS") { out = http::HttpMethod::OPTIONS; return true; }
+    if (value == "HEAD") { out = http::HttpMethod::HEAD; return true; }
+    return false;
+}
+
+HeaderBlock build_response_headers(const http::HttpResponse& response) {
+    HeaderBlock block;
+
+    // Reserve up front so the strings never move: nghttp2_nv borrows pointers
+    // into this storage, and a reallocation would invalidate every entry
+    // already pushed.
+    block.storage.reserve(1 + response.headers.size() * 2);
+    block.nvs.reserve(1 + response.headers.size());
+
+    block.storage.push_back(std::to_string(static_cast<int>(response.status_code)));
+    const std::string& status_str = block.storage.back();
+
+    static constexpr std::string_view kStatus = ":status";
+    block.nvs.push_back({
+        reinterpret_cast<uint8_t*>(const_cast<char*>(kStatus.data())),
+        reinterpret_cast<uint8_t*>(const_cast<char*>(status_str.data())),
+        kStatus.size(),
+        status_str.size(),
+        NGHTTP2_NV_FLAG_NONE
+    });
+
+    for (const auto& [k, v] : response.headers) {
+        if (is_connection_specific_header(k)) continue;
+
+        std::string lower_k;
+        lower_k.reserve(k.size());
+        for (char c : k) lower_k.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+
+        block.storage.push_back(std::move(lower_k));
+        const std::string& name = block.storage.back();
+        block.storage.push_back(v);
+        const std::string& value = block.storage.back();
+
+        block.nvs.push_back({
+            reinterpret_cast<uint8_t*>(const_cast<char*>(name.data())),
+            reinterpret_cast<uint8_t*>(const_cast<char*>(value.data())),
+            name.size(),
+            value.size(),
+            NGHTTP2_NV_FLAG_NONE
+        });
+    }
+
+    return block;
+}
+
+} // namespace detail
 
 // ---------------- Http2Session ----------------
 
@@ -94,18 +173,13 @@ int Http2Session::on_header(nghttp2_session* session, const nghttp2_frame* frame
     auto& ctx = *it->second;
     auto& req = ctx.request;
     if (key == ":method") {
-        if (val == "GET") req.method = http::HttpMethod::GET;
-        else if (val == "POST") req.method = http::HttpMethod::POST;
-        else if (val == "PUT") req.method = http::HttpMethod::PUT;
-        else if (val == "DELETE") req.method = http::HttpMethod::DELETE;
-        else if (val == "PATCH") req.method = http::HttpMethod::PATCH;
-        else if (val == "OPTIONS") req.method = http::HttpMethod::OPTIONS;
+        detail::parse_method(val, req.method);
     } else if (key == ":path") {
         ctx.backing_uri = val;
         req.uri = ctx.backing_uri;
     } else if (key == ":authority") {
         ctx.backing_headers.push_back({"Host", val});
-    } else if (key[0] != ':') {
+    } else if (!key.empty() && key[0] != ':') {
         ctx.backing_headers.push_back({key, val});
     }
     return 0;
@@ -222,24 +296,10 @@ void Http2Session::submit_response(int32_t stream_id, const http::HttpResponse& 
     if (it == streams_.end()) return;
     auto ctx = it->second;
 
-    std::vector<nghttp2_nv> nvs;
-    
-    std::string status_str = std::to_string(static_cast<int>(response.status_code));
-    nvs.push_back({(uint8_t*)":status", (uint8_t*)status_str.c_str(), 7, status_str.length(), NGHTTP2_NV_FLAG_NONE});
-    
-    for (const auto& [k, v] : response.headers) {
-        if (k == "Connection" || k == "Transfer-Encoding" || k == "Keep-Alive") continue; // Illegal in H2
-        std::string lower_k = k;
-        for (char& c : lower_k) c = static_cast<char>(std::tolower(c));
-        
-        nvs.push_back({
-            (uint8_t*)lower_k.c_str(),
-            (uint8_t*)v.c_str(),
-            lower_k.length(),
-            v.length(),
-            NGHTTP2_NV_FLAG_NONE
-        });
-    }
+    // The header block owns the encoded names and values; it must stay alive
+    // until nghttp2_submit_response has copied them out.
+    detail::HeaderBlock headers = detail::build_response_headers(response);
+    std::vector<nghttp2_nv>& nvs = headers.nvs;
 
     if (has_body) {
         nghttp2_data_provider provider;
