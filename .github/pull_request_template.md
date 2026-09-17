@@ -27,7 +27,7 @@ include sanitizer results.
 - [ ] I updated the relevant guide under `docs/`
 - [ ] I added a `CHANGELOG.md` entry if this is user-visible
 - [ ] My commits follow [Conventional Commits](https://www.conventionalcommits.org/)
-- [ ] I read [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)
+- [ ] I read [CONTRIBUTING.md](https://github.com/varuns2903/orbit-framework/blob/main/CONTRIBUTING.md)
 
 ## Breaking changes
 

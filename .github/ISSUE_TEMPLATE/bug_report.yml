@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for filing a report. Please do **not** use this form for security
-        vulnerabilities — see [SECURITY.md](../blob/main/SECURITY.md) instead.
+        vulnerabilities — see [SECURITY.md](https://github.com/varuns2903/orbit-framework/blob/main/SECURITY.md) instead.
 
   - type: textarea
     id: description

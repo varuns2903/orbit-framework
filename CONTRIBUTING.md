@@ -19,7 +19,7 @@ this guide covers everything you need to get a patch merged.
 ## Project status
 
 Orbit is young and actively developed. The public API is **not frozen** — see
-the API stability note in the [README](README.md#api-stability). Breaking
+the API stability note in the [README](README.md#-api-stability). Breaking
 changes are possible in minor releases and are documented in
 [CHANGELOG.md](CHANGELOG.md).
 

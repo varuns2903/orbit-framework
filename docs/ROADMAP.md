@@ -70,5 +70,5 @@ This document outlines the ultimate goals and roadmap for the Orbit Framework to
 
 ## 6. Maintenance & Lifespan
 - [x] **30. Use semantic versioning**
-- [ ] **31. Maintain API/ABI compatibility where possible**
+- [ ] **31. Maintain API/ABI compatibility where possible** — not yet guaranteed. The README's [API Stability](../README.md#-api-stability) section states this explicitly so that semver 1.x is not read as a stability promise Orbit does not currently make.
 - [x] **34. Maintain a detailed changelog**

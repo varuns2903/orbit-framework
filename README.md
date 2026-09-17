@@ -321,6 +321,31 @@ cmake -B build \
 
 ---
 
+## 🔒 API Stability
+
+Orbit is versioned with [Semantic Versioning](https://semver.org/), but it has
+not yet reached a frozen public API. **Treat 1.x as pre-stable.**
+
+- **The API may change in minor releases.** Roadmap item 31, *maintain API/ABI
+  compatibility*, is not yet met. Every breaking change is documented in
+  [CHANGELOG.md](CHANGELOG.md), but a minor bump is not a guarantee of a
+  drop-in upgrade.
+- **There is no ABI stability guarantee.** Rebuild your application against a
+  new Orbit release rather than swapping the shared library underneath it.
+- **Pin your version.** Use an exact tag with `FetchContent` or your package
+  manager, and upgrade deliberately after reading the changelog.
+- **Subsystem maturity varies.** HTTP/1.1, routing, middleware, and WebSockets
+  are the best exercised. HTTP/2, HTTP/3, the gRPC wrapper, and parts of the
+  ORM have thinner test coverage — see [docs/ROADMAP.md](docs/ROADMAP.md) for
+  the honest state of each area and
+  [docs/loopholes_and_drawbacks.md](docs/loopholes_and_drawbacks.md) for known
+  architectural caveats.
+
+If you are evaluating Orbit for production, read
+[docs/loopholes_and_drawbacks.md](docs/loopholes_and_drawbacks.md) first.
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome — and you don't need to write C++ to help. Test
