@@ -21,21 +21,26 @@ def create_project(project_name, use_fetch):
     
     # 1. main.cpp
     main_cpp = """#include <orbit/server/App.hpp>
-#include <orbit/http/HttpResponse.hpp>
+#include <orbit/config/Config.hpp>
+#include <orbit/http/json.hpp>
 #include <iostream>
 
-using namespace orbit;
-
 int main() {
-    server::App app;
+    config::ServerConfig config;
+    config.port = 3000;
 
-    app.get("/", [](const http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> res) {
-        res->send(http::HttpResponse().status(http::HttpStatus::OK).send("Hello from Orbit Framework!"));
+    server::App app(config);
+
+    app.get("/", []() -> std::string {
+        return "Hello from Orbit Framework!";
     });
 
-    app.listen(3000, []() {
-        std::cout << "🚀 Orbit Server is running on http://localhost:3000" << std::endl;
+    app.get("/api/status", []() -> nlohmann::json {
+        return {{"status", "ok"}};
     });
+
+    std::cout << "🚀 Orbit Server is running on http://localhost:3000" << std::endl;
+    app.listen();
 
     return 0;
 }
@@ -66,7 +71,7 @@ FetchContent_MakeAvailable(OrbitFramework)
 
     cmake_lists += f"""
 add_executable({project_name} main.cpp)
-target_link_libraries({project_name} PRIVATE OrbitFramework::server_core)
+target_link_libraries({project_name} PRIVATE OrbitFramework::core)
 """
     with open(os.path.join(project_name, "CMakeLists.txt"), "w") as f:
         f.write(cmake_lists)

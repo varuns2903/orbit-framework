@@ -51,41 +51,55 @@ iwr -useb https://raw.githubusercontent.com/varuns2903/orbit-framework/main/inst
 
 This will automatically download the framework, configure `vcpkg`, compile the core library in Release mode, and install the `orbit` CLI to your system path.
 
-### 2. Create a Server
+### 2. Create a Project
 
-Create `main.cpp`:
+```bash
+orbit new myapp
+cd myapp
+```
+
+This scaffolds `main.cpp`, a `CMakeLists.txt` wired to Orbit, and a `vcpkg.json`
+listing the dependencies.
+
+### 3. Write Your Server
+
+Edit `main.cpp`:
 
 ```cpp
 #include <orbit/server/App.hpp>
+#include <orbit/config/Config.hpp>
+#include <orbit/http/json.hpp>
 
 int main() {
-    server::App app;
+    config::ServerConfig config;
+    config.port = 8080;
+
+    server::App app(config);
 
     // Return a string — Orbit handles the HTTP response automatically
     app.get("/", []() -> std::string {
         return "Hello from Orbit! 🚀";
     });
 
-    // Return JSON from a struct
+    // Return JSON
     app.get("/api/status", []() -> nlohmann::json {
         return {{"status", "ok"}, {"version", "1.4.0"}};
     });
 
     // Dynamic route parameters
-    app.get("/users/:id", [](http::HttpRequest& req) -> nlohmann::json {
-        return {{"user_id", req.params["id"]}};
+    app.get("/users/:id", [](const http::HttpRequest& req) -> nlohmann::json {
+        return {{"user_id", req.params.at("id")}};
     });
 
-    app.listen();  // Default port: 8080
+    app.listen();
 }
 ```
 
-### 3. Build & Run
+### 4. Build & Run
 
 ```bash
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
-cmake --build build --parallel
-./build/basic_server
+orbit build --release
+orbit run
 ```
 
 ```bash
@@ -98,6 +112,35 @@ $ curl http://localhost:8080/api/status
 $ curl http://localhost:8080/users/42
 {"user_id":"42"}
 ```
+
+---
+
+## 🔧 Building Orbit From Source
+
+If you would rather build the framework itself — to contribute, or to run the
+examples — clone it along with `vcpkg`, which supplies the dependencies:
+
+```bash
+git clone https://github.com/varuns2903/orbit-framework.git
+cd orbit-framework
+
+# vcpkg provides OpenSSL, ngtcp2, the database drivers, and the rest
+git clone https://github.com/microsoft/vcpkg.git
+./vcpkg/bootstrap-vcpkg.sh          # bootstrap-vcpkg.bat on Windows
+
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
+      -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+
+./build/basic_server
+```
+
+> The first configure builds every dependency from source and takes roughly
+> 20-40 minutes. Later builds reuse the vcpkg binary cache.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and
+[docs/getting_started.md](docs/getting_started.md) for the Conan and
+`FetchContent` alternatives.
 
 ---
 
@@ -187,13 +230,16 @@ sudo make install
 Once installed, include it in your own project's `CMakeLists.txt`:
 
 ```cmake
-cmake_minimum_required(VERSION 3.15)
-project(my_app)
+cmake_minimum_required(VERSION 3.20)
+project(my_app LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OrbitFramework REQUIRED)
 
 add_executable(my_app main.cpp)
-target_link_libraries(my_app PRIVATE OrbitFramework::server_core)
+target_link_libraries(my_app PRIVATE OrbitFramework::core)
 ```
 
 ### CMake FetchContent (Alternative)
@@ -209,7 +255,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(OrbitFramework)
 
-target_link_libraries(my_app PRIVATE OrbitFramework::server_core)
+target_link_libraries(my_app PRIVATE OrbitFramework::core)
 ```
 
 ### vcpkg & Conan

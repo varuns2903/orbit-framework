@@ -191,7 +191,13 @@ if(BUILD_SHARED_LIBS)
     set_target_properties(server_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 endif()
 
+# Consumers see the same target name whether they arrive via find_package or
+# FetchContent. EXPORT_NAME makes the installed export OrbitFramework::core to
+# match the alias below; OrbitFramework::server_core stays as a compatibility
+# spelling because earlier README examples used it.
+set_target_properties(server_core PROPERTIES EXPORT_NAME core)
 add_library(OrbitFramework::core ALIAS server_core)
+add_library(OrbitFramework::server_core ALIAS server_core)
 
 target_link_libraries(server_core
     PUBLIC
@@ -199,8 +205,13 @@ target_link_libraries(server_core
         OpenSSL::Crypto
         ZLIB::ZLIB
         PkgConfig::NGHTTP2
-        inja
         CURL::libcurl
+    PRIVATE
+        # inja is a FetchContent target used only by src/http/HttpResponse.cpp
+        # and appears in no public header. Linking it PUBLIC put pantor::inja in
+        # the installed export, where consumers cannot resolve it; BUILD_INTERFACE
+        # keeps it out of the exported link interface entirely.
+        $<BUILD_INTERFACE:inja>
 )
 
 if(ORBIT_ENABLE_POSTGRES)
