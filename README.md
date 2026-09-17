@@ -78,7 +78,7 @@ int main() {
 
     // Return JSON
     app.get("/api/status", []() -> nlohmann::json {
-        return {{"status", "ok"}, {"version", "1.4.0"}};
+        return {{"status", "ok"}, {"version", "1.5.0"}};
     });
 
     // Dynamic route parameters
@@ -102,7 +102,7 @@ $ curl http://localhost:8080/
 Hello from Orbit! 🚀
 
 $ curl http://localhost:8080/api/status
-{"status":"ok","version":"1.4.0"}
+{"status":"ok","version":"1.5.0"}
 
 $ curl http://localhost:8080/users/42
 {"user_id":"42"}
@@ -126,10 +126,10 @@ Orbit can be consumed in several ways. Pick by what you are doing:
 | Hack on Orbit itself | [Build from source](#build-from-source) | No |
 | Produce `.deb` / `.rpm` / `.tar.gz` | [CPack packages](#building-distributable-packages) | No |
 
-> **Version note.** The examples below pin `main`. Release `v1.4.0` predates
-> several correctness fixes — including a CMake defect that corrupted the stack
-> of *every* consuming application — so prefer `main` until the next tag.
-> See [API Stability](#-api-stability).
+> **Version note.** Use `v1.5.0` or later. `v1.4.0` and earlier contain a CMake
+> defect that corrupted the stack of *every* consuming application, along with
+> an HTTP/2 use-after-free and an HTTP/1.0 connection hang. See
+> [CHANGELOG.md](CHANGELOG.md) and [API Stability](#-api-stability).
 
 ### Prerequisites
 
@@ -206,7 +206,7 @@ include(FetchContent)
 FetchContent_Declare(
   OrbitFramework
   GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
-  GIT_TAG        main          # pin a tag once one includes the fixes above
+  GIT_TAG        v1.5.0        # pin a release; avoid v1.4.0 and earlier
 )
 FetchContent_MakeAvailable(OrbitFramework)
 

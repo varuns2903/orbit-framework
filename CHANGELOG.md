@@ -5,6 +5,88 @@ All notable changes to the Orbit Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.0] - 2026-09-17
+
+A correctness and integration release. Three bugs fixed here made Orbit
+unreliable in ways that only appeared once you tried to *use* it from another
+project, so **upgrading from v1.4.0 or earlier is strongly recommended**.
+
+### Fixed
+
+- **Consuming applications corrupted their own stack.** `App.hpp` declares two
+  members under `#ifdef ORBIT_ENABLE_HTTP3`, but the macro was set with CMake's
+  directory-scoped `add_compile_definitions()`, so it never reached anything
+  linking Orbit. Consumers therefore compiled `App` 16 bytes smaller than the
+  constructor in `libserver_core.a` was built to fill, and `App`'s constructor
+  wrote past the end of the caller's object — reported as
+  `*** stack smashing detected ***` on shutdown. This affected every
+  integration path: FetchContent, `find_package`, vcpkg and Conan. Feature
+  macros are now `PUBLIC` on the target and propagate correctly.
+- **HTTP/2 response headers were a use-after-free.** Each `nghttp2_nv` name
+  borrowed a pointer into a `std::string` scoped to the loop that built it, so
+  every name dangled by the time nghttp2 read the list. It rarely crashed —
+  the freed block is immediately recycled — so header names went out as empty
+  or garbage instead.
+- **HTTP/1.0 clients hung until they timed out.** RFC 9112 section 9.3 makes
+  HTTP/1.0 close by default and persist only on an explicit `keep-alive`;
+  Orbit applied the HTTP/1.1 rule to both and held the socket open. Affected
+  health checks, older proxies and load balancers, and benchmarking tools.
+  The `Connection` header is now parsed as the comma-separated list of
+  case-insensitive tokens it is, so `Connection: Close` and
+  `Connection: TE, close` are also honoured.
+- Public headers included `<nlohmann/json.hpp>`, which resolved to the copy
+  bundled inside inja (3.10.5) rather than the 3.11.3 copy Orbit vendors.
+  Both use the same include guard, so different translation units could see
+  different definitions of `nlohmann::json`. All Orbit headers now use
+  `<orbit/http/json.hpp>`.
+- `find_package(OrbitFramework)` failed on any machine where MariaDB, MongoDB
+  or hiredis came from the system rather than vcpkg, and demanded
+  dependencies for subsystems the build had disabled. The installed config now
+  records which subsystems were enabled and mirrors the same lookup fallbacks
+  the build uses.
+- The installed CMake package exported `pantor::inja`, a FetchContent target
+  that is never installed and which no consumer could resolve.
+- `find_package` and FetchContent exported different target names. Both now
+  provide `OrbitFramework::core`, with `OrbitFramework::server_core` kept as a
+  compatibility alias.
+- Examples were built unconditionally, so configuring with a subsystem
+  disabled failed at link. Each example is now guarded by the subsystems it
+  uses.
+- CI could not resolve dependencies once upstream vcpkg moved past the pinned
+  `builtin-baseline`, because the workflows shallow-fetched `master` rather
+  than the pinned commit.
+- `conanfile.py` reported version `0.1.0` and exported no sources. It now
+  reads the version from `CMakeLists.txt` and exports the tree it needs.
+
+### Added
+
+- `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue forms and a
+  pull request template.
+- `THIRD_PARTY_NOTICES.md` covering bundled, fetched and linked dependencies,
+  including guidance for projects that already use nlohmann/json.
+- `docs/coverage.md` and a Code Coverage workflow publishing a measured figure
+  on every push — currently **27.1% lines** across 109 tests.
+- An API Stability section stating that 1.x is pre-stable and that minor
+  releases may break source compatibility.
+- A comprehensive Installation section documenting every supported route:
+  installer, CLI, FetchContent, `find_package`, vcpkg, Conan, Docker, building
+  from source, and CPack packaging.
+- 45 new tests covering WebSocket frame decoding, HTTP/2 header encoding,
+  HTTP/2 method parsing, and `Connection` header option parsing. The suite
+  grows from 64 to 109.
+
+### Changed
+
+- Test sources are collected with `file(GLOB CONFIGURE_DEPENDS)`. Two test
+  files had never been listed in `add_executable` and were silently never
+  compiled.
+- Roadmap entries claiming vcpkg/Conan publication, penetration testing and
+  85-90% coverage are unticked and describe what actually works today.
+- Performance claims are backed by measurement — median **61,419 req/s**
+  plaintext on the documented hardware — with methodology and limits stated in
+  `docs/benchmarks.md`.
+- GitHub Actions updated off the deprecated Node 20 runtime.
+
 ## [v1.4.0] - 2026-09-02
 
 ### Added
