@@ -1,6 +1,6 @@
 {
   "name": "orbit-framework",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "A blazing fast, asynchronous, and middleware-driven C++20 HTTP/3 web framework",
   "homepage": "https://github.com/varuns2903/orbit-framework",
   "license": "MIT",

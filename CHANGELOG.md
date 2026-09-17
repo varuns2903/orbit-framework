@@ -5,6 +5,50 @@ All notable changes to the Orbit Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.1] - 2026-09-17
+
+Packaging-only release. No library code changed — the only reason to upgrade is
+if you build the Docker image or consume the drafted vcpkg port.
+
+### Fixed
+
+- **`docker build .` could not complete.** The builder stage never installed a
+  libcurl development package, while `CMakeLists.txt` calls
+  `find_package(CURL REQUIRED)`:
+
+  ```
+  CMake Error: Could NOT find CURL (missing: CURL_LIBRARY CURL_INCLUDE_DIR)
+  ```
+
+  With that fixed the build reached the runtime stage and failed again, because
+  nghttp3 and ngtcp2 install to the multiarch library directory on
+  Debian-derived distributions rather than `/usr/lib`, so the `COPY` globs
+  matched nothing:
+
+  ```
+  COPY failed: no source files were specified
+  ```
+
+  The corrected paths also pick up `libngtcp2_crypto_quictls`, which is needed
+  at runtime and which the old globs missed as well.
+- **The Docker build context was 3.1 GB.** `.dockerignore` covered four
+  directories and missed `vcpkg/`, `vcpkg_installed/`, `build_cov/` and the
+  other build trees, all of which were uploaded and baked into an image layer.
+  Rewritten by category to match `.gitignore`, with an explicit block for
+  credentials so key material cannot be captured in an image. The context is
+  now 6.9 MB.
+- The drafted vcpkg port's `SHA512` referred to the v1.4.0 archive while its
+  manifest declared a newer version, so the port could not have verified its
+  download.
+
+### Changed
+
+- The image no longer builds the test suite. It fetched GoogleTest over the
+  network at configure time and compiled 18 translation units that nothing in
+  the runtime stage uses.
+- Removed the obsolete `version` key from `docker-compose.yml`, which Compose
+  V2 warns about.
+
 ## [v1.5.0] - 2026-09-17
 
 A correctness and integration release. Three bugs fixed here made Orbit

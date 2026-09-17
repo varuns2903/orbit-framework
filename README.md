@@ -78,7 +78,7 @@ int main() {
 
     // Return JSON
     app.get("/api/status", []() -> nlohmann::json {
-        return {{"status", "ok"}, {"version", "1.5.0"}};
+        return {{"status", "ok"}, {"version", "1.5.1"}};
     });
 
     // Dynamic route parameters
@@ -102,7 +102,7 @@ $ curl http://localhost:8080/
 Hello from Orbit! 🚀
 
 $ curl http://localhost:8080/api/status
-{"status":"ok","version":"1.5.0"}
+{"status":"ok","version":"1.5.1"}
 
 $ curl http://localhost:8080/users/42
 {"user_id":"42"}
@@ -126,7 +126,7 @@ Orbit can be consumed in several ways. Pick by what you are doing:
 | Hack on Orbit itself | [Build from source](#build-from-source) | No |
 | Produce `.deb` / `.rpm` / `.tar.gz` | [CPack packages](#building-distributable-packages) | No |
 
-> **Version note.** Use `v1.5.0` or later. `v1.4.0` and earlier contain a CMake
+> **Version note.** Use `v1.5.1` or later. `v1.4.0` and earlier contain a CMake
 > defect that corrupted the stack of *every* consuming application, along with
 > an HTTP/2 use-after-free and an HTTP/1.0 connection hang. See
 > [CHANGELOG.md](CHANGELOG.md) and [API Stability](#-api-stability).
@@ -206,7 +206,7 @@ include(FetchContent)
 FetchContent_Declare(
   OrbitFramework
   GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
-  GIT_TAG        v1.5.0        # pin a release; avoid v1.4.0 and earlier
+  GIT_TAG        v1.5.1        # pin a release; avoid v1.4.0 and earlier
 )
 FetchContent_MakeAvailable(OrbitFramework)
 
