@@ -23,7 +23,7 @@ and [CONTRIBUTING.md](../CONTRIBUTING.md).
 - [x] **43. Avoid forcing unused features/dependencies on users**
 
 ## 2. Platform & Modularity
-- [x] **8. Make features modular and optional** — the library is modular; the examples are not yet guarded by the same flags, see [#13](https://github.com/varuns2903/orbit-framework/issues/13).
+- [x] **8. Make features modular and optional** — both the library and the examples honour the `ORBIT_ENABLE_*` flags; disabling a subsystem builds fewer examples rather than failing to link.
 - [x] **19. Support Linux, Windows, and macOS** 
 - [x] **9. HTTP/1.1**
 - [x] **10. HTTP/2**

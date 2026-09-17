@@ -330,35 +330,44 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     # Examples
     option(ORBIT_BUILD_EXAMPLES "Build example applications" ON)
     if(ORBIT_BUILD_EXAMPLES)
-        add_executable(basic_server examples/basic_server.cpp)
-        target_link_libraries(basic_server PRIVATE server_core)
+        # Each example is registered through this helper with the list of
+        # subsystems its sources actually use. Examples were previously added
+        # unconditionally, so disabling a subsystem still compiled an example
+        # against headers whose implementation had been left out of
+        # SERVER_SOURCES, and the build failed at link time with undefined
+        # references. Configuring with a feature off should simply build fewer
+        # examples.
+        function(orbit_add_example name)
+            foreach(feature IN LISTS ARGN)
+                if(NOT ${feature})
+                    message(STATUS "Orbit: skipping example ${name} (requires ${feature})")
+                    return()
+                endif()
+            endforeach()
+            add_executable(${name} examples/${name}.cpp)
+            target_link_libraries(${name} PRIVATE server_core)
+        endfunction()
 
-        add_executable(rest_api examples/rest_api.cpp)
-        target_link_libraries(rest_api PRIVATE server_core)
+        # No optional subsystems: core HTTP, routing, WebSockets, templating.
+        orbit_add_example(benchmark_server)
+        orbit_add_example(chat_server)
+        orbit_add_example(fastapi_server)
+        orbit_add_example(graphql_server)
+        orbit_add_example(websocket_event_server)
 
-        add_executable(chat_server examples/chat_server.cpp)
-        target_link_libraries(chat_server PRIVATE server_core)
+        # Database-backed examples.
+        orbit_add_example(database_server ORBIT_ENABLE_REDIS)
+        orbit_add_example(rest_api ORBIT_ENABLE_POSTGRES)
+        orbit_add_example(orm_server ORBIT_ENABLE_POSTGRES)
+        orbit_add_example(migration_server ORBIT_ENABLE_POSTGRES)
 
-        add_executable(graphql_server examples/graphql_server.cpp)
-        target_link_libraries(graphql_server PRIVATE server_core)
-
-        add_executable(database_server examples/database_server.cpp)
-        target_link_libraries(database_server PRIVATE server_core)
-
-        add_executable(benchmark_server examples/benchmark_server.cpp)
-        target_link_libraries(benchmark_server PRIVATE server_core)
-
-        add_executable(migration_server examples/migration_server.cpp)
-        target_link_libraries(migration_server PRIVATE server_core)
-
-        add_executable(orm_server examples/orm_server.cpp)
-        target_link_libraries(orm_server PRIVATE server_core)
-
-        add_executable(fastapi_server examples/fastapi_server.cpp)
-        target_link_libraries(fastapi_server PRIVATE server_core)
-
-        add_executable(websocket_event_server examples/websocket_event_server.cpp)
-        target_link_libraries(websocket_event_server PRIVATE server_core)
+        # basic_server is the kitchen-sink example and touches every client.
+        orbit_add_example(basic_server
+            ORBIT_ENABLE_REDIS
+            ORBIT_ENABLE_POSTGRES
+            ORBIT_ENABLE_MARIADB
+            ORBIT_ENABLE_MONGODB
+        )
     endif()
 
     # Testing Setup (GoogleTest via FetchContent)
