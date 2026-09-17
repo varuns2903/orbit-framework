@@ -277,7 +277,17 @@ cmake -B build \
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read the existing codebase, ensure CI passes on all platforms, and submit a PR.
+Contributions are welcome — and you don't need to write C++ to help. Test
+coverage, documentation, examples, and platform testing are all high-impact
+right now.
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for build setup, coding standards, and the PR process
+- Browse [good first issues](https://github.com/varuns2903/orbit-framework/labels/good%20first%20issue) for a scoped starting point
+- See [docs/ROADMAP.md](docs/ROADMAP.md) for what's planned and what's unclaimed
+- All participation is governed by our [Code of Conduct](CODE_OF_CONDUCT.md)
+
+Found a security issue? **Do not open a public issue** — follow
+[SECURITY.md](SECURITY.md).
 
 ## 📄 License
 

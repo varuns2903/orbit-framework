@@ -1,0 +1,115 @@
+name: Bug Report
+description: Report something in Orbit that does not work as documented
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a report. Please do **not** use this form for security
+        vulnerabilities — see [SECURITY.md](../blob/main/SECURITY.md) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        A minimal `main.cpp` plus the request that triggers it. The smaller the
+        repro, the faster this gets fixed.
+      render: cpp
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Orbit version
+      description: Release tag (e.g. v1.4.0) or commit hash
+      placeholder: v1.4.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os_detail
+    attributes:
+      label: OS and kernel version
+      placeholder: "Ubuntu 24.04, kernel 6.8.0"
+    validations:
+      required: true
+
+  - type: input
+    id: compiler
+    attributes:
+      label: Compiler and version
+      placeholder: "GCC 13.2 / Clang 18 / MSVC 19.40"
+    validations:
+      required: true
+
+  - type: textarea
+    id: cmake
+    attributes:
+      label: CMake configure command
+      description: The full command, including any ORBIT_ENABLE_* options
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Which subsystem is involved?
+      multiple: true
+      options:
+        - HTTP/1.1
+        - HTTP/2
+        - HTTP/3 / QUIC
+        - WebSockets
+        - Routing
+        - Middleware
+        - Database / ORM
+        - Event loop (io_uring / epoll / kqueue / IOCP)
+        - TLS
+        - Build system / packaging
+        - CLI
+        - Other / not sure
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, stack trace, or sanitizer output
+      description: >
+        If the server crashed, a backtrace or ASan/UBSan report is enormously
+        helpful. Build with `-DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON`.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for a duplicate
+          required: true
+        - label: I am reporting against the latest release or `main`
+          required: true
+        - label: This is not a security vulnerability
+          required: true

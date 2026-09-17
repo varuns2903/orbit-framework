@@ -1,0 +1,59 @@
+name: Feature Request
+description: Suggest a capability or improvement for Orbit
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [docs/ROADMAP.md](../blob/main/docs/ROADMAP.md) first — the idea may
+        already be planned, in which case comment on the roadmap item instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: >
+        Describe the situation you hit, not the solution you have in mind. What
+        were you trying to build, and where did Orbit get in the way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Orbit do? A sketch of the API you would want helps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, or how other frameworks handle this.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - HTTP / protocols
+        - WebSockets
+        - Routing
+        - Middleware
+        - Database / ORM
+        - Event loop / performance
+        - Build system / packaging
+        - CLI / developer experience
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Would you be willing to implement this?
+      options:
+        - label: I would be willing to open a pull request for this

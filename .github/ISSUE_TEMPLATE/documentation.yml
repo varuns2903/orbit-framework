@@ -1,0 +1,26 @@
+name: Documentation Issue
+description: Report something unclear, missing, or wrong in the docs
+title: "[Docs]: "
+labels: ["documentation", "good first issue"]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Where?
+      description: File under `docs/`, a README section, or a docs site URL
+      placeholder: docs/websockets.md, "EventRouter" section
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested correction
+      description: If you already know the right answer, paste it here.
