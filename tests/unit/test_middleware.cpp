@@ -3,6 +3,7 @@
 #include <orbit/middleware/JwtAuth.hpp>
 #include <orbit/middleware/Compress.hpp>
 #include <orbit/middleware/RateLimiter.hpp>
+#include <orbit/middleware/Csrf.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/http/ResponseWriter.hpp>
@@ -75,4 +76,37 @@ TEST(MiddlewareTest, RateLimiterAllowsRequests) {
     // Third request (should be blocked)
     EXPECT_FALSE(m(req, writer));
     EXPECT_EQ(writer->last_response.status_code, HttpStatus::TooManyRequests);
+}
+
+// Csrf used to store views of local strings in req.headers; reading the
+// header after the middleware returned read freed memory (caught by ASan).
+TEST(MiddlewareTest, CsrfInjectedHeaderOutlivesMiddleware) {
+    auto m = csrf_protection();
+    auto writer = std::make_shared<MiddlewareMockResponseWriter>();
+
+    HttpRequest fresh;
+    fresh.method = HttpMethod::GET;
+    ASSERT_TRUE(m(fresh, writer));
+    std::string injected(fresh.headers["X-CSRF-Token"]);
+    EXPECT_FALSE(injected.empty());
+
+    HttpRequest returning;
+    returning.method = HttpMethod::GET;
+    returning.cookies["csrf_token"] = "existing-token-value-from-cookie";
+    ASSERT_TRUE(m(returning, writer));
+    EXPECT_EQ(returning.headers["X-CSRF-Token"], "existing-token-value-from-cookie");
+}
+
+TEST(HttpRequestTest, SetHeaderOwnsNameAndValue) {
+    HttpRequest req;
+    {
+        std::string name = "X-Temporary-Header-Name";
+        std::string value = "a value long enough to live on the heap, not in SSO";
+        req.set_header(name, value);
+        for (int i = 0; i < 100; ++i) req.set_header("X-" + std::to_string(i), std::to_string(i));
+    }
+    EXPECT_EQ(req.headers["x-temporary-header-name"], "a value long enough to live on the heap, not in SSO");
+    EXPECT_EQ(req.headers["X-0"], "0");
+    req.set_header("x-0", "replaced");
+    EXPECT_EQ(req.headers["X-0"], "replaced");
 }
