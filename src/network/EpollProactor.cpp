@@ -1,4 +1,5 @@
 #include <orbit/network/EpollProactor.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <stdexcept>
 #include <unistd.h>
 #include <iostream>
@@ -33,7 +34,7 @@ void EpollProactor::update_epoll(Context& ctx) {
     if (!ctx.tracked && events != EPOLLONESHOT) {
         ctx.tracked = true;
         if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, ctx.fd, &ev) == -1) {
-            std::cerr << "epoll_ctl ADD failed for fd " << ctx.fd << std::endl;
+            LOG_ERROR("epoll_ctl ADD failed for fd " << ctx.fd);
         }
     } else if (ctx.tracked) {
         if (events == EPOLLONESHOT) {
@@ -43,7 +44,7 @@ void EpollProactor::update_epoll(Context& ctx) {
         } else {
             // Update
             if (epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, ctx.fd, &ev) == -1) {
-                std::cerr << "epoll_ctl MOD failed for fd " << ctx.fd << std::endl;
+                LOG_ERROR("epoll_ctl MOD failed for fd " << ctx.fd);
             }
         }
     }

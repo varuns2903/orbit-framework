@@ -1,4 +1,5 @@
 #include <orbit/server/QuicHttp3Session.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <orbit/http/HttpResponse.hpp>
 
 #include <orbit/server/QuicConnection.hpp>
@@ -36,7 +37,7 @@ bool QuicHttp3Session::init() {
 
     int rv = nghttp3_conn_server_new(&httpconn_, &callbacks, &settings, nullptr, this);
     if (rv != 0) {
-        std::cerr << "nghttp3_conn_server_new failed: " << nghttp3_strerror(rv) << "\n";
+        LOG_ERROR("nghttp3_conn_server_new failed: " << nghttp3_strerror(rv));
         return false;
     }
     
@@ -52,7 +53,7 @@ int QuicHttp3Session::process_stream_data(int64_t stream_id, const uint8_t* data
     
     int rv = nghttp3_conn_read_stream(httpconn_, stream_id, data, datalen, fin);
     if (rv < 0) {
-        std::cerr << "nghttp3_conn_read_stream failed: rv=" << rv << " msg=" << nghttp3_strerror(rv) << "\n";
+        LOG_ERROR("nghttp3_conn_read_stream failed: rv=" << rv << " msg=" << nghttp3_strerror(rv));
         return rv;
     }
     return 0;
@@ -87,7 +88,7 @@ int QuicHttp3Session::on_stream_close(nghttp3_conn * /*conn*/, int64_t stream_id
 }
 
 int QuicHttp3Session::on_recv_data(nghttp3_conn * /*conn*/, int64_t stream_id, const uint8_t *data, size_t datalen, void *conn_user_data, void * /*stream_user_data*/) {
-    std::cout << "H3: on_recv_data stream=" << stream_id << " len=" << datalen << "\n";
+    LOG_DEBUG("H3: on_recv_data stream=" << stream_id << " len=" << datalen);
     auto session = static_cast<QuicHttp3Session*>(conn_user_data);
     auto stream = session->get_or_create_stream(stream_id);
     stream->body_buffer.append(reinterpret_cast<const char*>(data), datalen);
@@ -99,7 +100,7 @@ int QuicHttp3Session::on_deferred_consume(nghttp3_conn *conn, int64_t stream_id,
 }
 
 int QuicHttp3Session::on_begin_headers(nghttp3_conn *conn, int64_t stream_id, void *conn_user_data, void *stream_user_data) {
-    std::cout << "H3: on_begin_headers stream=" << stream_id << "\n";
+    LOG_DEBUG("H3: on_begin_headers stream=" << stream_id);
     auto session = static_cast<QuicHttp3Session*>(conn_user_data);
     auto stream = session->get_or_create_stream(stream_id);
     nghttp3_conn_set_stream_user_data(conn, stream_id, stream.get());
@@ -143,7 +144,7 @@ int QuicHttp3Session::on_recv_header(nghttp3_conn *conn, int64_t stream_id, int3
 }
 
 int QuicHttp3Session::on_end_headers(nghttp3_conn *conn, int64_t stream_id, int fin, void *conn_user_data, void *stream_user_data) {
-    std::cout << "H3: on_end_headers stream=" << stream_id << " fin=" << fin << "\n";
+    LOG_DEBUG("H3: on_end_headers stream=" << stream_id << " fin=" << fin);
     auto session = static_cast<QuicHttp3Session*>(conn_user_data);
     auto stream = session->get_or_create_stream(stream_id);
     stream->headers_complete = true;
@@ -156,7 +157,7 @@ int QuicHttp3Session::on_end_headers(nghttp3_conn *conn, int64_t stream_id, int 
 
 void QuicHttp3Session::handle_request(std::shared_ptr<Http3Stream> stream) {
     stream->request.body = stream->body_buffer;
-    std::cout << "HTTP/3 Request received on stream " << stream->stream_id << " URI: " << stream->request.uri << "\n";
+    LOG_DEBUG("HTTP/3 Request received on stream " << stream->stream_id << " URI: " << stream->request.uri);
     
     stream->response_body = "Hello from Antigravity HTTP/3!\n";
     std::string cl = std::to_string(stream->response_body.size());
@@ -191,7 +192,7 @@ void QuicHttp3Session::handle_request(std::shared_ptr<Http3Stream> stream) {
     
     int rv = nghttp3_conn_submit_response(httpconn_, stream->stream_id, nva.data(), nva.size(), &dr);
     if (rv != 0) {
-        std::cerr << "nghttp3_conn_submit_response failed: " << nghttp3_strerror(rv) << "\n";
+        LOG_ERROR("nghttp3_conn_submit_response failed: " << nghttp3_strerror(rv));
     }
 }
 

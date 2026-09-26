@@ -246,12 +246,12 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
         }
         
         std::string route_key = make_route_key(request.method, request.uri);
-        std::cout << "[Router] Trying to match route key: " << route_key << std::endl;
+        LOG_DEBUG("[Router] Trying to match route key: " << route_key);
         
         // 2. Exact match check
         auto it = routes_.find(route_key);
         if (it != routes_.end()) {
-            std::cout << "[Router] Exact match found for " << route_key << std::endl;
+            LOG_DEBUG("[Router] Exact match found for " << route_key);
             it->second(request, response_writer);
             return;
         }
