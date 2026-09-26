@@ -296,11 +296,11 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
         } else if (parent_ && parent_->error_handler_) {
             parent_->error_handler_(e, request, response_writer);
         } else {
+            // The exception text can contain SQL, file paths or secrets; it
+            // goes to the log, never to the client.
             LOG_ERROR("Unhandled exception in route " << request.uri << ": " << e.what());
             http::HttpResponse res;
-            res.status(http::HttpStatus::InternalServerError).send(
-                "500 Internal Server Error: " + std::string(e.what())
-            );
+            res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
             response_writer->send(std::move(res));
         }
     } catch (...) {
