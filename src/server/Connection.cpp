@@ -219,7 +219,14 @@ void Connection::on_read_complete(ssize_t bytes_read) {
 }
 
 void Connection::process_request() {
-    default_headers_.clear();
+    {
+        // Headers and interceptors registered by middleware belong to one
+        // request. Keeping them would re-apply them to every later response
+        // on this keep-alive connection (e.g. gzip applied twice).
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        default_headers_.clear();
+        interceptors_.clear();
+    }
     {
         std::lock_guard<std::mutex> lock(read_mutex_);
         current_request_buffer_ = std::string(read_buffer_.begin(), read_buffer_.end());
