@@ -42,6 +42,26 @@ struct FrameHeader {
 bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header);
 
 /**
+ * @brief Progress of parsing the frame at the front of a buffer.
+ */
+enum class FrameStatus {
+    NeedHeader,   ///< The frame header has not fully arrived.
+    NeedPayload,  ///< The header is parsed (payload_length is known); the payload has not fully arrived.
+    Complete,     ///< The whole frame is in the buffer.
+    Invalid       ///< The frame violates RFC 6455 and the connection must be failed.
+};
+
+/**
+ * @brief Parses the frame header at the front of @p buffer.
+ *
+ * Unlike parse_frame_header(), this distinguishes a protocol violation from
+ * a frame that is still arriving, and reports the payload length as soon as
+ * the header is available so callers can reject oversized frames without
+ * buffering them.
+ */
+FrameStatus inspect_frame(const std::vector<char>& buffer, FrameHeader& header);
+
+/**
  * @brief Unmasks a frame payload in place using the frame's masking key.
  * @param payload The masked payload bytes.
  * @param mask_key The 4-byte masking key from the frame header.
@@ -83,6 +103,13 @@ public:
      */
     void close();
 
+    /**
+     * @brief Sets the largest message payload accepted from the client, after
+     *        decompression. Larger messages close the connection with 1009.
+     * @param bytes Limit in bytes (default 16 MiB).
+     */
+    void set_max_message_size(size_t bytes) { max_message_size_ = bytes; }
+
     // Internal API called by Connection::handle_read when in WEBSOCKET state
     void process_raw_data(std::vector<char>& buffer);
 
@@ -92,6 +119,9 @@ private:
     std::function<void()> close_handler_;
     
     bool is_closed_{false};
+    size_t max_message_size_{16 * 1024 * 1024};
+
+    void fail_connection(uint16_t status_code);
 
     bool deflate_enabled_{false};
     z_stream inflate_stream_{};
@@ -101,7 +131,7 @@ private:
     void init_streams();
     void cleanup_streams();
     std::string deflate_payload(const std::string& payload);
-    std::string inflate_payload(const std::string& payload);
+    bool inflate_payload(const std::string& payload, std::string& out);
 };
 
 } // namespace websocket

@@ -74,8 +74,9 @@ std::string WebSocketConnection::deflate_payload(const std::string& payload) {
     return out;
 }
 
-std::string WebSocketConnection::inflate_payload(const std::string& payload) {
-    if (payload.empty()) return "";
+bool WebSocketConnection::inflate_payload(const std::string& payload, std::string& out) {
+    out.clear();
+    if (payload.empty()) return true;
     
     // Append the stripped trailer
     std::string in = payload + std::string("\x00\x00\xff\xff", 4);
@@ -83,7 +84,6 @@ std::string WebSocketConnection::inflate_payload(const std::string& payload) {
     inflate_stream_.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(in.data()));
     inflate_stream_.avail_in = static_cast<uInt>(in.size());
     
-    std::string out;
     char out_buf[16384];
     
     int ret;
@@ -93,13 +93,15 @@ std::string WebSocketConnection::inflate_payload(const std::string& payload) {
         
         ret = inflate(&inflate_stream_, Z_SYNC_FLUSH);
         
-        if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) return payload; // Fallback
+        if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR || ret == Z_NEED_DICT) return false;
         
         size_t have = sizeof(out_buf) - inflate_stream_.avail_out;
+        // Bound the output so a small compressed frame cannot expand without limit.
+        if (out.size() + have > max_message_size_) return false;
         out.append(out_buf, have);
     } while (inflate_stream_.avail_out == 0);
     
-    return out;
+    return true;
 }
 
 void WebSocketConnection::on_message(std::function<void(const std::string&)> handler) {
@@ -163,6 +165,23 @@ void WebSocketConnection::close() {
     }
 }
 
+void WebSocketConnection::fail_connection(uint16_t status_code) {
+    if (is_closed_) return;
+    is_closed_ = true;
+
+    // Close frame carrying a status code (RFC 6455 section 5.5.1).
+    std::vector<char> frame = {
+        static_cast<char>(0x88), 0x02,
+        static_cast<char>((status_code >> 8) & 0xFF), static_cast<char>(status_code & 0xFF)
+    };
+    connection_.write_raw(frame);
+    connection_.mark_for_close();
+
+    if (close_handler_) {
+        close_handler_();
+    }
+}
+
 namespace detail {
 
 void unmask_payload(std::string& payload, const uint8_t mask_key[4]) {
@@ -171,16 +190,14 @@ void unmask_payload(std::string& payload, const uint8_t mask_key[4]) {
     }
 }
 
-bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header) {
-    if (buffer.size() < 2) return false;
+FrameStatus inspect_frame(const std::vector<char>& buffer, FrameHeader& header) {
+    if (buffer.size() < 2) return FrameStatus::NeedHeader;
 
     uint8_t byte0 = static_cast<uint8_t>(buffer[0]);
     uint8_t byte1 = static_cast<uint8_t>(buffer[1]);
 
     header.fin = (byte0 & 0x80) != 0;
     header.opcode = byte0 & 0x0F;
-    bool rsv1 = (byte0 & 0x40) != 0; // Compress flag
-    (void)rsv1;
     header.masked = (byte1 & 0x80) != 0;
     
     uint8_t initial_len = byte1 & 0x7F;
@@ -188,34 +205,41 @@ bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header) {
     header.payload_length = initial_len;
 
     if (initial_len == 126) {
-        if (buffer.size() < 4) return false;
-        uint16_t ext_len;
-        std::memcpy(&ext_len, buffer.data() + 2, 2);
-        header.payload_length = ntohs(ext_len);
+        if (buffer.size() < 4) return FrameStatus::NeedHeader;
+        header.payload_length = (static_cast<uint64_t>(static_cast<uint8_t>(buffer[2])) << 8) |
+                                 static_cast<uint64_t>(static_cast<uint8_t>(buffer[3]));
         header.header_length += 2;
     } else if (initial_len == 127) {
-        if (buffer.size() < 10) return false;
-        uint64_t ext_len;
-        std::memcpy(&ext_len, buffer.data() + 2, 8);
-        // Extremely simple big-endian conversion to host (assuming little endian host)
+        if (buffer.size() < 10) return FrameStatus::NeedHeader;
         uint64_t host_len = 0;
-        for (int i = 0; i < 8; ++i) {
-            host_len |= (static_cast<uint64_t>(static_cast<uint8_t>(buffer[static_cast<size_t>(2 + i)])) << ((7 - i) * 8));
+        for (size_t i = 0; i < 8; ++i) {
+            host_len = (host_len << 8) | static_cast<uint64_t>(static_cast<uint8_t>(buffer[2 + i]));
         }
+        // RFC 6455 section 5.2: the most significant bit must be 0.
+        if (host_len & (uint64_t{1} << 63)) return FrameStatus::Invalid;
         header.payload_length = host_len;
         header.header_length += 8;
     }
 
+    // Control frames carry at most 125 bytes and cannot be fragmented (section 5.5).
+    if ((header.opcode & 0x08) && (header.payload_length > 125 || !header.fin)) {
+        return FrameStatus::Invalid;
+    }
+
     if (header.masked) {
-        if (buffer.size() < header.header_length + 4) return false;
+        if (buffer.size() < header.header_length + 4) return FrameStatus::NeedHeader;
         std::memcpy(header.mask_key, buffer.data() + header.header_length, 4);
         header.header_length += 4;
     }
 
-    // Do we have the full payload?
-    if (buffer.size() < header.header_length + header.payload_length) return false;
+    // Written so that a huge payload_length cannot wrap the sum.
+    if (buffer.size() - header.header_length < header.payload_length) return FrameStatus::NeedPayload;
 
-    return true;
+    return FrameStatus::Complete;
+}
+
+bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header) {
+    return inspect_frame(buffer, header) == FrameStatus::Complete;
 }
 
 } // namespace detail
@@ -223,8 +247,22 @@ bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header) {
 void WebSocketConnection::process_raw_data(std::vector<char>& buffer) {
     while (!buffer.empty()) {
         detail::FrameHeader header;
-        if (!detail::parse_frame_header(buffer, header)) {
-            // Need more data
+        detail::FrameStatus status = detail::inspect_frame(buffer, header);
+        if (status == detail::FrameStatus::Invalid) {
+            buffer.clear();
+            fail_connection(1002); // Protocol error
+            return;
+        }
+        if (status == detail::FrameStatus::NeedHeader) {
+            break;
+        }
+        // Reject oversized frames from the header alone, before buffering the payload.
+        if (header.payload_length > max_message_size_) {
+            buffer.clear();
+            fail_connection(1009); // Message too big
+            return;
+        }
+        if (status == detail::FrameStatus::NeedPayload) {
             break;
         }
 
@@ -253,7 +291,13 @@ void WebSocketConnection::process_raw_data(std::vector<char>& buffer) {
             if (message_handler_) {
                 bool rsv1 = (buffer[0] & 0x40) != 0;
                 if (deflate_enabled_ && rsv1) {
-                    message_handler_(inflate_payload(payload));
+                    std::string inflated;
+                    if (!inflate_payload(payload, inflated)) {
+                        buffer.clear();
+                        fail_connection(1009);
+                        return;
+                    }
+                    message_handler_(inflated);
                 } else {
                     message_handler_(payload);
                 }
