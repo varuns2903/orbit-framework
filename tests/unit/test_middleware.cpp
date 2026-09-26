@@ -48,6 +48,7 @@ TEST(MiddlewareTest, CorsMiddleware) {
     HttpRequest req;
     req.method = HttpMethod::OPTIONS;
     req.headers["Origin"] = "http://example.com";
+    req.headers["Access-Control-Request-Method"] = "POST";
     auto writer = std::make_shared<MiddlewareMockResponseWriter>();
     
     bool continue_chain = m(req, writer);

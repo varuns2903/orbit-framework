@@ -18,8 +18,29 @@ Use `app.use()` to apply middleware to every incoming request.
 
 ```cpp
 app.use(logger);
-app.use(middleware::Cors::allow_all());
+app.use(middleware::cors());
 ```
+
+## CORS
+
+`middleware::cors()` with no arguments allows every origin (`Access-Control-Allow-Origin: *`)
+without credentials. To restrict origins, list them:
+
+```cpp
+middleware::CorsOptions cors;
+cors.allowed_origins = {"https://app.example.com", "https://admin.example.com"};
+cors.allow_credentials = true;
+app.use(middleware::cors(cors));
+```
+
+With an allow-list, only a listed `Origin` is echoed back in
+`Access-Control-Allow-Origin`, `Vary: Origin` is always sent so shared caches
+keep per-origin copies, and unlisted origins get no CORS headers (the browser
+then blocks the response). Preflights (`OPTIONS` with
+`Access-Control-Request-Method`) are answered with `204`; other `OPTIONS`
+requests reach your routes. `allow_credentials` is ignored when
+`allowed_origins` contains `"*"`, because allowing credentials from every origin
+would let any website act as the signed-in user.
 
 ## Route-Specific Middleware
 
