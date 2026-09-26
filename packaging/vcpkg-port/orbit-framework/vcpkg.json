@@ -18,7 +18,6 @@
       "name": "ngtcp2",
       "features": ["openssl"]
     },
-    "hiredis",
     "pkgconf",
     {
       "name": "liburing",
