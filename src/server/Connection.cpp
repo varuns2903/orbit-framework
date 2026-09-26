@@ -233,67 +233,101 @@ void Connection::process_request() {
         
         // WebSocket Upgrade Interception
         auto upgrade_it = req.headers.find("Upgrade");
-        if (upgrade_it != req.headers.end() && upgrade_it->second == "websocket") {
-            if (router_.has_ws_route(req.uri)) {
-                auto key_it = req.headers.find("Sec-WebSocket-Key");
-                if (key_it != req.headers.end()) {
-                    std::string accept_key = http::websocket::Handshake::generate_accept_key(std::string(key_it->second));
-                    
-                    http::HttpResponse res;
-                    res.status_code = http::HttpStatus::SwitchingProtocols;
-                    res.headers["Upgrade"] = "websocket";
-                    res.headers["Connection"] = "Upgrade";
-                    res.headers["Sec-WebSocket-Accept"] = accept_key;
-                    
-                    bool use_deflate = false;
-                    auto ext_it = req.headers.find("Sec-WebSocket-Extensions");
-                    if (ext_it != req.headers.end() && ext_it->second.find("permessage-deflate") != std::string::npos) {
-                        use_deflate = true;
-                        res.headers["Sec-WebSocket-Extensions"] = "permessage-deflate; client_no_context_takeover; server_no_context_takeover";
-                    }
-                    
-                    std::string handshake_str = res.serialize();
-                    
-                    auto ws_conn = std::make_unique<http::websocket::WebSocketConnection>(*this, use_deflate);
-                    auto handler = router_.get_ws_route(req.uri);
-                    
-                    // Erase the HTTP request from the buffer before switching states!
-                    size_t headers_end = raw_request.find("\r\n\r\n");
-                    size_t consumed_bytes = headers_end + 4;
-                    {
-                        std::lock_guard<std::mutex> lock(read_mutex_);
-                        if (consumed_bytes <= read_buffer_.size()) {
-                            read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<std::ptrdiff_t>(consumed_bytes));
-                        } else {
-                            read_buffer_.clear();
-                        }
-                    }
-                    
-                    // Queue the handshake immediately
-                    write_raw(std::vector<char>(handshake_str.begin(), handshake_str.end()));
-                    
-                    // Modify the state!
-                    upgrade_to_websocket(std::move(ws_conn));
-                    
-                    // Call the user callback (this allows them to set up on_message handlers and send initial messages)
-                    handler(*ws_connection_);
-                    
-                    // If the client pipelined a WebSocket frame immediately, process it!
-                    {
-                        std::lock_guard<std::mutex> lock(read_mutex_);
-                        if (!read_buffer_.empty()) {
-                            ws_connection_->process_raw_data(read_buffer_);
-                        }
-                    }
-
-                    // The HTTP request path only re-arms the read once a response
-                    // has been sent, which never happens for an upgrade. Without
-                    // this, frames the client sends after the handshake are never read.
-                    trigger_read();
-                    
-                    return; // Bypass standard HTTP routing
+        if (upgrade_it != req.headers.end() &&
+            http::connection_option_present(upgrade_it->second, "websocket") &&
+            router_.has_ws_route(req.uri)) {
+            // Consume the handshake request; anything after it is WebSocket data.
+            {
+                size_t consumed_bytes = raw_request.find("\r\n\r\n") + 4;
+                std::lock_guard<std::mutex> lock(read_mutex_);
+                if (consumed_bytes <= read_buffer_.size()) {
+                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<std::ptrdiff_t>(consumed_bytes));
+                } else {
+                    read_buffer_.clear();
                 }
             }
+
+            auto writer = std::dynamic_pointer_cast<http::ResponseWriter>(shared_from_this());
+            auto reject = [&](const std::string& message) {
+                http::HttpResponse err;
+                err.status_code = http::HttpStatus::BadRequest;
+                err.headers["Sec-WebSocket-Version"] = "13";
+                err.set_body(message);
+                should_close_ = true;
+                send(std::move(err));
+            };
+
+            // RFC 6455 section 4.2.1 opening handshake requirements.
+            auto conn_it = req.headers.find("Connection");
+            auto key_it = req.headers.find("Sec-WebSocket-Key");
+            auto version_it = req.headers.find("Sec-WebSocket-Version");
+            if (req.method != http::HttpMethod::GET ||
+                conn_it == req.headers.end() || !http::connection_option_present(conn_it->second, "upgrade") ||
+                key_it == req.headers.end() || !http::websocket::Handshake::is_valid_client_key(key_it->second)) {
+                reject("400 Bad Request: invalid WebSocket handshake");
+                return;
+            }
+            if (version_it == req.headers.end() || version_it->second != "13") {
+                reject("400 Bad Request: unsupported WebSocket version");
+                return;
+            }
+
+            // Authentication, rate limiting and origin checks apply to
+            // WebSocket routes too. A middleware that stops the request has
+            // already sent its response, so the upgrade is simply abandoned.
+            should_close_ = true;
+            if (!router_.run_ws_middlewares(req.uri, req, writer)) {
+                return;
+            }
+            should_close_ = false;
+
+            std::string accept_key = http::websocket::Handshake::generate_accept_key(std::string(key_it->second));
+            
+            http::HttpResponse res;
+            res.status_code = http::HttpStatus::SwitchingProtocols;
+            {
+                std::lock_guard<std::mutex> lock(write_mutex_);
+                for (const auto& [k, v] : default_headers_) res.headers[k] = v;
+            }
+            res.headers["Upgrade"] = "websocket";
+            res.headers["Connection"] = "Upgrade";
+            res.headers["Sec-WebSocket-Accept"] = accept_key;
+            
+            bool use_deflate = false;
+            auto ext_it = req.headers.find("Sec-WebSocket-Extensions");
+            if (ext_it != req.headers.end() && ext_it->second.find("permessage-deflate") != std::string::npos) {
+                use_deflate = true;
+                res.headers["Sec-WebSocket-Extensions"] = "permessage-deflate; client_no_context_takeover; server_no_context_takeover";
+            }
+            
+            std::string handshake_str = res.serialize();
+            
+            auto ws_conn = std::make_unique<http::websocket::WebSocketConnection>(*this, use_deflate);
+            auto handler = router_.get_ws_route(req.uri);
+            
+            // Queue the handshake immediately
+            write_raw(std::vector<char>(handshake_str.begin(), handshake_str.end()));
+            
+            // Modify the state!
+            upgrade_to_websocket(std::move(ws_conn));
+            
+            // Call the user callback (this allows them to set up on_message handlers and send initial messages)
+            handler(*ws_connection_);
+            
+            // If the client pipelined a WebSocket frame immediately, process it!
+            {
+                std::lock_guard<std::mutex> lock(read_mutex_);
+                if (!read_buffer_.empty()) {
+                    ws_connection_->process_raw_data(read_buffer_);
+                }
+            }
+
+            // The HTTP request path only re-arms the read once a response
+            // has been sent, which never happens for an upgrade. Without
+            // this, frames the client sends after the handshake are never read.
+            trigger_read();
+            
+            return; // Bypass standard HTTP routing
         }
 
         // Decide whether the connection persists after this response.
