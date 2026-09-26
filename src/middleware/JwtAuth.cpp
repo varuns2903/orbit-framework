@@ -2,6 +2,9 @@
 #include <orbit/http/HttpResponse.hpp>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
+#include <openssl/crypto.h>
+#include <orbit/utils/Logger.hpp>
+#include <stdexcept>
 #include <vector>
 #include <chrono>
 
@@ -59,24 +62,50 @@ static bool verify_jwt_signature(const std::string& header_b64, const std::strin
          hash, &hash_len);
          
     std::string expected_signature = base64url_encode(hash, static_cast<int>(hash_len));
-    return provided_signature == expected_signature;
+    // Constant-time: a plain == leaks how many leading characters matched.
+    return provided_signature.size() == expected_signature.size() &&
+           CRYPTO_memcmp(provided_signature.data(), expected_signature.data(), expected_signature.size()) == 0;
 }
 
-routing::Middleware jwt_auth(const std::string& secret_key) {
-    return [secret_key](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) -> bool {
+namespace {
+
+void reject(const std::shared_ptr<http::ResponseWriter>& writer, const char* json_error) {
+    http::HttpResponse res;
+    res.status(http::HttpStatus::Unauthorized).json(std::string(json_error));
+    res.headers["WWW-Authenticate"] = "Bearer";
+    writer->send(std::move(res));
+}
+
+bool audience_matches(const nlohmann::json& aud, const std::string& expected) {
+    if (aud.is_string()) return aud.get<std::string>() == expected;
+    if (aud.is_array()) {
+        for (const auto& a : aud) {
+            if (a.is_string() && a.get<std::string>() == expected) return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+routing::Middleware jwt_auth(JwtOptions options) {
+    if (options.secret.empty()) {
+        throw std::invalid_argument("jwt_auth: the secret must not be empty");
+    }
+    if (options.secret.size() < 32) {
+        LOG_WARN("jwt_auth: secret is shorter than 32 bytes; HS256 keys should have at least 256 bits of entropy");
+    }
+
+    return [options](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) -> bool {
         auto auth_it = req.headers.find("Authorization");
         if (auth_it == req.headers.end()) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::Unauthorized).json(std::string(R"({"error": "Missing Authorization header"})"));
-            writer->send(std::move(res));
+            reject(writer, R"({"error": "Missing Authorization header"})");
             return false;
         }
         
         std::string_view auth_header = auth_it->second;
         if (!auth_header.starts_with("Bearer ")) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::Unauthorized).json(std::string(R"({"error": "Invalid Authorization scheme"})"));
-            writer->send(std::move(res));
+            reject(writer, R"({"error": "Invalid Authorization scheme"})");
             return false;
         }
         
@@ -84,59 +113,86 @@ routing::Middleware jwt_auth(const std::string& secret_key) {
         
         // Split token by '.'
         size_t first_dot = token.find('.');
-        size_t second_dot = token.find('.', first_dot + 1);
+        size_t second_dot = first_dot == std::string::npos ? std::string::npos : token.find('.', first_dot + 1);
         
-        if (first_dot == std::string::npos || second_dot == std::string::npos) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::Unauthorized).json(std::string(R"({"error": "Malformed JWT"})"));
-            writer->send(std::move(res));
+        if (first_dot == std::string::npos || second_dot == std::string::npos ||
+            token.find('.', second_dot + 1) != std::string::npos) {
+            reject(writer, R"({"error": "Malformed JWT"})");
             return false;
         }
         
         std::string header_b64 = token.substr(0, first_dot);
         std::string payload_b64 = token.substr(first_dot + 1, second_dot - first_dot - 1);
         std::string signature_b64 = token.substr(second_dot + 1);
-        
-        if (!verify_jwt_signature(header_b64, payload_b64, signature_b64, secret_key)) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::Unauthorized).json(std::string(R"({"error": "Invalid JWT signature"})"));
-            writer->send(std::move(res));
+
+        // The algorithm is fixed by the server, never chosen by the token.
+        nlohmann::json header = nlohmann::json::parse(base64url_decode(header_b64), nullptr, false);
+        if (header.is_discarded() || !header.is_object() || !header.contains("alg") ||
+            !header["alg"].is_string() || header["alg"].get<std::string>() != "HS256") {
+            reject(writer, R"({"error": "Unsupported JWT algorithm"})");
             return false;
         }
         
-        std::string payload_json_str = base64url_decode(payload_b64);
-        if (payload_json_str.empty()) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::Unauthorized).json(std::string(R"({"error": "Invalid payload encoding"})"));
-            writer->send(std::move(res));
+        if (!verify_jwt_signature(header_b64, payload_b64, signature_b64, options.secret)) {
+            reject(writer, R"({"error": "Invalid JWT signature"})");
             return false;
         }
         
-        try {
-            req.user = nlohmann::json::parse(payload_json_str);
-        } catch (...) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::Unauthorized).json(std::string(R"({"error": "Payload is not valid JSON"})"));
-            writer->send(std::move(res));
+        nlohmann::json claims = nlohmann::json::parse(base64url_decode(payload_b64), nullptr, false);
+        if (claims.is_discarded() || !claims.is_object()) {
+            reject(writer, R"({"error": "Payload is not a JSON object"})");
             return false;
         }
-        
-        // Check expiration
-        if (req.user.contains("exp") && req.user["exp"].is_number()) {
-            long long exp = req.user["exp"].get<long long>();
-            auto now = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::system_clock::now().time_since_epoch()
-            ).count();
-            if (now > exp) {
-                http::HttpResponse res;
-                res.status(http::HttpStatus::Unauthorized).json(std::string(R"({"error": "Token expired"})"));
-                writer->send(std::move(res));
+
+        const long long now = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        const long long leeway = options.leeway.count();
+
+        if (claims.contains("exp")) {
+            if (!claims["exp"].is_number()) {
+                reject(writer, R"({"error": "Invalid exp claim"})");
+                return false;
+            }
+            if (now > claims["exp"].get<long long>() + leeway) {
+                reject(writer, R"({"error": "Token expired"})");
+                return false;
+            }
+        } else if (options.require_exp) {
+            reject(writer, R"({"error": "Token has no expiry"})");
+            return false;
+        }
+
+        if (claims.contains("nbf")) {
+            if (!claims["nbf"].is_number()) {
+                reject(writer, R"({"error": "Invalid nbf claim"})");
+                return false;
+            }
+            if (now + leeway < claims["nbf"].get<long long>()) {
+                reject(writer, R"({"error": "Token not yet valid"})");
                 return false;
             }
         }
-        
+
+        if (!options.issuer.empty() &&
+            (!claims.contains("iss") || !claims["iss"].is_string() || claims["iss"].get<std::string>() != options.issuer)) {
+            reject(writer, R"({"error": "Invalid issuer"})");
+            return false;
+        }
+
+        if (!options.audience.empty() && (!claims.contains("aud") || !audience_matches(claims["aud"], options.audience))) {
+            reject(writer, R"({"error": "Invalid audience"})");
+            return false;
+        }
+
+        req.user = std::move(claims);
         return true;
     };
+}
+
+routing::Middleware jwt_auth(const std::string& secret_key) {
+    JwtOptions options;
+    options.secret = secret_key;
+    return jwt_auth(std::move(options));
 }
 
 } // namespace middleware
