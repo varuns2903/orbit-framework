@@ -20,6 +20,8 @@ void ConnectionManager::add_connection(network::Socket socket, const std::string
     
     utils::PrometheusRegistry::get_instance().inc_gauge("orbit_active_connections", "type=\"tcp\"");
     
+    connection->set_timeouts(timeouts_);
+
     // With Proactor, we kick off the first read immediately!
     connection->start();
 }

@@ -150,14 +150,20 @@ void WebSocketConnection::send(const std::string& message) {
 }
 
 void WebSocketConnection::close() {
-    if (is_closed_) return;
-    is_closed_ = true;
+    if (is_closed_.exchange(true)) return;
 
     // Send close frame (OPCODE 8)
     std::vector<char> frame = {static_cast<char>(0x88), 0x00};
     connection_.write_raw(frame);
     connection_.mark_for_close();
     
+    if (close_handler_) {
+        close_handler_();
+    }
+}
+
+void WebSocketConnection::handle_transport_closed() {
+    if (is_closed_.exchange(true)) return;
     if (close_handler_) {
         close_handler_();
     }
@@ -231,8 +237,7 @@ void WebSocketConnection::process_raw_data(std::vector<char>& buffer) {
         // We have a full frame!
         if (header.opcode == 0x8) {
             // Close frame
-            if (!is_closed_) {
-                is_closed_ = true;
+            if (!is_closed_.exchange(true)) {
                 if (close_handler_) close_handler_();
                 connection_.mark_for_close();
             }

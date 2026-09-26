@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 #include <cstdint>
+#include <atomic>
 
 #include <zlib.h>
 
@@ -83,6 +84,13 @@ public:
      */
     void close();
 
+    /**
+     * @brief Internal: the underlying transport has gone away (peer disconnect,
+     *        timeout or I/O error). Fires the close handler once, if it has not
+     *        already run, and makes further send() calls no-ops.
+     */
+    void handle_transport_closed();
+
     // Internal API called by Connection::handle_read when in WEBSOCKET state
     void process_raw_data(std::vector<char>& buffer);
 
@@ -91,7 +99,7 @@ private:
     std::function<void(const std::string&)> message_handler_;
     std::function<void()> close_handler_;
     
-    bool is_closed_{false};
+    std::atomic<bool> is_closed_{false};
 
     bool deflate_enabled_{false};
     z_stream inflate_stream_{};

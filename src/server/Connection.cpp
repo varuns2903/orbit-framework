@@ -39,6 +39,12 @@ Connection::~Connection() {
     if (current_timer_id_ != 0) {
         timer_manager_.cancel_timer(current_timer_id_);
     }
+    // Whatever tore the connection down (peer close, timeout, I/O error),
+    // WebSocket users must hear about it before the object they hold a
+    // reference to is destroyed.
+    if (ws_connection_) {
+        ws_connection_->handle_transport_closed();
+    }
     if (ssl_) {
         SSL_free(ssl_);
     }
@@ -47,15 +53,42 @@ Connection::~Connection() {
     }
 }
 
-void Connection::reset_timer() {
+void Connection::arm_timer(std::chrono::milliseconds timeout) {
+    std::lock_guard<std::mutex> lock(timer_mutex_);
     if (current_timer_id_ != 0) {
         timer_manager_.cancel_timer(current_timer_id_);
+        current_timer_id_ = 0;
     }
-    current_timer_id_ = timer_manager_.add_timer(socket_.fd(), std::chrono::seconds(10));
+    if (timeout.count() > 0) {
+        current_timer_id_ = timer_manager_.add_timer(socket_.fd(), timeout);
+    }
+}
+
+// Picks the timeout for whatever the connection is waiting on right now.
+void Connection::arm_timer_for_current_phase() {
+    switch (state_) {
+        case ConnectionState::WEBSOCKET:
+        case ConnectionState::RAW_STREAM:
+            arm_timer(timeouts_.websocket_idle);
+            return;
+        case ConnectionState::HTTP2:
+        case ConnectionState::HTTP_STREAMING_BODY:
+            arm_timer(timeouts_.idle);
+            return;
+        default:
+            break;
+    }
+    if (is_processing_request_) {
+        // A handler is running (possibly a long computation, a slow database
+        // call or an SSE stream). Its duration is the application's business.
+        arm_timer(std::chrono::milliseconds(0));
+    } else {
+        arm_timer(timeouts_.keep_alive);
+    }
 }
 
 void Connection::start() {
-    reset_timer();
+    arm_timer(timeouts_.header);
     trigger_read();
 }
 
@@ -78,12 +111,19 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         if (state_ == ConnectionState::HTTP_STREAMING_BODY && body_stream_on_end_) {
             body_stream_on_end_();
         }
+        if (state_ == ConnectionState::WEBSOCKET && ws_connection_) {
+            ws_connection_->handle_transport_closed();
+        }
         std::cout << "on_read_complete closed with bytes_read=" << bytes_read << std::endl;
         manager_.remove_connection(socket_.fd());
         return;
     }
     
-    reset_timer();
+    bool buffer_was_empty;
+    {
+        std::lock_guard<std::mutex> lock(read_mutex_);
+        buffer_was_empty = read_buffer_.empty();
+    }
     
     if (ssl_) {
         BIO_write(rbio_, async_read_buf_, static_cast<int>(bytes_read));
@@ -150,6 +190,10 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         trigger_write();
     }
     
+    if (state_ != ConnectionState::HTTP) {
+        arm_timer_for_current_phase();
+    }
+
     if (state_ == ConnectionState::RAW_STREAM) {
         std::lock_guard<std::mutex> lock(read_mutex_);
         if (!read_buffer_.empty() && raw_stream_on_data_) {
@@ -192,10 +236,28 @@ void Connection::on_read_complete(ssize_t bytes_read) {
     }
     
     RequestState state = check_request_state();
+
+    if (state == RequestState::INCOMPLETE && !is_processing_request_) {
+        bool headers_done;
+        {
+            std::lock_guard<std::mutex> lock(read_mutex_);
+            headers_done = std::string_view(read_buffer_.data(), read_buffer_.size()).find("\r\n\r\n") != std::string_view::npos;
+        }
+        if (headers_done) {
+            // Receiving the body: each read extends the deadline.
+            arm_timer(timeouts_.idle);
+        } else if (buffer_was_empty) {
+            // First bytes of a new request: the headers must all arrive within
+            // header_timeout. Later bytes do not extend it, so a client cannot
+            // hold the connection open by trickling header bytes.
+            arm_timer(timeouts_.header);
+        }
+    }
     
     if (state == RequestState::COMPLETE || state == RequestState::HEADERS_COMPLETE) {
         bool expected = false;
         if (is_processing_request_.compare_exchange_strong(expected, true)) {
+            arm_timer(state == RequestState::HEADERS_COMPLETE ? timeouts_.idle : std::chrono::milliseconds(0));
             if (state == RequestState::HEADERS_COMPLETE) {
                 state_ = ConnectionState::HTTP_STREAMING_BODY;
             }
@@ -274,6 +336,7 @@ void Connection::process_request() {
                     
                     // Modify the state!
                     upgrade_to_websocket(std::move(ws_conn));
+                    arm_timer(timeouts_.websocket_idle);
                     
                     // Call the user callback (this allows them to set up on_message handlers and send initial messages)
                     handler(*ws_connection_);
@@ -459,6 +522,7 @@ void Connection::send(http::HttpResponse&& response) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
     } else {
         is_processing_request_ = false;
+        arm_timer_for_current_phase();
         // Double check state after releasing the lock, just in case data was appended concurrently
         if (check_request_state() == RequestState::COMPLETE) {
             bool expected = false;
@@ -505,6 +569,7 @@ void Connection::end() {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
     } else {
         is_processing_request_ = false;
+        arm_timer_for_current_phase();
         if (check_request_state() == RequestState::COMPLETE) {
             bool expected = false;
             if (is_processing_request_.compare_exchange_strong(expected, true)) {
@@ -641,7 +706,11 @@ void Connection::trigger_write() {
     
     if (should_close_) {
         manager_.remove_connection(socket_.fd());
+        return;
     }
+
+    // Everything queued has been written; go back to waiting on the peer.
+    arm_timer_for_current_phase();
 }
 
 void Connection::on_write_complete(ssize_t bytes_written) {
@@ -650,7 +719,8 @@ void Connection::on_write_complete(ssize_t bytes_written) {
         return;
     }
     
-    reset_timer();
+    // A write made progress; the peer is still reading.
+    arm_timer(timeouts_.idle);
     
     if (ssl_) {
         tls_write_buffer_.erase(tls_write_buffer_.begin(), tls_write_buffer_.begin() + bytes_written);
@@ -673,7 +743,7 @@ void Connection::on_sendfile_complete(ssize_t bytes_written) {
         return;
     }
     
-    reset_timer();
+    arm_timer(timeouts_.idle);
     file_offset_ += bytes_written;
     
     is_writing_ = false;
