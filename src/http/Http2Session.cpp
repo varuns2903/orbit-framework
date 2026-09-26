@@ -177,6 +177,7 @@ int Http2Session::on_header(nghttp2_session* session, const nghttp2_frame* frame
     } else if (key == ":path") {
         ctx.backing_uri = val;
         req.uri = ctx.backing_uri;
+        req.target = val;
     } else if (key == ":authority") {
         ctx.backing_headers.push_back({"Host", val});
     } else if (!key.empty() && key[0] != ':') {
