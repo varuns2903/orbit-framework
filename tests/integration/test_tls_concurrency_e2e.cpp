@@ -2,12 +2,12 @@
 #include <orbit/server/App.hpp>
 
 #include <curl/curl.h>
+#include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
 #include <chrono>
-#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <thread>
@@ -30,15 +30,17 @@ bool make_self_signed(const std::string& cert_path, const std::string& key_path)
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char*>("localhost"), -1, -1, 0);
     X509_set_issuer_name(x509, name);
     X509_sign(x509, pkey, EVP_sha256());
-    FILE* f = std::fopen(cert_path.c_str(), "wb");
-    PEM_write_X509(f, x509);
-    std::fclose(f);
-    f = std::fopen(key_path.c_str(), "wb");
-    PEM_write_PrivateKey(f, pkey, nullptr, nullptr, 0, nullptr, nullptr);
-    std::fclose(f);
+    // BIO file APIs, not FILE*: on Windows, handing a FILE* from this CRT to
+    // OpenSSL aborts with "no OPENSSL_Applink".
+    BIO* cert_bio = BIO_new_file(cert_path.c_str(), "wb");
+    BIO* key_bio = BIO_new_file(key_path.c_str(), "wb");
+    bool ok = cert_bio && key_bio && PEM_write_bio_X509(cert_bio, x509) == 1 &&
+              PEM_write_bio_PrivateKey(key_bio, pkey, nullptr, nullptr, 0, nullptr, nullptr) == 1;
+    BIO_free(cert_bio);
+    BIO_free(key_bio);
     X509_free(x509);
     EVP_PKEY_free(pkey);
-    return true;
+    return ok;
 }
 
 size_t collect(void* data, size_t size, size_t n, void* out) {
