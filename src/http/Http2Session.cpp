@@ -21,6 +21,7 @@ inline ssize_t pread(int fd, void* buf, size_t count, long offset) {
 #endif
 
 #include <cctype>
+#include <stdexcept>
 
 namespace http {
 namespace h2 {
@@ -104,8 +105,11 @@ HeaderBlock build_response_headers(const http::HttpResponse& response) {
 
 // ---------------- Http2Session ----------------
 
-Http2Session::Http2Session(server::Connection& connection, const routing::Router& router, concurrency::ThreadPool& thread_pool)
-    : connection_(connection), router_(router), thread_pool_(thread_pool) {
+Http2Session::Http2Session(std::weak_ptr<server::Connection> connection, network::Proactor& proactor,
+                           const routing::Router& router, concurrency::ThreadPool& thread_pool,
+                           std::string client_ip, size_t max_body_size)
+    : connection_(std::move(connection)), proactor_(proactor), router_(router), thread_pool_(thread_pool),
+      client_ip_(std::move(client_ip)), max_body_size_(max_body_size) {
     
     nghttp2_session_callbacks* callbacks;
     nghttp2_session_callbacks_new(&callbacks);
@@ -132,13 +136,19 @@ Http2Session::~Http2Session() {
     if (session_) {
         nghttp2_session_del(session_);
     }
+    for (auto& [id, ctx] : streams_) {
+        if (ctx->file_fd != -1) {
+            close(ctx->file_fd);
+            ctx->file_fd = -1;
+        }
+    }
 }
 
 void Http2Session::process_data(const uint8_t* data, size_t len) {
     std::lock_guard<std::mutex> lock(session_mutex_);
     ssize_t rv = nghttp2_session_mem_recv(session_, data, len);
     if (rv < 0) {
-        connection_.mark_for_close();
+        if (auto conn = connection_.lock()) conn->mark_for_close();
         return;
     }
     send_pending();
@@ -153,7 +163,6 @@ int Http2Session::on_begin_headers(nghttp2_session* session, const nghttp2_frame
         auto* self = static_cast<Http2Session*>(user_data);
         auto stream_ctx = std::make_shared<StreamContext>();
         stream_ctx->stream_id = frame->hd.stream_id;
-        stream_ctx->session = self;
         self->streams_[frame->hd.stream_id] = stream_ctx;
     }
     return 0;
@@ -190,12 +199,13 @@ int Http2Session::on_frame_recv(nghttp2_session* session, const nghttp2_frame* f
     auto it = self->streams_.find(frame->hd.stream_id);
     if (it == self->streams_.end()) return 0;
     
-    if (frame->hd.type == NGHTTP2_HEADERS && frame->headers.cat == NGHTTP2_HCAT_REQUEST) {
-        if (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) {
-            self->dispatch_request(it->second);
-        }
-    } else if (frame->hd.type == NGHTTP2_DATA) {
-        if (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) {
+    bool ends_request = (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) &&
+        ((frame->hd.type == NGHTTP2_HEADERS && frame->headers.cat == NGHTTP2_HCAT_REQUEST) ||
+         frame->hd.type == NGHTTP2_DATA);
+    if (ends_request) {
+        if (it->second->body_too_large) {
+            self->submit_status_locked(frame->hd.stream_id, http::HttpStatus::PayloadTooLarge);
+        } else {
             self->dispatch_request(it->second);
         }
     }
@@ -210,7 +220,16 @@ int Http2Session::on_data_chunk_recv(nghttp2_session* session, uint8_t flags, in
     auto it = self->streams_.find(stream_id);
     if (it == self->streams_.end()) return 0;
     
-    it->second->backing_body.append(reinterpret_cast<const char*>(data), len);
+    auto& ctx = *it->second;
+    if (ctx.body_too_large) return 0;
+    if (ctx.backing_body.size() + len > self->max_body_size_) {
+        // Stop buffering; the request is answered with 413 when it ends.
+        ctx.body_too_large = true;
+        ctx.backing_body.clear();
+        ctx.backing_body.shrink_to_fit();
+        return 0;
+    }
+    ctx.backing_body.append(reinterpret_cast<const char*>(data), len);
     return 0;
 }
 
@@ -233,8 +252,13 @@ ssize_t Http2Session::send_callback(nghttp2_session* session, const uint8_t* dat
     (void)session;
     (void)flags;
     auto* self = static_cast<Http2Session*>(user_data);
+    auto conn = self->connection_.lock();
+    if (!conn) {
+        // The client connection is gone; nothing can be delivered.
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
     std::vector<char> buf(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data) + length);
-    self->connection_.write_raw(buf);
+    conn->write_raw(buf);
     return static_cast<ssize_t>(length);
 }
 
@@ -244,12 +268,13 @@ void Http2Session::dispatch_request(std::shared_ptr<StreamContext> stream_ctx) {
         stream_ctx->request.headers[pair.first] = pair.second;
     }
     
-    stream_ctx->request.client_ip = connection_.client_ip();
-    auto writer = std::make_shared<Http2ResponseWriter>(this, stream_ctx->stream_id);
+    stream_ctx->request.client_ip = client_ip_;
+    auto writer = std::make_shared<Http2ResponseWriter>(weak_from_this(), stream_ctx->stream_id);
     
-    // Pass stream_ctx to keep it alive
-    thread_pool_.enqueue([this, stream_ctx, writer]() mutable {
-        router_.route(stream_ctx->request, writer);
+    // The task owns the session and stream context, so both outlive the
+    // handler even if the client disconnects meanwhile.
+    thread_pool_.enqueue([self = shared_from_this(), stream_ctx, writer]() mutable {
+        self->router_.route(stream_ctx->request, writer);
     });
 }
 
@@ -290,7 +315,14 @@ ssize_t Http2Session::data_provider_read(nghttp2_session *session, int32_t strea
     }
 }
 
-void Http2Session::submit_response(int32_t stream_id, const http::HttpResponse& response, bool has_body) {
+void Http2Session::submit_status_locked(int32_t stream_id, http::HttpStatus status) {
+    http::HttpResponse res;
+    res.status_code = status;
+    detail::HeaderBlock headers = detail::build_response_headers(res);
+    nghttp2_submit_response(session_, stream_id, headers.nvs.data(), headers.nvs.size(), nullptr);
+}
+
+void Http2Session::submit_response(int32_t stream_id, http::HttpResponse& response, bool has_body) {
     std::lock_guard<std::mutex> lock(session_mutex_);
     auto it = streams_.find(stream_id);
     if (it == streams_.end()) return;
@@ -308,7 +340,10 @@ void Http2Session::submit_response(int32_t stream_id, const http::HttpResponse& 
         
         ctx->response_body = response.body;
         ctx->response_offset = 0;
+        // Take ownership: the response's destructor would otherwise close the
+        // descriptor while this stream is still reading from it.
         ctx->file_fd = response.file_fd;
+        response.file_fd = -1;
         ctx->file_size = response.file_size;
         ctx->file_offset = 0;
         
@@ -332,8 +367,14 @@ void Http2Session::end_stream(int32_t stream_id) {
 
 // ---------------- Http2ResponseWriter ----------------
 
-Http2ResponseWriter::Http2ResponseWriter(Http2Session* session, int32_t stream_id)
-    : session_(session), stream_id_(stream_id) {}
+Http2ResponseWriter::Http2ResponseWriter(std::weak_ptr<Http2Session> session, int32_t stream_id)
+    : session_(std::move(session)), stream_id_(stream_id) {}
+
+std::shared_ptr<Http2Session> Http2ResponseWriter::session_or_throw() {
+    auto session = session_.lock();
+    if (!session) throw std::runtime_error("HTTP/2 session has been closed");
+    return session;
+}
 
 void Http2ResponseWriter::add_interceptor(Interceptor interceptor) {
     interceptors_.push_back(std::move(interceptor));
@@ -344,11 +385,11 @@ void Http2ResponseWriter::set_header(const std::string& key, const std::string& 
 }
 
 network::Proactor& Http2ResponseWriter::proactor() {
-    return session_->get_connection().proactor();
+    return session_or_throw()->proactor();
 }
 
 concurrency::ThreadPool& Http2ResponseWriter::thread_pool() {
-    return session_->get_connection().thread_pool();
+    return session_or_throw()->thread_pool();
 }
 
 void Http2ResponseWriter::send(http::HttpResponse&& response) {
@@ -360,7 +401,9 @@ void Http2ResponseWriter::send(http::HttpResponse&& response) {
         }
     }
     bool has_body = !response.body.empty() || response.file_fd != -1;
-    session_->submit_response(stream_id_, response, has_body);
+    if (auto session = session_.lock()) {
+        session->submit_response(stream_id_, response, has_body);
+    }
 }
 
 void Http2ResponseWriter::send_headers(http::HttpResponse& response) {
@@ -371,7 +414,9 @@ void Http2ResponseWriter::send_headers(http::HttpResponse& response) {
             response.headers[k] = v;
         }
     }
-    session_->submit_response(stream_id_, response, true);
+    if (auto session = session_.lock()) {
+        session->submit_response(stream_id_, response, true);
+    }
 }
 
 void Http2ResponseWriter::write_chunk(std::string_view chunk) {
@@ -381,7 +426,9 @@ void Http2ResponseWriter::write_chunk(std::string_view chunk) {
 }
 
 void Http2ResponseWriter::end() {
-    session_->end_stream(stream_id_);
+    if (auto session = session_.lock()) {
+        session->end_stream(stream_id_);
+    }
 }
 
 void Http2ResponseWriter::send_sse_event(std::string_view data, std::string_view event, std::string_view id) {

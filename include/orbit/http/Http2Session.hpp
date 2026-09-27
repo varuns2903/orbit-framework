@@ -17,6 +17,9 @@
 namespace server {
     class Connection;
 }
+namespace network {
+    class Proactor;
+}
 
 namespace http {
 namespace h2 {
@@ -67,9 +70,18 @@ bool is_connection_specific_header(std::string_view name);
 /**
  * @brief Manages an HTTP/2 session over a connection.
  */
-class Http2Session {
+/**
+ * @brief One HTTP/2 connection's nghttp2 session.
+ *
+ * Handlers run on the thread pool and may finish after the client has gone.
+ * The session is therefore shared (writers and in-flight handlers keep it
+ * alive) and refers to its connection only weakly.
+ */
+class Http2Session : public std::enable_shared_from_this<Http2Session> {
 public:
-    Http2Session(server::Connection& connection, const routing::Router& router, concurrency::ThreadPool& thread_pool);
+    Http2Session(std::weak_ptr<server::Connection> connection, network::Proactor& proactor,
+                 const routing::Router& router, concurrency::ThreadPool& thread_pool,
+                 std::string client_ip, size_t max_body_size);
     ~Http2Session();
 
     void process_data(const uint8_t* data, size_t len);
@@ -81,16 +93,21 @@ public:
      * @param response The HttpResponse to send.
      * @param has_body True if the response includes a body.
      */
-    void submit_response(int32_t stream_id, const http::HttpResponse& response, bool has_body);
+    /// Takes ownership of response.file_fd when a file body is sent.
+    void submit_response(int32_t stream_id, http::HttpResponse& response, bool has_body);
     void submit_data(int32_t stream_id);
     void end_stream(int32_t stream_id);
 
-    server::Connection& get_connection() { return connection_; }
+    network::Proactor& proactor() { return proactor_; }
+    concurrency::ThreadPool& thread_pool() { return thread_pool_; }
 
 private:
-    server::Connection& connection_;
+    std::weak_ptr<server::Connection> connection_;
+    network::Proactor& proactor_;
     const routing::Router& router_;
     concurrency::ThreadPool& thread_pool_;
+    std::string client_ip_;
+    size_t max_body_size_;
     
     nghttp2_session* session_{nullptr};
     std::mutex session_mutex_;
@@ -112,8 +129,8 @@ private:
         int file_fd{-1};
         off_t file_size{0};
         off_t file_offset{0};
-        
-        Http2Session* session;
+
+        bool body_too_large{false};
     };
 
     std::unordered_map<int32_t, std::shared_ptr<StreamContext>> streams_;
@@ -128,6 +145,7 @@ private:
     static ssize_t data_provider_read(nghttp2_session *session, int32_t stream_id, uint8_t *buf, size_t length, uint32_t *data_flags, nghttp2_data_source *source, void *user_data);
 
     void dispatch_request(std::shared_ptr<StreamContext> stream_ctx);
+    void submit_status_locked(int32_t stream_id, http::HttpStatus status);
 };
 
 /**
@@ -135,7 +153,7 @@ private:
  */
 class Http2ResponseWriter : public http::ResponseWriter {
 public:
-    Http2ResponseWriter(Http2Session* session, int32_t stream_id);
+    Http2ResponseWriter(std::weak_ptr<Http2Session> session, int32_t stream_id);
     
     void add_interceptor(Interceptor interceptor) override;
     void set_header(const std::string& key, const std::string& value) override;
@@ -151,7 +169,9 @@ public:
     void read_body_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_end) override;
 
 private:
-    Http2Session* session_;
+    std::shared_ptr<Http2Session> session_or_throw();
+
+    std::weak_ptr<Http2Session> session_;
     int32_t stream_id_;
     std::unordered_map<std::string, std::string> default_headers_;
     std::vector<Interceptor> interceptors_;
