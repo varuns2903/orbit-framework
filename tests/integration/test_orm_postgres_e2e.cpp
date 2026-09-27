@@ -38,30 +38,51 @@ struct Results {
 concurrency::Task scenario(std::shared_ptr<database::PostgresClient> db, Results* r, std::promise<void>* done) {
     r->connected = co_await database::connect_async(db);
     if (r->connected) {
-        co_await database::query_async(db, "CREATE TABLE orm_people (name text, note text);");
-        co_await orm::QueryBuilder<database::PostgresClient, Person>(db, "orm_people").insert_async(Person{kEvilName, "n1"});
-        co_await orm::QueryBuilder<database::PostgresClient, Person>(db, "orm_people").insert_async(Person{"alice", "n2"});
+        // Awaiters are named locals: GCC 13 hits an internal compiler error on
+        // co_await expressions holding braced lists or non-trivial temporaries.
+        using People = orm::QueryBuilder<database::PostgresClient, Person>;
+        auto create = database::query_async(db, "CREATE TABLE orm_people (name text, note text);");
+        co_await create;
 
-        auto evil = co_await orm::QueryBuilder<database::PostgresClient, Person>(db, "orm_people")
-                        .where(orm::Col("name") == kEvilName).get_async();
+        People insert_evil(db, "orm_people");
+        Person evil_person{kEvilName, "n1"};
+        auto insert1 = insert_evil.insert_async(evil_person);
+        co_await insert1;
+
+        People insert_alice(db, "orm_people");
+        Person alice{"alice", "n2"};
+        auto insert2 = insert_alice.insert_async(alice);
+        co_await insert2;
+
+        People find_evil(db, "orm_people");
+        find_evil.where(orm::Col("name") == kEvilName);
+        auto get_evil = find_evil.get_async();
+        std::vector<Person> evil = co_await get_evil;
         r->evil_matches = evil.size();
         if (!evil.empty()) r->evil_name_read = evil[0].name;
 
         // With string splicing this became "note = 'n2' OR '1'='1'" and matched every row.
-        auto injected = co_await orm::QueryBuilder<database::PostgresClient, Person>(db, "orm_people")
-                            .where("note", "=", "n2' OR '1'='1").get_async();
+        People find_injected(db, "orm_people");
+        find_injected.where("note", "=", "n2' OR '1'='1");
+        auto get_injected = find_injected.get_async();
+        std::vector<Person> injected = co_await get_injected;
         r->injected_where_matches = injected.size();
 
         try {
-            orm::QueryBuilder<database::PostgresClient, Person>(db, "orm_people").where("note", "= 'x' OR 1=1 --", "y");
+            People bad(db, "orm_people");
+            bad.where("note", "= 'x' OR 1=1 --", "y");
         } catch (const std::invalid_argument&) {
             r->bad_operator_threw = true;
         }
 
-        auto count = co_await database::query_async(db, "SELECT count(*) AS n FROM orm_people;");
+        auto count_query = database::query_async(db, "SELECT count(*) AS n FROM orm_people;");
+        database::ResultSet count = co_await count_query;
         if (count.size() == 1) r->row_count = count[0].get(0).value_or("");
 
-        auto param = co_await database::query_async(db, "SELECT $1::text AS v;", {std::string("it's; fine")});
+        orm::Params params;
+        params.emplace_back(std::string("it's; fine"));
+        auto param_query = database::query_async(db, "SELECT $1::text AS v;", params);
+        database::ResultSet param = co_await param_query;
         if (param.size() == 1) r->param_query_value = param[0].get(0).value_or("");
     }
     done->set_value();
