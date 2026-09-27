@@ -1,7 +1,9 @@
 #include <orbit/middleware/OAuth2.hpp>
 #include <orbit/http/HttpResponse.hpp>
-#include <orbit/utils/Logger.hpp>
 #include <curl/curl.h>
+// After curl.h: on Windows it pulls in <windows.h>, which #defines ERROR;
+// Logger.hpp #undefs it again so LOG_ERROR expands correctly.
+#include <orbit/utils/Logger.hpp>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
