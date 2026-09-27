@@ -75,8 +75,7 @@ public:
                 co_await database::query_async(db, sql);
 
                 // Record it in the tracking table
-                std::string insert_tracking = "INSERT INTO orbit_migrations (version) VALUES ('" + filename + "');";
-                co_await database::query_async(db, insert_tracking);
+                co_await database::query_async(db, "INSERT INTO orbit_migrations (version) VALUES ($1);", {filename});
                 
                 executed++;
             }

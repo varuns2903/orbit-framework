@@ -25,7 +25,7 @@ Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performan
 | **Modern Protocols** | HTTP/1.1, HTTP/2, **HTTP/3 & QUIC** — no external proxy needed |
 | **Express-Style API** | Routing, middleware chains, route groups, and dynamic parameters |
 | **Magic Returns** | Return `std::string`, structs, or `nlohmann::json` from handlers — Orbit auto-serializes |
-| **Built-in ORM** | Expression Template DSL: `Col("age") >= 18` compiles to SQL at zero runtime cost |
+| **Built-in ORM** | Expression DSL: `Col("age") >= 18` builds SQL with bound parameters, never spliced values |
 | **Real-Time** | RFC 6455 WebSockets + Socket.IO-style EventRouter with rooms & sessions |
 | **13+ Middlewares** | CORS, JWT Auth, Rate Limiting, CSRF, Compression, Proxy, OAuth2, and more |
 | **4 Database Clients** | PostgreSQL, MySQL/MariaDB, MongoDB, Redis — all async with C++20 coroutines |
@@ -452,7 +452,7 @@ app.get("/adults", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWrit
         auto db = std::make_shared<database::PostgresClient>(&writer->proactor(), "dbname=myapp");
         co_await connect_async(db);
 
-        // Type-safe Expression Template DSL → compiled to SQL
+        // Expression DSL → parameterized SQL (values are bound, not spliced)
         auto users = co_await query_User(db)
             .where(orm::Col("age") >= 18)
             .get_async();
