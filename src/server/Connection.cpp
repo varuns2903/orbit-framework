@@ -814,12 +814,11 @@ RequestState Connection::check_request_state() {
         if (space1 != std::string_view::npos && space2 != std::string_view::npos && space1 != space2) {
             http::HttpMethod method = http::HttpParser::parse_method(request_line.substr(0, space1));
             std::string_view full_uri = request_line.substr(space1 + 1, space2 - space1 - 1);
-            std::string uri;
             size_t q_mark = full_uri.find('?');
-            if (q_mark != std::string_view::npos) {
-                uri = std::string(full_uri.substr(0, q_mark));
-            } else {
-                uri = std::string(full_uri);
+            // Match stream routes on the decoded path, as the router does.
+            std::string uri;
+            if (!http::percent_decode(full_uri.substr(0, q_mark), uri, false, true)) {
+                uri.clear();
             }
             
             if (router_.is_stream_route(method, uri)) {

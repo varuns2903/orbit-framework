@@ -37,6 +37,35 @@ bool connection_option_present(std::string_view field_value, std::string_view op
     return false;
 }
 
+bool percent_decode(std::string_view in, std::string& out, bool plus_as_space, bool for_path) {
+    auto hexval = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    out.clear();
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        char c = in[i];
+        if (c == '%') {
+            if (i + 2 >= in.size()) return false;
+            int hi = hexval(in[i + 1]);
+            int lo = hexval(in[i + 2]);
+            if (hi < 0 || lo < 0) return false;
+            char decoded = static_cast<char>(hi * 16 + lo);
+            if (for_path && (decoded == '/' || decoded == '\\' || decoded == '\0')) return false;
+            out.push_back(decoded);
+            i += 2;
+        } else if (c == '+' && plus_as_space) {
+            out.push_back(' ');
+        } else {
+            out.push_back(c);
+        }
+    }
+    return true;
+}
+
 HttpMethod HttpParser::parse_method(std::string_view method_str) {
     if (method_str == "GET") return HttpMethod::GET;
     if (method_str == "POST") return HttpMethod::POST;
@@ -68,22 +97,27 @@ std::optional<HttpRequest> HttpParser::parse(std::string_view raw_request) {
         std::string full_uri = std::string(request_line.substr(space1 + 1, space2 - space1 - 1));
         
         auto q_mark = full_uri.find('?');
+        std::string_view raw_path = std::string_view(full_uri).substr(0, q_mark);
+        // Routes, params and static files all see the decoded path.
+        if (!percent_decode(raw_path, request.uri, false, true)) {
+            return std::nullopt;
+        }
         if (q_mark != std::string::npos) {
-            request.uri = full_uri.substr(0, q_mark);
             std::string query_string = full_uri.substr(q_mark + 1);
             
             std::istringstream q_stream(query_string);
             std::string kv;
             while (std::getline(q_stream, kv, '&')) {
+                if (kv.empty()) continue;
                 auto eq_pos = kv.find('=');
-                if (eq_pos != std::string::npos) {
-                    request.query[kv.substr(0, eq_pos)] = kv.substr(eq_pos + 1);
-                } else {
-                    request.query[kv] = ""; // Key with no value
+                std::string key, value;
+                std::string_view raw_key = std::string_view(kv).substr(0, eq_pos);
+                std::string_view raw_value = eq_pos == std::string::npos ? std::string_view{} : std::string_view(kv).substr(eq_pos + 1);
+                if (!percent_decode(raw_key, key, true, false) || !percent_decode(raw_value, value, true, false)) {
+                    return std::nullopt;
                 }
+                request.query[key] = value; // A key with no '=' gets an empty value
             }
-        } else {
-            request.uri = full_uri;
         }
 
         request.http_version = std::string(request_line.substr(space2 + 1));
