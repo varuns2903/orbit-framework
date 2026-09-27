@@ -191,13 +191,15 @@ bool is_safe_cookie_part(std::string_view s) {
 } // namespace
 
 std::string HttpResponse::serialize_headers() const {
-    std::ostringstream oss;
+    // Not "oss": the LOG_* macros declare their own oss, and MSVC /WX
+    // rejects the shadowing (C4456).
+    std::ostringstream out;
     int code = static_cast<int>(status_code);
     if (code < 100 || code > 999) {
         LOG_ERROR("Invalid HTTP status code " << code << "; sending 500 instead");
         code = 500;
     }
-    oss << "HTTP/1.1 " << code << " " << reason_phrase(code) << "\r\n";
+    out << "HTTP/1.1 " << code << " " << reason_phrase(code) << "\r\n";
 
     bool has_content_length = false;
     for (const auto& [key, value] : headers) {
@@ -208,7 +210,7 @@ std::string HttpResponse::serialize_headers() const {
             continue;
         }
         if (utils::CaseInsensitiveEqual{}(std::string_view(key), std::string_view("Content-Length"))) has_content_length = true;
-        oss << key << ": " << value << "\r\n";
+        out << key << ": " << value << "\r\n";
     }
 
     for (const auto& cookie : cookies) {
@@ -218,22 +220,22 @@ std::string HttpResponse::serialize_headers() const {
             LOG_WARN("Dropping cookie with invalid characters: " << cookie.name);
             continue;
         }
-        oss << "Set-Cookie: " << cookie.name << "=" << cookie.value;
-        if (!cookie.path.empty()) oss << "; Path=" << cookie.path;
-        if (!cookie.domain.empty()) oss << "; Domain=" << cookie.domain;
-        if (cookie.max_age >= 0) oss << "; Max-Age=" << cookie.max_age;
-        if (cookie.secure) oss << "; Secure";
-        if (cookie.http_only) oss << "; HttpOnly";
-        if (!cookie.same_site.empty()) oss << "; SameSite=" << cookie.same_site;
-        oss << "\r\n";
+        out << "Set-Cookie: " << cookie.name << "=" << cookie.value;
+        if (!cookie.path.empty()) out << "; Path=" << cookie.path;
+        if (!cookie.domain.empty()) out << "; Domain=" << cookie.domain;
+        if (cookie.max_age >= 0) out << "; Max-Age=" << cookie.max_age;
+        if (cookie.secure) out << "; Secure";
+        if (cookie.http_only) out << "; HttpOnly";
+        if (!cookie.same_site.empty()) out << "; SameSite=" << cookie.same_site;
+        out << "\r\n";
     }
 
     if (!has_content_length && !body.empty()) {
-        oss << "Content-Length: " << body.length() << "\r\n";
+        out << "Content-Length: " << body.length() << "\r\n";
     }
 
-    oss << "\r\n";
-    return oss.str();
+    out << "\r\n";
+    return out.str();
 }
 
 std::string HttpResponse::serialize() const {
