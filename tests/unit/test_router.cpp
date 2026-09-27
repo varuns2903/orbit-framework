@@ -145,3 +145,71 @@ TEST(RouterTest, MiddlewareExecution) {
     router.route(req2, writer2);
     EXPECT_EQ(writer2->last_response.status_code, http::HttpStatus::OK);
 }
+
+// --- Nested groups (issue #26) ---
+
+namespace {
+routing::Middleware tag(std::vector<std::string>& log, std::string name) {
+    return [&log, name](http::HttpRequest&, std::shared_ptr<http::ResponseWriter>) {
+        log.push_back(name);
+        return true;
+    };
+}
+
+http::HttpRequest get_request(const std::string& uri, http::HttpMethod method = http::HttpMethod::GET) {
+    http::HttpRequest req;
+    req.method = method;
+    req.uri = uri;
+    return req;
+}
+} // namespace
+
+TEST(RouterGroupTest, NestedGroupsKeepRoutesPrefixesAndMiddleware) {
+    routing::Router router;
+    std::vector<std::string> log;
+    router.group("/api", [&](routing::Router& api) {
+        api.use(tag(log, "api"));
+        api.get("/ping", [&](http::HttpRequest&, std::shared_ptr<http::ResponseWriter>) { log.push_back("ping"); });
+        api.group("/v1", [&](routing::Router& v1) {
+            v1.use(tag(log, "v1"));
+            v1.get("/users", [&](http::HttpRequest&, std::shared_ptr<http::ResponseWriter>) { log.push_back("users"); });
+            v1.group("/admin", [&](routing::Router& admin) {
+                admin.use(tag(log, "admin"));
+                admin.get("/stats/:id", [&](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter>) {
+                    log.push_back("stats " + req.params["id"]);
+                });
+            });
+        });
+    });
+
+    auto r1 = get_request("/api/ping");
+    router.route(r1, nullptr);
+    EXPECT_EQ(log, (std::vector<std::string>{"api", "ping"}));
+
+    log.clear();
+    auto r2 = get_request("/api/v1/users");
+    router.route(r2, nullptr);
+    EXPECT_EQ(log, (std::vector<std::string>{"api", "v1", "users"}));
+
+    log.clear();
+    auto r3 = get_request("/api/v1/admin/stats/42");
+    router.route(r3, nullptr);
+    EXPECT_EQ(log, (std::vector<std::string>{"api", "v1", "admin", "stats 42"}));
+}
+
+TEST(RouterGroupTest, StreamRoutesInGroupsRunGroupMiddleware) {
+    routing::Router router;
+    std::vector<std::string> log;
+    router.group("/up", [&](routing::Router& up) {
+        up.use(tag(log, "auth"));
+        up.group("/files", [&](routing::Router& files) {
+            files.add_stream_route(http::HttpMethod::POST, "/raw", [&](http::HttpRequest&, std::shared_ptr<http::ResponseWriter>) {
+                log.push_back("stream");
+            });
+        });
+    });
+    EXPECT_TRUE(router.is_stream_route(http::HttpMethod::POST, "/up/files/raw"));
+    auto req = get_request("/up/files/raw", http::HttpMethod::POST);
+    router.route(req, nullptr);
+    EXPECT_EQ(log, (std::vector<std::string>{"auth", "stream"}));
+}

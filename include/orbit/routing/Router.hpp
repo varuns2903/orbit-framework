@@ -127,6 +127,7 @@ public:
 private:
 
     std::string make_route_key(http::HttpMethod method, std::string_view path) const;
+    void mark_stream_route(http::HttpMethod method, const std::string& full_path);
     std::vector<std::string> split_path(std::string_view path) const;
     
     std::string prefix_;
