@@ -85,59 +85,65 @@ void Connection::on_read_complete(ssize_t bytes_read) {
     
     reset_timer();
     
+    bool have_tls_output = false;
     if (ssl_) {
-        BIO_write(rbio_, async_read_buf_, static_cast<int>(bytes_read));
-        
-        if (!is_tls_handshake_complete_) {
-            int ret = SSL_do_handshake(ssl_);
-            if (ret == 1) {
-                is_tls_handshake_complete_ = true;
-                const unsigned char* alpn = nullptr;
-                unsigned int alpn_len = 0;
-                SSL_get0_alpn_selected(ssl_, &alpn, &alpn_len);
-                if (alpn_len == 2 && std::memcmp(alpn, "h2", 2) == 0) {
-                    state_ = ConnectionState::HTTP2;
-                    h2_session_ = std::make_shared<http::h2::Http2Session>(*this, router_, thread_pool_);
-                }
-            } else {
-                int err = SSL_get_error(ssl_, ret);
-                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-                    char wbuf[4096];
-                    while (true) {
-                        int wbytes = BIO_read(wbio_, wbuf, sizeof(wbuf));
-                        if (wbytes <= 0) break;
-                        tls_write_buffer_.insert(tls_write_buffer_.end(), wbuf, wbuf + wbytes);
-                    }
-                    if (!tls_write_buffer_.empty()) {
-                        trigger_write();
-                    }
-                    trigger_read(); // Continue reading handshake data
-                    return;
+        std::vector<char> plaintext;
+        bool handshake_failed = false;
+        bool handshake_pending = false;
+        bool negotiated_h2 = false;
+        {
+            std::lock_guard<std::mutex> tls_lock(tls_mutex_);
+            BIO_write(rbio_, async_read_buf_, static_cast<int>(bytes_read));
+            
+            if (!is_tls_handshake_complete_) {
+                int ret = SSL_do_handshake(ssl_);
+                if (ret == 1) {
+                    is_tls_handshake_complete_ = true;
+                    const unsigned char* alpn = nullptr;
+                    unsigned int alpn_len = 0;
+                    SSL_get0_alpn_selected(ssl_, &alpn, &alpn_len);
+                    negotiated_h2 = (alpn_len == 2 && std::memcmp(alpn, "h2", 2) == 0);
                 } else {
-                    manager_.remove_connection(socket_.fd());
-                    return;
-                }
-            }
-        }
-        
-        if (is_tls_handshake_complete_) {
-            while (true) {
-                char clear_buf[8192];
-                int ret = SSL_read(ssl_, clear_buf, sizeof(clear_buf));
-                if (ret > 0) {
-                    std::lock_guard<std::mutex> lock(read_mutex_);
-                    read_buffer_.insert(read_buffer_.end(), clear_buf, clear_buf + ret);
-                } else {
-                    break;
+                    int err = SSL_get_error(ssl_, ret);
+                    if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                        handshake_pending = true;
+                    } else {
+                        handshake_failed = true;
+                    }
                 }
             }
             
-            char wbuf[4096];
-            while (true) {
-                int wbytes = BIO_read(wbio_, wbuf, sizeof(wbuf));
-                if (wbytes <= 0) break;
-                tls_write_buffer_.insert(tls_write_buffer_.end(), wbuf, wbuf + wbytes);
+            if (is_tls_handshake_complete_) {
+                char clear_buf[8192];
+                while (true) {
+                    int ret = SSL_read(ssl_, clear_buf, sizeof(clear_buf));
+                    if (ret <= 0) break;
+                    plaintext.insert(plaintext.end(), clear_buf, clear_buf + ret);
+                }
             }
+
+            drain_tls_output_locked();
+            have_tls_output = !tls_write_buffer_.empty();
+        }
+
+        if (handshake_failed) {
+            manager_.remove_connection(socket_.fd());
+            return;
+        }
+        if (handshake_pending) {
+            if (have_tls_output) {
+                trigger_write();
+            }
+            trigger_read(); // Continue reading handshake data
+            return;
+        }
+        if (negotiated_h2) {
+            state_ = ConnectionState::HTTP2;
+            h2_session_ = std::make_shared<http::h2::Http2Session>(*this, router_, thread_pool_);
+        }
+        if (!plaintext.empty()) {
+            std::lock_guard<std::mutex> lock(read_mutex_);
+            read_buffer_.insert(read_buffer_.end(), plaintext.begin(), plaintext.end());
         }
     } else {
         std::lock_guard<std::mutex> lock(read_mutex_);
@@ -146,7 +152,7 @@ void Connection::on_read_complete(ssize_t bytes_read) {
     
     // We defer checking max body size to check_request_state()
     
-    if (!tls_write_buffer_.empty()) {
+    if (have_tls_output) {
         trigger_write();
     }
     
@@ -557,36 +563,37 @@ void Connection::trigger_write() {
                 write_buffer_.clear();
             }
         }
-        if (!chunk_to_encrypt.empty()) {
-            SSL_write(ssl_, chunk_to_encrypt.data(), static_cast<int>(chunk_to_encrypt.size()));
-        }
-        
-        char buf[4096];
-        while (true) {
-            int bytes = BIO_read(wbio_, buf, sizeof(buf));
-            if (bytes <= 0) break;
-            tls_write_buffer_.insert(tls_write_buffer_.end(), buf, buf + bytes);
-        }
-        
-        if (file_fd_ != -1 && file_offset_ < file_size_ && tls_write_buffer_.empty()) {
-            char file_buf[16384];
-            size_t to_read = static_cast<size_t>(std::min(static_cast<off_t>(sizeof(file_buf)), file_size_ - file_offset_));
-            ssize_t bytes_read = pread(file_fd_, file_buf, to_read, file_offset_);
-            
-            if (bytes_read > 0) {
-                SSL_write(ssl_, file_buf, static_cast<int>(bytes_read));
-                file_offset_ += bytes_read;
-                
-                while (true) {
-                    int wbytes = BIO_read(wbio_, buf, sizeof(buf));
-                    if (wbytes <= 0) break;
-                    tls_write_buffer_.insert(tls_write_buffer_.end(), buf, buf + wbytes);
-                }
-            } else {
-                is_writing_ = false;
-                manager_.remove_connection(socket_.fd());
-                return;
+
+        bool file_read_failed = false;
+        {
+            std::lock_guard<std::mutex> tls_lock(tls_mutex_);
+            if (!chunk_to_encrypt.empty()) {
+                SSL_write(ssl_, chunk_to_encrypt.data(), static_cast<int>(chunk_to_encrypt.size()));
             }
+            drain_tls_output_locked();
+            
+            if (file_fd_ != -1 && file_offset_ < file_size_ && tls_write_buffer_.empty() && tls_inflight_.empty()) {
+                char file_buf[16384];
+                size_t to_read = static_cast<size_t>(std::min(static_cast<off_t>(sizeof(file_buf)), file_size_ - file_offset_));
+                ssize_t bytes_read = pread(file_fd_, file_buf, to_read, file_offset_);
+                if (bytes_read > 0) {
+                    SSL_write(ssl_, file_buf, static_cast<int>(bytes_read));
+                    file_offset_ += bytes_read;
+                    drain_tls_output_locked();
+                } else {
+                    file_read_failed = true;
+                }
+            }
+
+            if (tls_inflight_.empty() && !tls_write_buffer_.empty()) {
+                tls_inflight_.swap(tls_write_buffer_);
+            }
+        }
+
+        if (file_read_failed) {
+            is_writing_ = false;
+            manager_.remove_connection(socket_.fd());
+            return;
         }
         
         if (file_fd_ != -1 && file_offset_ >= file_size_) {
@@ -594,9 +601,11 @@ void Connection::trigger_write() {
             file_fd_ = -1;
         }
         
-        if (!tls_write_buffer_.empty()) {
+        // tls_inflight_ belongs to this writer until on_write_complete, so it
+        // is safe to hand its storage to the proactor outside the lock.
+        if (!tls_inflight_.empty()) {
             auto self = shared_from_this();
-            proactor_.async_write(socket_.fd(), tls_write_buffer_.data(), tls_write_buffer_.size(), [self](ssize_t written) {
+            proactor_.async_write(socket_.fd(), tls_inflight_.data(), tls_inflight_.size(), [self](ssize_t written) {
                 self->on_write_complete(written);
             });
             return; // Will clear flag in callback
@@ -648,7 +657,8 @@ void Connection::on_write_complete(ssize_t bytes_written) {
     reset_timer();
     
     if (ssl_) {
-        tls_write_buffer_.erase(tls_write_buffer_.begin(), tls_write_buffer_.begin() + bytes_written);
+        size_t n = std::min(static_cast<size_t>(bytes_written), tls_inflight_.size());
+        tls_inflight_.erase(tls_inflight_.begin(), tls_inflight_.begin() + static_cast<std::ptrdiff_t>(n));
     } else {
         std::lock_guard<std::mutex> lock(write_mutex_);
         if (static_cast<size_t>(bytes_written) <= active_write_buffer_.size()) {
@@ -673,6 +683,15 @@ void Connection::on_sendfile_complete(ssize_t bytes_written) {
     
     is_writing_ = false;
     trigger_write();
+}
+
+void Connection::drain_tls_output_locked() {
+    char buf[4096];
+    while (true) {
+        int bytes = BIO_read(wbio_, buf, sizeof(buf));
+        if (bytes <= 0) break;
+        tls_write_buffer_.insert(tls_write_buffer_.end(), buf, buf + bytes);
+    }
 }
 
 void Connection::write_raw(const std::vector<char>& data) {
