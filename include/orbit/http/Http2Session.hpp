@@ -135,7 +135,7 @@ private:
  */
 class Http2ResponseWriter : public http::ResponseWriter {
 public:
-    Http2ResponseWriter(Http2Session* session, int32_t stream_id);
+    Http2ResponseWriter(Http2Session* session, int32_t stream_id, bool suppress_body = false);
     
     void add_interceptor(Interceptor interceptor) override;
     void set_header(const std::string& key, const std::string& value) override;
@@ -156,6 +156,7 @@ private:
     std::unordered_map<std::string, std::string> default_headers_;
     std::vector<Interceptor> interceptors_;
     bool headers_sent_{false};
+    bool suppress_body_{false}; // HEAD request
 };
 
 } // namespace h2

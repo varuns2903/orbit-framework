@@ -245,7 +245,8 @@ void Http2Session::dispatch_request(std::shared_ptr<StreamContext> stream_ctx) {
     }
     
     stream_ctx->request.client_ip = connection_.client_ip();
-    auto writer = std::make_shared<Http2ResponseWriter>(this, stream_ctx->stream_id);
+    auto writer = std::make_shared<Http2ResponseWriter>(this, stream_ctx->stream_id,
+                                                        stream_ctx->request.method == http::HttpMethod::HEAD);
     
     // Pass stream_ctx to keep it alive
     thread_pool_.enqueue([this, stream_ctx, writer]() mutable {
@@ -332,8 +333,8 @@ void Http2Session::end_stream(int32_t stream_id) {
 
 // ---------------- Http2ResponseWriter ----------------
 
-Http2ResponseWriter::Http2ResponseWriter(Http2Session* session, int32_t stream_id)
-    : session_(session), stream_id_(stream_id) {}
+Http2ResponseWriter::Http2ResponseWriter(Http2Session* session, int32_t stream_id, bool suppress_body)
+    : session_(session), stream_id_(stream_id), suppress_body_(suppress_body) {}
 
 void Http2ResponseWriter::add_interceptor(Interceptor interceptor) {
     interceptors_.push_back(std::move(interceptor));
@@ -359,7 +360,9 @@ void Http2ResponseWriter::send(http::HttpResponse&& response) {
             response.headers[k] = v;
         }
     }
-    bool has_body = !response.body.empty() || response.file_fd != -1;
+    int code = static_cast<int>(response.status_code);
+    bool bodiless = suppress_body_ || code < 200 || code == 204 || code == 304;
+    bool has_body = !bodiless && (!response.body.empty() || response.file_fd != -1);
     session_->submit_response(stream_id_, response, has_body);
 }
 
@@ -371,7 +374,7 @@ void Http2ResponseWriter::send_headers(http::HttpResponse& response) {
             response.headers[k] = v;
         }
     }
-    session_->submit_response(stream_id_, response, true);
+    session_->submit_response(stream_id_, response, !suppress_body_);
 }
 
 void Http2ResponseWriter::write_chunk(std::string_view chunk) {

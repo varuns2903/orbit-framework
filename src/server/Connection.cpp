@@ -230,6 +230,7 @@ void Connection::process_request() {
     if (parsed_req) {
         http::HttpRequest& req = *parsed_req;
         req.client_ip = client_ip_;
+        is_head_request_ = (req.method == http::HttpMethod::HEAD);
         
         // WebSocket Upgrade Interception
         auto upgrade_it = req.headers.find("Upgrade");
@@ -429,7 +430,11 @@ void Connection::send(http::HttpResponse&& response) {
     bool is_file = (response.file_fd != -1);
     std::string serialized_data;
     
-    if (is_file) {
+    if (is_head_request_) {
+        // Same headers as GET (including Content-Length), no content; an
+        // open file is closed by the response's destructor.
+        serialized_data = response.serialize_headers();
+    } else if (is_file) {
         serialized_data = response.serialize_headers();
         this->file_fd_ = response.file_fd;
         this->file_size_ = response.file_size;
@@ -470,6 +475,7 @@ void Connection::send(http::HttpResponse&& response) {
 }
 
 void Connection::write_chunk(std::string_view chunk) {
+    if (is_head_request_) return;
     if (is_chunked_) {
         std::string formatted_chunk;
         char hex_len[32];
@@ -484,7 +490,7 @@ void Connection::write_chunk(std::string_view chunk) {
 }
 
 void Connection::end() {
-    if (is_chunked_) {
+    if (is_chunked_ && !is_head_request_) {
         send_data("0\r\n\r\n");
     }
     

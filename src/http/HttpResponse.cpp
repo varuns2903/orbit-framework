@@ -230,7 +230,9 @@ std::string HttpResponse::serialize_headers() const {
         out << "\r\n";
     }
 
-    if (!has_content_length && !body.empty()) {
+    // 1xx, 204 and 304 responses never carry content (RFC 9110 section 6.4.1).
+    const bool bodiless = code < 200 || code == 204 || code == 304;
+    if (!has_content_length && !body.empty() && !bodiless) {
         out << "Content-Length: " << body.length() << "\r\n";
     }
 
@@ -240,6 +242,10 @@ std::string HttpResponse::serialize_headers() const {
 
 std::string HttpResponse::serialize() const {
     if (file_fd != -1) {
+        return serialize_headers();
+    }
+    int code = static_cast<int>(status_code);
+    if (code < 200 || code == 204 || code == 304) {
         return serialize_headers();
     }
     return serialize_headers() + body;
