@@ -7,7 +7,7 @@ Deploying Orbit applications to production is straightforward thanks to its mini
 Orbit provides a multi-stage `Dockerfile` in the root repository. 
 
 The build works in two stages:
-1. **Builder Stage**: Installs the compiler, CMake, and development headers (`libpq-dev`, `libhiredis-dev`, etc.). It also fetches and compiles `quictls`, `ngtcp2`, and `nghttp3` for HTTP/3 support.
+1. **Builder Stage**: Installs the compiler, CMake, and development headers (`libpq-dev`, `libmariadb-dev`, etc.). It also fetches and compiles `quictls`, `ngtcp2`, and `nghttp3` for HTTP/3 support.
 2. **Runtime Stage**: Copies *only* the compiled binaries and the required runtime shared libraries (`.so` files) into a clean, lightweight Ubuntu image.
 
 ### Building the Image
