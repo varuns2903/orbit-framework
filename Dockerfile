@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libpq-dev \
     libcurl4-openssl-dev \
-    libhiredis-dev \
     zlib1g-dev \
     libnghttp2-dev \
     liburing-dev \
@@ -77,7 +76,6 @@ RUN apt-get update && apt-get install -y \
     libpq5 \
     libpq-dev \
     libcurl4 \
-    libhiredis-dev \
     zlib1g \
     libnghttp2-14 \
     liburing2 \
