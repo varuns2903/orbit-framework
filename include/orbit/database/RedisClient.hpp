@@ -76,8 +76,12 @@ public:
     bool expire(const std::string& key, int seconds);
 
 private:
+    // Callers must hold mutex_.
+    bool connect_locked();
+    void close_locked();
+
     std::string send_command(const std::vector<std::string>& args);
-    std::string read_response();
+    std::string read_response(bool& ok);
 
     std::string host_;
     int port_;
