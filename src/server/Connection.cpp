@@ -213,6 +213,8 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
     } else if (state == RequestState::ERROR_HEADERS_TOO_LARGE) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
+    } else if (state == RequestState::ERROR_BAD_REQUEST) {
+        send_error(http::HttpStatus::BadRequest, "400 Bad Request");
     } else {
         trigger_read();
     }
@@ -316,18 +318,26 @@ void Connection::process_request() {
             should_close_ = true;
         }
         
-        // Erase request from read buffer
+        // Erase request from read buffer. The parser has already rejected
+        // malformed framing, so Content-Length here is a validated number.
         size_t headers_end = raw_request.find("\r\n\r\n");
         size_t consumed_bytes = headers_end + 4;
         
         if (state_ != ConnectionState::HTTP_STREAMING_BODY) {
-            auto cl_it = req.headers.find("Content-Length");
-            if (cl_it != req.headers.end()) {
-                consumed_bytes += std::stoull(std::string(cl_it->second));
-            } else if (req.headers.find("Transfer-Encoding") != req.headers.end()) {
-                // If chunked and not streaming, consume everything
-                consumed_bytes = read_buffer_.size();
+            size_t request_line_end = raw_request.find("\r\n");
+            http::MessageFraming framing = http::parse_framing(
+                raw_request.substr(request_line_end + 2, headers_end + 2 - (request_line_end + 2)));
+            if (framing.chunked) {
+                size_t encoded_size = 0;
+                http::decode_chunked(raw_request.substr(headers_end + 4), request_body_storage_,
+                                     encoded_size, max_body_size_);
+                req.body = request_body_storage_;
+                consumed_bytes += encoded_size;
+            } else if (framing.has_content_length) {
+                consumed_bytes += framing.content_length;
             }
+        } else {
+            req.body = {};
         }
         
         {
@@ -452,6 +462,8 @@ void Connection::send(http::HttpResponse&& response) {
         send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
     } else if (state == RequestState::ERROR_HEADERS_TOO_LARGE) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
+    } else if (state == RequestState::ERROR_BAD_REQUEST) {
+        send_error(http::HttpStatus::BadRequest, "400 Bad Request");
     } else {
         is_processing_request_ = false;
         // Double check state after releasing the lock, just in case data was appended concurrently
@@ -498,6 +510,8 @@ void Connection::end() {
         send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
     } else if (state == RequestState::ERROR_HEADERS_TOO_LARGE) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
+    } else if (state == RequestState::ERROR_BAD_REQUEST) {
+        send_error(http::HttpStatus::BadRequest, "400 Bad Request");
     } else {
         is_processing_request_ = false;
         if (check_request_state() == RequestState::COMPLETE) {
@@ -803,115 +817,70 @@ RequestState Connection::check_request_state() {
     if (first_line_end != std::string_view::npos && first_line_end > 4096) {
         return RequestState::ERROR_HEADERS_TOO_LARGE;
     }
+    if (headers_end > 8192) {
+        return RequestState::ERROR_HEADERS_TOO_LARGE;
+    }
+
+    // Framing is decided once, strictly, from the parsed header lines. Both
+    // this check and process_request() use the same rules, so they can never
+    // disagree about where a request ends.
+    http::MessageFraming framing = http::parse_framing(
+        buf_view.substr(first_line_end + 2, headers_end + 2 - (first_line_end + 2)));
+    if (!framing.valid) {
+        return RequestState::ERROR_BAD_REQUEST;
+    }
     
     // -------------------------------------------------------------
     // Check if this route is a STREAM route. If so, return HEADERS_COMPLETE
     // -------------------------------------------------------------
-    if (first_line_end != std::string_view::npos) {
-        std::string_view request_line = buf_view.substr(0, first_line_end);
-        size_t space1 = request_line.find(' ');
-        size_t space2 = request_line.find(' ', space1 + 1);
-        if (space1 != std::string_view::npos && space2 != std::string_view::npos && space1 != space2) {
-            http::HttpMethod method = http::HttpParser::parse_method(request_line.substr(0, space1));
-            std::string_view full_uri = request_line.substr(space1 + 1, space2 - space1 - 1);
-            std::string uri;
-            size_t q_mark = full_uri.find('?');
-            if (q_mark != std::string_view::npos) {
-                uri = std::string(full_uri.substr(0, q_mark));
+    std::string_view request_line = buf_view.substr(0, first_line_end);
+    size_t space1 = request_line.find(' ');
+    size_t space2 = request_line.find(' ', space1 + 1);
+    if (space1 != std::string_view::npos && space2 != std::string_view::npos && space1 != space2) {
+        http::HttpMethod method = http::HttpParser::parse_method(request_line.substr(0, space1));
+        std::string_view full_uri = request_line.substr(space1 + 1, space2 - space1 - 1);
+        size_t q_mark = full_uri.find('?');
+        std::string uri(q_mark != std::string_view::npos ? full_uri.substr(0, q_mark) : full_uri);
+        
+        if (router_.is_stream_route(method, uri)) {
+            if (framing.chunked) {
+                is_chunked_ = true;
+                is_chunk_header_mode_ = true;
             } else {
-                uri = std::string(full_uri);
+                is_chunked_ = false;
+                // Without Content-Length the stream runs until the peer closes,
+                // matching the previous streaming-route behaviour.
+                content_length_remaining_ = framing.has_content_length
+                    ? framing.content_length
+                    : static_cast<size_t>(-1);
             }
-            
-            if (router_.is_stream_route(method, uri)) {
-                std::string_view raw_request = buf_view.substr(0, headers_end + 4);
-                
-                auto ci_find = [](std::string_view haystack, std::string_view needle) -> size_t {
-                    auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(), [](char ch1, char ch2) {
-                        return std::tolower(static_cast<unsigned char>(ch1)) == std::tolower(static_cast<unsigned char>(ch2));
-                    });
-                    if (it != haystack.end()) {
-                        return std::distance(haystack.begin(), it);
-                    }
-                    return std::string_view::npos;
-                };
-                
-                if (ci_find(raw_request, "transfer-encoding") != std::string_view::npos) {
-                    is_chunked_ = true;
-                    is_chunk_header_mode_ = true;
-                } else {
-                    is_chunked_ = false;
-                    size_t cl_pos = ci_find(raw_request, "content-length:");
-                    if (cl_pos != std::string_view::npos) {
-                        size_t end_of_line = raw_request.find("\r\n", cl_pos);
-                        std::string_view cl_str = raw_request.substr(cl_pos + 15, end_of_line - cl_pos - 15);
-                        
-                        // Trim spaces
-                        while (!cl_str.empty() && cl_str.front() == ' ') cl_str.remove_prefix(1);
-                        
-                        if (!cl_str.empty()) {
-                            try {
-                                content_length_remaining_ = std::stoull(std::string(cl_str));
-                            } catch (...) {
-                                content_length_remaining_ = static_cast<size_t>(-1);
-                            }
-                        } else {
-                            content_length_remaining_ = static_cast<size_t>(-1);
-                        }
-                    } else {
-                        content_length_remaining_ = static_cast<size_t>(-1);
-                    }
-                }
-                
-                return RequestState::HEADERS_COMPLETE;
-            }
+            return RequestState::HEADERS_COMPLETE;
         }
     }
     // -------------------------------------------------------------
-    
-    auto ci_find = [](std::string_view haystack, std::string_view needle) -> size_t {
-        auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(), [](char ch1, char ch2) {
-            return std::tolower(static_cast<unsigned char>(ch1)) == std::tolower(static_cast<unsigned char>(ch2));
-        });
-        return it != haystack.end() ? static_cast<size_t>(std::distance(haystack.begin(), it)) : std::string_view::npos;
-    };
-    
-    size_t content_length_pos = ci_find(buf_view, "content-length:");
-    if (content_length_pos != std::string_view::npos && content_length_pos < headers_end) {
-        size_t value_start = content_length_pos + 15;
-        while (value_start < headers_end && (buf_view[value_start] == ' ' || buf_view[value_start] == '	')) {
-            value_start++;
+
+    std::string_view body = buf_view.substr(headers_end + 4);
+
+    if (framing.chunked) {
+        std::string decoded;
+        size_t consumed = 0;
+        switch (http::decode_chunked(body, decoded, consumed, max_body_size_)) {
+            case http::ChunkedStatus::Complete: return RequestState::COMPLETE;
+            case http::ChunkedStatus::Incomplete: return RequestState::INCOMPLETE;
+            case http::ChunkedStatus::TooLarge: return RequestState::ERROR_PAYLOAD_TOO_LARGE;
+            case http::ChunkedStatus::Invalid: return RequestState::ERROR_BAD_REQUEST;
         }
-        
-        size_t value_end = buf_view.find("\r\n", value_start);
-        std::string_view length_str = buf_view.substr(value_start, value_end - value_start);
-        
-        try {
-            size_t content_length = std::stoull(std::string(length_str));
-            if (content_length > max_body_size_) {
-                return RequestState::ERROR_PAYLOAD_TOO_LARGE;
-            }
-            size_t total_expected = headers_end + 4 + content_length;
-            if (read_buffer_.size() >= total_expected) {
-                return RequestState::COMPLETE;
-            }
-        } catch (...) {
-            return RequestState::INCOMPLETE;
-        }
-    } else {
-        // No Content-Length. If it's chunked, we should parse chunks, but for now we just check total buffer size
-        if (read_buffer_.size() - (headers_end + 4) > max_body_size_) {
+    }
+
+    if (framing.has_content_length) {
+        if (framing.content_length > max_body_size_) {
             return RequestState::ERROR_PAYLOAD_TOO_LARGE;
         }
+        return body.size() >= framing.content_length ? RequestState::COMPLETE : RequestState::INCOMPLETE;
     }
-    
-    if (headers_end != std::string_view::npos && content_length_pos == std::string_view::npos) {
-        // If no Content-Length and not Chunked, the request is complete (GET, etc.)
-        // But if it is chunked, we might need a better check. For now, assuming complete if no Content-Length
-        // Wait, HTTP standard says if no Content-Length and no Transfer-Encoding, body length is 0.
-        return RequestState::COMPLETE;
-    }
-    
-    return RequestState::INCOMPLETE; 
+
+    // No Content-Length and no Transfer-Encoding: the body is empty (RFC 9112 section 6.3).
+    return RequestState::COMPLETE;
 }
 
 } // namespace server
