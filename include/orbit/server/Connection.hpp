@@ -32,7 +32,8 @@ enum class RequestState {
     COMPLETE,
     HEADERS_COMPLETE,
     ERROR_PAYLOAD_TOO_LARGE,
-    ERROR_HEADERS_TOO_LARGE
+    ERROR_HEADERS_TOO_LARGE,
+    ERROR_BAD_REQUEST
 };
 
 /**
@@ -154,6 +155,7 @@ private:
     size_t content_length_remaining_{0};
 
     RequestState check_request_state();
+    std::string request_body_storage_; // Owns a decoded chunked request body
     bool should_close_{false};
     ConnectionState state_{ConnectionState::HTTP};
     uint64_t current_timer_id_{0};

@@ -53,7 +53,7 @@ scoped to be completable without deep knowledge of the codebase.
 ### Dependencies
 
 Orbit depends on OpenSSL, zlib, libpq, curl, libmariadb, mongo-c-driver,
-nghttp2, nghttp3, ngtcp2, hiredis, and (on Linux) liburing. Do not install these
+nghttp2, nghttp3, ngtcp2, and (on Linux) liburing. Do not install these
 by hand — use vcpkg, which reads the dependency list from `vcpkg.json`:
 
 ```bash
