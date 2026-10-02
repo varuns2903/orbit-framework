@@ -26,8 +26,10 @@ option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior Sanitizers" ON)
 option(ORBIT_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 
 if(ORBIT_ENABLE_COVERAGE)
-    add_compile_options(--coverage -O0 -g)
-    add_link_options(--coverage)
+    # Atomic counters: the tests run many threads, and non-atomic updates
+    # leave impossible counts (e.g. "branch taken -1") that gcovr rejects.
+    add_compile_options(--coverage -fprofile-update=atomic -O0 -g)
+    add_link_options(--coverage -fprofile-update=atomic)
 endif()
 
 # Optional sanitizers for debug builds to catch memory leaks and UB

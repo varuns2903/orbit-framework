@@ -7,6 +7,10 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+# Least privilege for GITHUB_TOKEN: these jobs only read the repository.
+permissions:
+  contents: read
+
 jobs:
   coverage:
     name: Measure test coverage
@@ -78,6 +82,7 @@ jobs:
           --filter "${GITHUB_WORKSPACE}/src/" \
           --filter "${GITHUB_WORKSPACE}/include/orbit/" \
           --exclude '.*json\.hpp' \
+          --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
           --html-details coverage.html \
           --xml coverage.xml \
           --txt coverage.txt \
