@@ -19,6 +19,16 @@ KqueueProactor::KqueueProactor() : events_(64) {
 }
 
 KqueueProactor::~KqueueProactor() {
+    // Pending callbacks may hold the last reference to objects whose
+    // destructors call remove() (e.g. a proxied request). Release them while
+    // ctx_mutex_ still exists: destroying contexts_ as a member happens after
+    // the mutex is gone, and macOS aborts on locking a destroyed mutex.
+    std::unordered_map<int, Context> pending;
+    {
+        std::lock_guard<std::mutex> lock(ctx_mutex_);
+        pending.swap(contexts_);
+    }
+    pending.clear();
     if (kq_fd_ >= 0) close(kq_fd_);
 }
 
