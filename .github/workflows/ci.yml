@@ -6,10 +6,15 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# Least privilege for GITHUB_TOKEN: these jobs only read the repository.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build & Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -86,7 +91,9 @@ jobs:
 
     - name: Run Tests
       working-directory: build
-      run: ctest -C Release --output-on-failure
+      # A hung test fails within minutes instead of holding the runner for
+      # GitHub's 6-hour job limit.
+      run: ctest -C Release --output-on-failure --timeout 300
 
     - name: Run Memory Leak Detection (Ubuntu)
       if: matrix.os == 'ubuntu-latest'

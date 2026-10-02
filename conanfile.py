@@ -53,7 +53,6 @@ class OrbitFrameworkRecipe(ConanFile):
         self.requires("libcurl/8.5.0")
         self.requires("mariadb-connector-c/3.3.3")
         self.requires("mongo-c-driver/1.25.0")
-        self.requires("hiredis/1.1.0")
         self.requires("nghttp2/1.58.0")
         # Note: ngtcp2 & nghttp3 might require manual recipes or custom conan remotes
         # self.requires("ngtcp2/1.1.0")
