@@ -37,7 +37,13 @@ void KqueueProactor::update_kqueue(Context& ctx) {
     EV_SET(&ev_write, ctx.fd, EVFILT_WRITE, needs_write ? EV_ADD : EV_DELETE, 0, 0, nullptr);
     changes.push_back(ev_write);
 
-    kevent(kq_fd_, changes.data(), changes.size(), nullptr, 0, nullptr);
+    // Apply each change on its own. With no event list, kevent() stops at the
+    // first failing change and returns -1: deleting a filter that was never
+    // added (ENOENT) used to silently drop the following EV_ADD, so e.g. the
+    // write filter for an outgoing connect was never registered.
+    for (auto& change : changes) {
+        kevent(kq_fd_, &change, 1, nullptr, 0, nullptr);
+    }
     ctx.tracked = true;
 }
 
@@ -48,7 +54,9 @@ void KqueueProactor::remove(socket_t fd) {
         struct kevent changes[2];
         EV_SET(&changes[0], fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
         EV_SET(&changes[1], fd, EVFILT_WRITE, EV_DELETE, 0, 0, nullptr);
-        kevent(kq_fd_, changes, 2, nullptr, 0, nullptr);
+        // Separately, for the same reason as in update_kqueue().
+        kevent(kq_fd_, &changes[0], 1, nullptr, 0, nullptr);
+        kevent(kq_fd_, &changes[1], 1, nullptr, 0, nullptr);
         contexts_.erase(it);
     }
 }
