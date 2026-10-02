@@ -1,4 +1,6 @@
 #include <orbit/concurrency/ThreadPool.hpp>
+#include <orbit/utils/Logger.hpp>
+#include <exception>
 
 namespace concurrency {
 
@@ -56,7 +58,15 @@ void ThreadPool::worker_loop() {
         
         // Execute the task OUTSIDE the lock. This is critical for parallel performance,
         // otherwise only one thread could execute a task at a time!
-        task();
+        // An exception escaping a worker thread would call std::terminate and
+        // take the whole server down, so contain it here.
+        try {
+            task();
+        } catch (const std::exception& e) {
+            LOG_ERROR("Unhandled exception in worker task: " << e.what());
+        } catch (...) {
+            LOG_ERROR("Unhandled non-standard exception in worker task");
+        }
     }
 }
 
