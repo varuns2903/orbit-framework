@@ -287,6 +287,11 @@ void Connection::process_request() {
                             ws_connection_->process_raw_data(read_buffer_);
                         }
                     }
+
+                    // The HTTP request path only re-arms the read once a response
+                    // has been sent, which never happens for an upgrade. Without
+                    // this, frames the client sends after the handshake are never read.
+                    trigger_read();
                     
                     return; // Bypass standard HTTP routing
                 }
