@@ -1,5 +1,5 @@
 #include <orbit/middleware/Csrf.hpp>
-#include <random>
+#include <orbit/utils/Random.hpp>
 #include <algorithm>
 
 namespace middleware {
@@ -8,20 +8,8 @@ Csrf::Csrf(const std::string& cookie_name, const std::string& header_name)
     : cookie_name_(cookie_name), header_name_(header_name) {}
 
 std::string Csrf::generate_random_token() {
-    const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    std::random_device rd;
-    std::mt19937 generator(rd());
-    std::uniform_int_distribution<> dist(0, sizeof(charset) - 2);
-    
-    std::string token;
-    token.reserve(32);
-    for (int i = 0; i < 32; ++i) {
-        token += charset[dist(generator)];
-    }
-    return token;
+    return utils::secure_random_hex(32);
 }
-
-
 
 bool Csrf::operator()(http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) {
     std::string cookie_token;
@@ -84,7 +72,7 @@ bool Csrf::operator()(http::HttpRequest& req, std::shared_ptr<http::ResponseWrit
         }
     }
 
-    if (cookie_token.empty() || provided_token.empty() || cookie_token != provided_token) {
+    if (cookie_token.empty() || provided_token.empty() || !utils::constant_time_equals(cookie_token, provided_token)) {
         http::HttpResponse res;
         res.status(http::HttpStatus::Forbidden).send("CSRF Token Verification Failed");
         writer->send(std::move(res));
