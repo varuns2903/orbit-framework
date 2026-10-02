@@ -13,7 +13,14 @@ ThreadPool::ThreadPool(size_t num_threads) {
 }
 
 ThreadPool::~ThreadPool() {
-    stop_ = true;
+    {
+        // Set the flag under the queue mutex. Otherwise a worker that has
+        // just checked the wait predicate (stop_ == false, queue empty) but
+        // not yet blocked misses the notification, sleeps forever, and
+        // join() below never returns.
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        stop_ = true;
+    }
     condition_.notify_all(); // Wake up all threads so they can exit gracefully
     
     for (std::thread& worker : workers_) {
