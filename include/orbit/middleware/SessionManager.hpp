@@ -8,45 +8,48 @@
 namespace middleware {
 
 /**
- * @ingroup middlewares
- * @brief Middleware for managing sessions using Redis.
+ * @brief Cookie and lifetime settings for SessionManager.
  */
-class SessionManager {
-public:
-    /**
-     * @brief Constructs a new Session Manager.
-     * 
-     * @param redis_host The Redis server host.
-     * @param redis_port The Redis server port.
-     */
-    SessionManager(const std::string& redis_host, int redis_port);
-    
-    /**
-     * @brief Middleware execution operator.
-     * 
-     * @param req The HTTP request.
-     * @param writer The HTTP response writer.
-     * @return true If the request should continue to the next handler.
-     * @return false If the request should be blocked.
-     */
-    bool operator()(http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer);
-
-private:
-    std::string generate_session_id();
-
-    std::shared_ptr<database::RedisClient> redis_;
+struct SessionOptions {
+    std::string cookie_name = "session_id";
+    int ttl_seconds = 86400;        ///< Idle lifetime; refreshed on every request
+    bool secure = false;            ///< Set the Secure attribute (enable behind HTTPS)
+    std::string same_site = "Lax";  ///< SameSite attribute: "Strict", "Lax" or "None"
 };
 
 /**
- * @ingroup middlewares
- * @brief Helper to create a session management middleware handler.
- * 
- * @param redis_host The Redis server host.
- * @param redis_port The Redis server port.
- * @return A middleware handler function.
+ * @brief Middleware that assigns each client a session identifier stored in Redis.
+ *
+ * Identifiers are 256-bit values from the system CSPRNG. An identifier sent by
+ * the client is accepted only if Redis holds it, so a client (or an attacker
+ * planting a cookie) cannot choose its own session identifier.
  */
-inline auto session(const std::string& redis_host, int redis_port) {
-    return [manager = std::make_shared<SessionManager>(redis_host, redis_port)]
+class SessionManager {
+public:
+    SessionManager(const std::string& redis_host, int redis_port, SessionOptions options = {});
+    
+    /**
+     * @brief Sets req.session_id to a valid session, creating one if needed.
+     */
+    bool operator()(http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer);
+
+    /**
+     * @brief Generates a new random session identifier (64 hex characters).
+     */
+    static std::string generate_session_id();
+
+private:
+    bool is_known_session(const std::string& session_id);
+
+    std::shared_ptr<database::RedisClient> redis_;
+    SessionOptions options_;
+};
+
+/**
+ * @brief Creates a session middleware backed by Redis.
+ */
+inline auto session(const std::string& redis_host, int redis_port, SessionOptions options = {}) {
+    return [manager = std::make_shared<SessionManager>(redis_host, redis_port, options)]
            (http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) -> bool {
         return (*manager)(req, writer);
     };
