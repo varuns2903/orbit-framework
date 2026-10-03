@@ -355,6 +355,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         orbit_add_example(fastapi_server)
         orbit_add_example(graphql_server)
         orbit_add_example(websocket_event_server)
+        orbit_add_example(websocket_echo_server)
 
         # Database-backed examples.
         orbit_add_example(database_server ORBIT_ENABLE_REDIS)

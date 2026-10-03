@@ -1,0 +1,73 @@
+name: WebSocket Conformance (Autobahn)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  autobahn:
+    name: Autobahn fuzzingclient
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v7
+
+    - name: Cache vcpkg dependencies
+      uses: actions/cache@v6
+      with:
+        path: |
+          build/vcpkg_installed
+          vcpkg/downloads
+        key: ${{ runner.os }}-vcpkg-manifest-v1-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-manifest-v1-
+
+    - name: Setup vcpkg (pinned to builtin-baseline)
+      run: |
+        mkdir -p vcpkg
+        cd vcpkg
+        if [ ! -d ".git" ]; then
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+        fi
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
+        ./bootstrap-vcpkg.sh -disableMetrics
+
+    - name: Build the echo server
+      run: |
+        cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake \
+          -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_GRPC=OFF -DORBIT_BUILD_TESTS=OFF -DORBIT_BUILD_EXAMPLES=ON
+        cmake --build build --parallel 4 --target websocket_echo_server
+
+    - name: Run Autobahn against it
+      run: |
+        ./build/websocket_echo_server --port 9001 --log-level WARN &
+        for i in $(seq 1 50); do nc -z 127.0.0.1 9001 && break; sleep 0.2; done
+        mkdir -p reports
+        docker run --rm --network host \
+          -v "$PWD/.github/autobahn:/config" -v "$PWD/reports:/reports" \
+          crossbario/autobahn-testsuite \
+          wstest -m fuzzingclient -s /config/fuzzingclient.json
+
+    - name: Check results
+      run: python3 .github/autobahn/check_results.py reports/servers/index.json
+
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: autobahn-report
+        path: reports/servers

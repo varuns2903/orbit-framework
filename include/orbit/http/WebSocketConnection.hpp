@@ -4,6 +4,8 @@
 #include <vector>
 #include <cstdint>
 #include <atomic>
+#include <mutex>
+#include <string_view>
 
 #include <zlib.h>
 
@@ -69,6 +71,13 @@ FrameStatus inspect_frame(const std::vector<char>& buffer, FrameHeader& header);
  */
 void unmask_payload(std::string& payload, const uint8_t mask_key[4]);
 
+/// True if data is well-formed UTF-8 (no overlong forms, surrogates, or code
+/// points above U+10FFFF), as RFC 6455 requires of text messages and close reasons.
+bool is_valid_utf8(std::string_view data);
+
+/// True if a close frame may carry this status code (RFC 6455 section 7.4).
+bool is_valid_close_code(uint16_t code);
+
 } // namespace detail
 
 /**
@@ -76,7 +85,14 @@ void unmask_payload(std::string& payload, const uint8_t mask_key[4]);
  */
 class WebSocketConnection {
 public:
+    /// Where frames go. Lets the protocol logic run without a socket (tests).
+    struct Transport {
+        std::function<void(const std::vector<char>&)> write; ///< Queue bytes to the peer.
+        std::function<void()> close;                          ///< Close once queued bytes are sent.
+    };
+
     explicit WebSocketConnection(server::Connection& underlying_connection, bool enable_deflate = false);
+    explicit WebSocketConnection(Transport transport, bool enable_deflate = false);
     ~WebSocketConnection();
 
     // User-facing API
@@ -88,6 +104,13 @@ public:
     void on_message(std::function<void(const std::string&)> handler);
 
     /**
+     * @brief Registers a callback for binary messages. When set, binary
+     *        messages go here and on_message() receives only text; when not
+     *        set, on_message() receives both, as before.
+     */
+    void on_binary_message(std::function<void(const std::string&)> handler);
+
+    /**
      * @brief Registers a callback to be called when the connection is closed.
      * @param handler The callback function.
      */
@@ -95,9 +118,15 @@ public:
     
     /**
      * @brief Sends a text message over the WebSocket connection.
+     *        Safe to call from any thread.
      * @param message The message to send.
      */
     void send(const std::string& message);
+
+    /**
+     * @brief Sends a binary message. Safe to call from any thread.
+     */
+    void send_binary(const std::string& data);
 
     /**
      * @brief Closes the WebSocket connection gracefully.
@@ -122,14 +151,30 @@ public:
     void process_raw_data(std::vector<char>& buffer);
 
 private:
-    server::Connection& connection_;
+    Transport transport_;
     std::function<void(const std::string&)> message_handler_;
+    std::function<void(const std::string&)> binary_handler_;
     std::function<void()> close_handler_;
     
     std::atomic<bool> is_closed_{false};
     size_t max_message_size_{16 * 1024 * 1024};
 
+    // Serialises frame construction, compression and queueing: send() may be
+    // called from any thread (e.g. EventRouter broadcasts) while the event
+    // loop answers pings and closes.
+    std::mutex send_mutex_;
+
+    // Message being reassembled from fragments (event-loop thread only).
+    uint8_t fragment_opcode_{0}; // 0 = none in progress
+    bool fragment_compressed_{false};
+    std::string fragment_payload_;
+
+    void send_frame(uint8_t opcode, const std::string& payload);
+    void write_frame_locked(uint8_t first_byte, const std::string& payload);
     void fail_connection(uint16_t status_code);
+    // Returns false if the connection was failed.
+    bool deliver_message(uint8_t opcode, bool compressed, std::string payload);
+    void handle_close_frame(const std::string& payload);
 
     bool deflate_enabled_{false};
     z_stream inflate_stream_{};
