@@ -4,22 +4,22 @@ on:
   push:
     branches:
       - main
+  # Pull requests build the docs (so a broken Doxygen setup is caught before
+  # merge) but never deploy them.
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: "pages"
+  group: "pages-${{ github.event_name }}-${{ github.ref }}"
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -29,15 +29,39 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y doxygen
 
       - name: Generate API Documentation
-        run: doxygen Doxyfile
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v6
+        # Doxyfile.in is the single Doxygen configuration (CMake's `docs`
+        # target uses it too); fill in its @VARIABLES@ without configuring
+        # the whole project.
+        run: |
+          VERSION=$(sed -n 's/^project(OrbitFramework VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          mkdir -p build-docs
+          sed -e "s|@PROJECT_NAME@|Orbit Framework|g" \
+              -e "s|@PROJECT_VERSION@|$VERSION|g" \
+              -e "s|@CMAKE_CURRENT_BINARY_DIR@|$PWD/build-docs|g" \
+              -e "s|@CMAKE_CURRENT_SOURCE_DIR@|$PWD|g" \
+              Doxyfile.in > build-docs/Doxyfile
+          doxygen build-docs/Doxyfile
+          test -f build-docs/docs/html/index.html
 
       - name: Upload artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
-          path: './docs/html'
+          path: './build-docs/docs/html'
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
 
       - name: Deploy to GitHub Pages
         id: deployment

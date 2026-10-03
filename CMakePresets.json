@@ -1,0 +1,82 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release",
+      "description": "Optimised library and examples, no tests.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ORBIT_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Debug + ASan/UBSan",
+      "description": "Debug build with tests and address/undefined-behaviour sanitizers.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ORBIT_BUILD_TESTS": "ON",
+        "ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "debug-nosan",
+      "inherits": "base",
+      "displayName": "Debug without sanitizers",
+      "description": "Debug build with tests; lighter on memory, and usable under Valgrind.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ORBIT_BUILD_TESTS": "ON",
+        "ENABLE_SANITIZERS": "OFF"
+      }
+    },
+    {
+      "name": "core",
+      "inherits": "base",
+      "displayName": "Core only",
+      "description": "HTTP/1.1, HTTP/2, routing, middleware and WebSockets; database backends and HTTP/3 off.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ORBIT_BUILD_TESTS": "OFF",
+        "ORBIT_ENABLE_POSTGRES": "OFF",
+        "ORBIT_ENABLE_MARIADB": "OFF",
+        "ORBIT_ENABLE_MONGODB": "OFF",
+        "ORBIT_ENABLE_REDIS": "OFF",
+        "ORBIT_ENABLE_HTTP3": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "debug-nosan", "configurePreset": "debug-nosan" },
+    { "name": "core", "configurePreset": "core" }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "timeout": 300 }
+    },
+    {
+      "name": "debug-nosan",
+      "configurePreset": "debug-nosan",
+      "output": { "outputOnFailure": true },
+      "execution": { "timeout": 300 }
+    }
+  ]
+}

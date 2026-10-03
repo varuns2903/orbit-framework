@@ -78,6 +78,25 @@ cmake -B build \
 cmake --build build --parallel
 ```
 
+Or use a preset from `CMakePresets.json` (CMake 3.21+; expects vcpkg cloned
+into `./vcpkg`). Each builds into `build/<preset>`:
+
+| Preset | What it builds |
+|--------|----------------|
+| `debug` | Debug + tests + ASan/UBSan |
+| `debug-nosan` | Debug + tests, no sanitizers (less memory; works under Valgrind) |
+| `release` | Optimised library and examples, no tests |
+| `core` | Release without database backends or HTTP/3 |
+
+```bash
+cmake --preset debug
+cmake --build --preset debug --parallel 4
+ctest --preset debug
+```
+
+Sanitizer builds use several GB of RAM per compile job; on a small machine,
+use `--parallel 1` or the `debug-nosan` preset.
+
 ### Useful CMake options
 
 | Option | Default | Purpose |
