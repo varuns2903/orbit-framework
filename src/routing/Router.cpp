@@ -40,9 +40,29 @@ bool Router::has_ws_route(const std::string& path) const {
 WsHandler Router::get_ws_route(const std::string& path) const {
     auto it = ws_routes_.find(path);
     if (it != ws_routes_.end()) {
-        return it->second;
+        return it->second.handler;
     }
     return nullptr;
+}
+
+bool Router::run_ws_middlewares(const std::string& path, http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> response_writer) const {
+    auto it = ws_routes_.find(path);
+    if (it == ws_routes_.end()) return false;
+    try {
+        for (const auto& mw : middlewares_) {
+            if (!mw(request, response_writer)) return false;
+        }
+        for (const auto& mw : it->second.middlewares) {
+            if (!mw(request, response_writer)) return false;
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Unhandled exception in WebSocket middleware for " << path << ": " << e.what());
+        http::HttpResponse res;
+        res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
+        response_writer->send(std::move(res));
+        return false;
+    }
+    return true;
 }
 
 void Router::group(const std::string& prefix, std::function<void(Router&)> callback) {
@@ -212,11 +232,18 @@ bool Router::is_stream_route(http::HttpMethod method, const std::string& path) c
 }
 
 void Router::ws(const std::string& path, WsHandler handler) {
+    ws(path, {}, std::move(handler));
+}
+
+void Router::ws(const std::string& path, std::vector<Middleware> mws, WsHandler handler) {
     std::string full_path = prefix_ + path;
+    // Group middleware wraps route middleware, exactly as for HTTP routes.
+    std::vector<Middleware> combined = local_middlewares_;
+    combined.insert(combined.end(), mws.begin(), mws.end());
     if (parent_) {
-        parent_->ws(full_path, std::move(handler));
+        parent_->ws(full_path, std::move(combined), std::move(handler));
     } else {
-        ws_routes_[full_path] = std::move(handler);
+        ws_routes_[full_path] = WsRoute{std::move(handler), std::move(combined)};
     }
 }
 
