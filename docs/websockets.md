@@ -41,6 +41,37 @@ app.ws("/chat", [](http::websocket::WebSocketConnection& ws) {
 });
 ```
 
+## Text and Binary Messages
+
+`send()` sends a text frame and `send_binary()` a binary one. Incoming binary
+messages go to `on_binary_message()` when it is set; otherwise `on_message()`
+receives both kinds, as it always has.
+
+```cpp
+app.ws("/echo", [](http::websocket::WebSocketConnection& ws) {
+    ws.on_message([&ws](const std::string& text) { ws.send(text); });
+    ws.on_binary_message([&ws](const std::string& data) { ws.send_binary(data); });
+});
+```
+
+`send()`, `send_binary()` and `close()` are safe to call from any thread, e.g. when
+broadcasting from a worker.
+
+## Protocol Conformance
+
+Connections follow RFC 6455 and RFC 7692 (permessage-deflate):
+
+- Fragmented messages are reassembled, and control frames may arrive between the fragments.
+- Pongs echo the ping payload.
+- Violations close the connection with the proper status code:
+  - `1002` for an unmasked client frame, an RSV bit set without a negotiated extension, a reserved opcode, a bad fragment sequence, or an invalid close code.
+  - `1007` for text, or a close reason, that is not valid UTF-8.
+- A close frame is answered with the client's status code.
+- Each compressed message uses a fresh deflate context, matching the negotiated `no_context_takeover`.
+
+CI runs the [Autobahn TestSuite](https://github.com/crossbario/autobahn-testsuite)
+against `examples/websocket_echo_server.cpp`; see `.github/workflows/autobahn.yml`.
+
 ## Securing WebSocket Routes
 
 Global middleware (`app.use`), group middleware and route middleware run before
