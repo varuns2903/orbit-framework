@@ -72,6 +72,30 @@ Simply run:
 docker-compose up -d --build
 ```
 
+## Connection Timeouts
+
+`ServerConfig` has one timeout per phase of a connection. A value of `0`
+disables that timeout.
+
+| Field | Default | Applies to |
+|---|---|---|
+| `header_timeout` | 10 s | From the first byte of a request until its headers are complete. Later bytes do **not** extend it, so a client cannot hold a connection by trickling header bytes. |
+| `keep_alive_timeout` | 10 s | Idle time between requests on a persistent connection. |
+| `idle_timeout` | 30 s | Longest pause while receiving a request body or writing a response. |
+| `websocket_idle_timeout` | 0 (off) | Idle time on WebSocket and raw-stream connections. |
+
+No timeout runs while a handler is executing, so slow handlers and
+Server-Sent Events streams are not cut off. WebSocket connections stay open while
+quiet; to drop dead peers, set `websocket_idle_timeout` and have clients send
+pings.
+
+```cpp
+config::ServerConfig cfg;
+cfg.header_timeout = std::chrono::seconds(5);
+cfg.keep_alive_timeout = std::chrono::seconds(60);
+cfg.websocket_idle_timeout = std::chrono::seconds(120);
+```
+
 ## 3. Reverse Proxies (NGINX / HAProxy)
 
 While Orbit is perfectly capable of being exposed directly to the public internet (and features its own Load Balancing and Proxy middlewares), you may wish to run it behind an enterprise reverse proxy like NGINX.
