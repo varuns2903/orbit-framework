@@ -97,11 +97,19 @@ void Connection::trigger_read() {
     bool expected = false;
     if (is_reading_.compare_exchange_strong(expected, true)) {
         auto self = shared_from_this();
-        proactor_.async_read(socket_.fd(), async_read_buf_, sizeof(async_read_buf_), [self](ssize_t bytes) {
-            self->is_reading_ = false;
-            self->on_read_complete(bytes);
+        bool submitted = submit_io([&] {
+            proactor_.async_read(socket_.fd(), async_read_buf_, sizeof(async_read_buf_), [self](ssize_t bytes) {
+                self->is_reading_ = false;
+                self->on_read_complete(bytes);
+            });
         });
+        if (!submitted) is_reading_ = false;
     }
+}
+
+void Connection::on_removed() {
+    std::lock_guard<std::mutex> lock(io_mutex_);
+    removed_ = true;
 }
 
 void Connection::on_read_complete(ssize_t bytes_read) {
@@ -572,7 +580,15 @@ void Connection::send(http::HttpResponse&& response) {
         serialized_data = response.serialize();
     }
 
-    send_data(serialized_data);
+    // Close once this response is on the wire. Deciding this here, not when
+    // the request was parsed, keeps an earlier pipelined response's write
+    // completion from closing the socket before this one is queued.
+    const bool last_response = should_close_;
+    send_data(serialized_data, last_response);
+
+    if (last_response) {
+        return; // No further requests are read on this connection.
+    }
     
     RequestState state = check_request_state();
     if (state == RequestState::COMPLETE) {
@@ -621,8 +637,11 @@ void Connection::write_chunk(std::string_view chunk) {
 }
 
 void Connection::end() {
-    if (is_chunked_ && !is_head_request_) {
-        send_data("0\r\n\r\n");
+    const bool last_response = should_close_;
+    // Closes once everything queued is written.
+    send_data(is_chunked_ && !is_head_request_ ? "0\r\n\r\n" : "", last_response);
+    if (last_response) {
+        return;
     }
     
     RequestState state = check_request_state();
@@ -674,10 +693,13 @@ void Connection::send_sse_event(std::string_view data, std::string_view event, s
     write_chunk(sse_msg);
 }
 
-void Connection::send_data(std::string_view data) {
+void Connection::send_data(std::string_view data, bool close_after) {
     {
         std::lock_guard<std::mutex> lock(write_mutex_);
         write_buffer_.insert(write_buffer_.end(), data.begin(), data.end());
+        // Same critical section as the data, so the writer never sees the
+        // close request without the final bytes it belongs after.
+        if (close_after) close_after_write_ = true;
     }
     trigger_write();
 }
@@ -739,10 +761,15 @@ void Connection::trigger_write() {
         // is safe to hand its storage to the proactor outside the lock.
         if (!tls_inflight_.empty()) {
             auto self = shared_from_this();
-            proactor_.async_write(socket_.fd(), tls_inflight_.data(), tls_inflight_.size(), [self](ssize_t written) {
-                self->on_write_complete(written);
-            });
-            return; // Will clear flag in callback
+            if (submit_io([&] {
+                    proactor_.async_write(socket_.fd(), tls_inflight_.data(), tls_inflight_.size(), [self](ssize_t written) {
+                        self->on_write_complete(written);
+                    });
+                })) {
+                return; // Will clear flag in callback
+            }
+            is_writing_ = false;
+            return;
         }
     } else {
         std::lock_guard<std::mutex> lock(write_mutex_);
@@ -755,17 +782,25 @@ void Connection::trigger_write() {
         
         if (!active_write_buffer_.empty()) {
             auto self = shared_from_this();
-            proactor_.async_write(socket_.fd(), active_write_buffer_.data(), active_write_buffer_.size(), [self](ssize_t written) {
-                self->on_write_complete(written);
-            });
+            if (!submit_io([&] {
+                    proactor_.async_write(socket_.fd(), active_write_buffer_.data(), active_write_buffer_.size(), [self](ssize_t written) {
+                        self->on_write_complete(written);
+                    });
+                })) {
+                is_writing_ = false;
+            }
             return;
         }
         
         if (file_fd_ != -1 && file_size_ > file_offset_) {
             auto self = shared_from_this();
-            proactor_.async_sendfile(socket_.fd(), file_fd_, file_offset_, static_cast<size_t>(file_size_ - file_offset_), [self](ssize_t written) {
-                self->on_sendfile_complete(written);
-            });
+            if (!submit_io([&] {
+                    proactor_.async_sendfile(socket_.fd(), file_fd_, file_offset_, static_cast<size_t>(file_size_ - file_offset_), [self](ssize_t written) {
+                        self->on_sendfile_complete(written);
+                    });
+                })) {
+                is_writing_ = false;
+            }
             return;
         }
         
@@ -776,14 +811,36 @@ void Connection::trigger_write() {
     }
     
     is_writing_ = false;
+
+    // A response queued by another thread between our last look at the
+    // buffers and clearing is_writing_ saw "already writing" and left it to
+    // us. Pick it up, or it would sit unsent until the next write.
+    bool close_requested = false;
+    if (has_pending_output(close_requested)) {
+        trigger_write();
+        return;
+    }
     
-    if (should_close_) {
+    if (close_requested) {
         manager_.remove_connection(socket_.fd());
         return;
     }
 
     // Everything queued has been written; go back to waiting on the peer.
     arm_timer_for_current_phase();
+}
+
+bool Connection::has_pending_output(bool& close_requested) {
+    {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        close_requested = close_after_write_;
+        if (!write_buffer_.empty() || !active_write_buffer_.empty()) return true;
+    }
+    if (ssl_) {
+        std::lock_guard<std::mutex> tls_lock(tls_mutex_);
+        if (!tls_write_buffer_.empty()) return true;
+    }
+    return file_fd_ != -1 && file_offset_ < file_size_;
 }
 
 void Connection::on_write_complete(ssize_t bytes_written) {
@@ -843,7 +900,7 @@ void Connection::write_raw(const std::vector<char>& data) {
 
 void Connection::mark_for_close() {
     should_close_ = true;
-    trigger_write();
+    send_data({}, true);
 }
 
 void Connection::upgrade_to_websocket(std::unique_ptr<http::websocket::WebSocketConnection> ws_conn) {

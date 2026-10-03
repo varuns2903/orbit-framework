@@ -39,6 +39,9 @@ void ConnectionManager::remove_connection(int fd) {
     }
     
     if (conn) {
+        // Stop new I/O first, then cancel what is pending; in the other order
+        // a worker thread could register fresh I/O in between.
+        conn->on_removed();
         // Cancel all pending asynchronous operations in the Proactor
         proactor_.remove(fd);
         // The shared_ptr will be destroyed here, triggering Connection::~Connection

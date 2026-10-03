@@ -74,6 +74,10 @@ public:
      */
     void start();
 
+    /// Called by ConnectionManager when the connection is dropped, before
+    /// its pending I/O is cancelled. No new I/O is submitted afterwards.
+    void on_removed();
+
     /**
      * @brief Sets the timeouts used for this connection. Call before start().
      */
@@ -117,7 +121,8 @@ public:
 
 private:
     void process_request();
-    void send_data(std::string_view data);
+    // Queues bytes for writing; with close_after, closes once they are sent.
+    void send_data(std::string_view data, bool close_after = false);
     void arm_timer(std::chrono::milliseconds timeout);
     void arm_timer_for_current_phase();
     void send_error(http::HttpStatus status, const std::string& message);
@@ -148,6 +153,21 @@ private:
     std::unordered_map<std::string, std::string> default_headers_; // Populated by middlewares
     std::string current_request_buffer_; // Holds the request data for string_views during async processing
     std::atomic<bool> is_reading_{false};
+
+    // Runs submit() (one proactor_.async_* call) unless the connection has
+    // been removed. A worker thread can finish a response after the event
+    // loop already removed the connection; registering I/O then would keep
+    // the socket (held by the callback's shared_ptr) open until the peer
+    // gave up. Returns false if nothing was submitted.
+    template <typename Submit>
+    bool submit_io(Submit&& submit) {
+        std::lock_guard<std::mutex> lock(io_mutex_);
+        if (removed_) return false;
+        submit();
+        return true;
+    }
+    std::mutex io_mutex_;
+    bool removed_ = false; // guarded by io_mutex_
     std::atomic<bool> is_writing_{false};
     bool is_chunked_{false};
     bool is_head_request_{false}; // Responses to HEAD carry headers only
@@ -158,6 +178,9 @@ private:
     RequestState check_request_state();
     std::string request_body_storage_; // Owns a decoded chunked request body
     bool should_close_{false};
+    // Set (under write_mutex_) together with the final response's bytes;
+    // the connection closes when everything queued has been written.
+    bool close_after_write_{false};
     ConnectionState state_{ConnectionState::HTTP};
     uint64_t current_timer_id_{0};
     std::mutex timer_mutex_;
@@ -182,6 +205,9 @@ private:
     // is_writing_ touches it, so it is never reallocated during a write.
     std::vector<char> tls_inflight_;
     void drain_tls_output_locked();
+    // True if anything is queued that trigger_write() would send. Also
+    // reports, consistently with the queue, whether a close was requested.
+    bool has_pending_output(bool& close_requested);
     
     std::atomic<bool> is_processing_request_{false};
     
