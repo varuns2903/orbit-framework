@@ -2,6 +2,7 @@
 #ifdef _WIN32
 #undef DELETE
 #endif
+#include <deque>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -34,6 +35,32 @@ struct HttpRequest {
     nlohmann::json user; // Populated by JwtAuth middleware
 
     mutable nlohmann::json json_body; // Cached parsed JSON
+
+    /**
+     * @brief Storage for header names and values that did not come from the
+     *        raw request buffer. A deque never moves its elements, so the
+     *        string_views in `headers` stay valid as it grows.
+     */
+    std::deque<std::string> owned_header_storage;
+
+    /**
+     * @brief Sets a header, copying the name and value into storage owned by
+     *        this request.
+     *
+     * `headers` holds string_views. Assigning a temporary or local string to
+     * it directly leaves a dangling view once that string is destroyed; use
+     * this instead whenever the value does not live in the request buffer.
+     */
+    void set_header(std::string_view name, std::string value) {
+        const std::string& stored_name = owned_header_storage.emplace_back(name);
+        const std::string& stored_value = owned_header_storage.emplace_back(std::move(value));
+        auto it = headers.find(stored_name);
+        if (it != headers.end()) {
+            it->second = stored_value;
+        } else {
+            headers.emplace(stored_name, stored_value);
+        }
+    }
     
     /**
      * @brief Parses and returns the request body as a JSON object.

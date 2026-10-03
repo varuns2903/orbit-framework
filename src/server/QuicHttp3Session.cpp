@@ -116,7 +116,6 @@ int QuicHttp3Session::on_recv_header(nghttp3_conn *conn, int64_t stream_id, int3
     std::string header_name(reinterpret_cast<const char*>(name_buf.base), name_buf.len);
     std::string header_value(reinterpret_cast<const char*>(value_buf.base), value_buf.len);
     
-    std::cout << "H3: on_recv_header stream=" << stream_id << " " << header_name << ": " << header_value << "\n";
     
     if (header_name == ":method") {
         if (header_value == "GET") stream->request.method = http::HttpMethod::GET;
@@ -130,13 +129,10 @@ int QuicHttp3Session::on_recv_header(nghttp3_conn *conn, int64_t stream_id, int3
     } else if (header_name == ":scheme") {
         // scheme
     } else if (header_name == ":authority") {
-        stream->header_storage.push_back("Host");
-        stream->header_storage.push_back(header_value);
-        stream->request.headers[stream->header_storage[stream->header_storage.size()-2]] = stream->header_storage.back();
+        stream->request.set_header("Host", std::string(header_value));
     } else {
-        stream->header_storage.push_back(header_name);
-        stream->header_storage.push_back(header_value);
-        stream->request.headers[stream->header_storage[stream->header_storage.size()-2]] = stream->header_storage.back();
+        // Owned storage: views into a growing vector dangled on reallocation.
+        stream->request.set_header(header_name, std::string(header_value));
     }
     
     return 0;

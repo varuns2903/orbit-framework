@@ -33,9 +33,9 @@ bool Csrf::operator()(http::HttpRequest& req, std::shared_ptr<http::ResponseWrit
                 res.set_cookie(c);
             });
             // Inject into request headers so route handlers/templates can read it
-            req.headers[header_name_] = new_token;
+            req.set_header(header_name_, new_token);
         } else {
-            req.headers[header_name_] = cookie_token;
+            req.set_header(header_name_, cookie_token);
         }
         return true;
     }
