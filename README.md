@@ -544,6 +544,7 @@ cmake -B build \
 | [🔌 WebSockets](docs/websockets.md) | RFC 6455 WebSockets and EventRouter |
 | [⚡ HTTP/3 & QUIC](docs/http3.md) | Enabling and using HTTP/3 |
 | [📋 Changelog](CHANGELOG.md) | Release history and breaking changes |
+| [🧭 Migration Guide](docs/migration.md) | Upgrading between releases, with before/after code |
 | [📊 Test Coverage](docs/coverage.md) | Measured coverage, per-file gaps, and how to reproduce |
 | [⚡ Benchmarks](docs/benchmarks.md) | Throughput figures, methodology, and their limits |
 
@@ -556,8 +557,9 @@ not yet reached a frozen public API. **Treat 1.x as pre-stable.**
 
 - **The API may change in minor releases.** Roadmap item 31, *maintain API/ABI
   compatibility*, is not yet met. Every breaking change is documented in
-  [CHANGELOG.md](CHANGELOG.md), but a minor bump is not a guarantee of a
-  drop-in upgrade.
+  [CHANGELOG.md](CHANGELOG.md), and [docs/migration.md](docs/migration.md)
+  shows how to update code for each one, but a minor bump is not a guarantee
+  of a drop-in upgrade.
 - **There is no ABI stability guarantee.** Rebuild your application against a
   new Orbit release rather than swapping the shared library underneath it.
 - **Pin your version.** Use an exact tag with `FetchContent` or your package
