@@ -1,0 +1,17 @@
+# Normalise line endings in the repository; check out with the platform's
+# native endings except where a tool needs a specific one.
+* text=auto
+
+# Shell scripts must keep LF, or they fail on Linux/macOS after a Windows checkout.
+*.sh text eol=lf
+tools/cli/orbit text eol=lf
+# Batch files need CRLF on Windows.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touch binary files.
+*.png binary
+*.jpg binary
+*.ico binary
+*.gz binary
+*.zip binary
