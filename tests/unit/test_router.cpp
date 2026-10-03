@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <orbit/routing/Router.hpp>
+#include <orbit/http/HttpParser.hpp>
 #include <orbit/network/Proactor.hpp>
 #include <orbit/concurrency/ThreadPool.hpp>
 
@@ -144,6 +145,18 @@ TEST(RouterTest, MiddlewareExecution) {
     auto writer2 = std::make_shared<MockResponseWriter>();
     router.route(req2, writer2);
     EXPECT_EQ(writer2->last_response.status_code, http::HttpStatus::OK);
+}
+
+TEST(RouterDecodingTest, DynamicParamsAreDecoded) {
+    routing::Router router;
+    std::string captured;
+    router.get("/users/:name", [&](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter>) {
+        captured = req.params["name"];
+    });
+    auto req = http::HttpParser::parse("GET /users/Jos%C3%A9%20M HTTP/1.1\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    router.route(*req, nullptr);
+    EXPECT_EQ(captured, "Jos\xC3\xA9 M");
 }
 
 // --- Nested groups (issue #26) ---

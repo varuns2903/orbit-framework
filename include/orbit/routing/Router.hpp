@@ -18,6 +18,11 @@ using Middleware = std::function<bool(http::HttpRequest&, std::shared_ptr<http::
 using WsHandler = std::function<void(http::websocket::WebSocketConnection&)>;
 using ErrorHandler = std::function<void(const std::exception&, http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)>;
 
+struct WsRoute {
+    WsHandler handler;
+    std::vector<Middleware> middlewares; // Group and route middleware, outermost first
+};
+
 struct DynamicRoute {
     http::HttpMethod method;
     std::vector<std::string> path_segments;
@@ -109,6 +114,14 @@ public:
     Router& options(const std::string& path, std::vector<Middleware> mws, RouteHandler handler);
     
     void ws(const std::string& path, WsHandler handler);
+    void ws(const std::string& path, std::vector<Middleware> mws, WsHandler handler);
+
+    /**
+     * @brief Runs global, group and route middleware for a WebSocket upgrade.
+     * @return True if every middleware let the request through; false if one
+     *         stopped it (it has then already sent a response).
+     */
+    bool run_ws_middlewares(const std::string& path, http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> response_writer) const;
     void use(Middleware m);
     
     // Register global error handler
@@ -136,7 +149,7 @@ private:
     ErrorHandler error_handler_;
     
     std::unordered_map<std::string, RouteHandler> routes_;
-    std::unordered_map<std::string, WsHandler> ws_routes_;
+    std::unordered_map<std::string, WsRoute> ws_routes_;
     std::vector<DynamicRoute> dynamic_routes_;
     std::vector<Middleware> middlewares_;
     

@@ -61,6 +61,17 @@ void ConnectionPool::release(const std::string& host, int port, int fd, void* ss
     pool_[key].push_back(conn);
 }
 
+ConnectionPool::~ConnectionPool() {
+    // Pooled connections own their socket and TLS state; release them rather
+    // than dropping the raw handles with the map.
+    for (auto& [key, conns] : pool_) {
+        for (auto& conn : conns) {
+            if (conn.ssl) SSL_free(static_cast<SSL*>(conn.ssl));
+            network::close_socket(conn.fd);
+        }
+    }
+}
+
 void ConnectionPool::cleanup_stale_connections() {
     std::lock_guard<std::mutex> lock(mutex_);
     auto now = std::chrono::steady_clock::now();

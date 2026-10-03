@@ -1,4 +1,5 @@
 #include <orbit/network/EpollProactor.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <stdexcept>
 #include <unistd.h>
 #include <iostream>
@@ -16,6 +17,16 @@ EpollProactor::EpollProactor() : events_(1024) {
 }
 
 EpollProactor::~EpollProactor() {
+    // Pending callbacks may hold the last reference to objects whose
+    // destructors call remove() (e.g. a proxied request). Release them while
+    // ctx_mutex_ still exists: destroying contexts_ as a member happens after
+    // the mutex is gone, and macOS aborts on locking a destroyed mutex.
+    std::unordered_map<int, Context> pending;
+    {
+        std::lock_guard<std::mutex> lock(ctx_mutex_);
+        pending.swap(contexts_);
+    }
+    pending.clear();
     close(epoll_fd_);
 }
 
@@ -33,7 +44,7 @@ void EpollProactor::update_epoll(Context& ctx) {
     if (!ctx.tracked && events != EPOLLONESHOT) {
         ctx.tracked = true;
         if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, ctx.fd, &ev) == -1) {
-            std::cerr << "epoll_ctl ADD failed for fd " << ctx.fd << std::endl;
+            LOG_ERROR("epoll_ctl ADD failed for fd " << ctx.fd);
         }
     } else if (ctx.tracked) {
         if (events == EPOLLONESHOT) {
@@ -43,7 +54,7 @@ void EpollProactor::update_epoll(Context& ctx) {
         } else {
             // Update
             if (epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, ctx.fd, &ev) == -1) {
-                std::cerr << "epoll_ctl MOD failed for fd " << ctx.fd << std::endl;
+                LOG_ERROR("epoll_ctl MOD failed for fd " << ctx.fd);
             }
         }
     }

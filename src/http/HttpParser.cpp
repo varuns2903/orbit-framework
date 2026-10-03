@@ -2,6 +2,8 @@
 #include <sstream>
 
 #include <cctype>
+#include <cstdint>
+#include <string>
 
 namespace http {
 
@@ -37,6 +39,183 @@ bool connection_option_present(std::string_view field_value, std::string_view op
     return false;
 }
 
+namespace {
+
+bool iequals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string_view trim_ows(std::string_view s) {
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
+    return s;
+}
+
+// Parses a non-empty run of decimal digits, rejecting signs, spaces and overflow.
+bool parse_decimal(std::string_view s, size_t& out) {
+    if (s.empty()) return false;
+    size_t value = 0;
+    for (char c : s) {
+        if (c < '0' || c > '9') return false;
+        size_t digit = static_cast<size_t>(c - '0');
+        if (value > (SIZE_MAX - digit) / 10) return false;
+        value = value * 10 + digit;
+    }
+    out = value;
+    return true;
+}
+
+bool is_token_char(char c) {
+    if (std::isalnum(static_cast<unsigned char>(c))) return true;
+    switch (c) {
+        case '!': case '#': case '$': case '%': case '&': case '\'': case '*':
+        case '+': case '-': case '.': case '^': case '_': case '`': case '|': case '~':
+            return true;
+        default:
+            return false;
+    }
+}
+
+} // namespace
+
+MessageFraming parse_framing(std::string_view header_section) {
+    MessageFraming framing;
+    bool has_transfer_encoding = false;
+
+    size_t pos = 0;
+    while (pos < header_section.size()) {
+        size_t line_end = header_section.find("\r\n", pos);
+        if (line_end == std::string_view::npos) line_end = header_section.size();
+        std::string_view line = header_section.substr(pos, line_end - pos);
+        pos = line_end + 2;
+        if (line.empty()) continue;
+
+        size_t colon = line.find(':');
+        if (colon == std::string_view::npos || colon == 0) {
+            framing.valid = false;
+            return framing;
+        }
+        std::string_view name = line.substr(0, colon);
+        for (char c : name) {
+            if (!is_token_char(c)) {
+                // Covers "Content-Length : 5" and obs-fold continuation lines.
+                framing.valid = false;
+                return framing;
+            }
+        }
+        std::string_view value = trim_ows(line.substr(colon + 1));
+
+        if (iequals(name, "Content-Length")) {
+            size_t length = 0;
+            if (!parse_decimal(value, length)) {
+                framing.valid = false;
+                return framing;
+            }
+            if (framing.has_content_length && framing.content_length != length) {
+                framing.valid = false;
+                return framing;
+            }
+            framing.has_content_length = true;
+            framing.content_length = length;
+        } else if (iequals(name, "Transfer-Encoding")) {
+            has_transfer_encoding = true;
+            // The final coding decides framing; only "chunked" is understood.
+            size_t last_comma = value.rfind(',');
+            std::string_view last = trim_ows(last_comma == std::string_view::npos ? value : value.substr(last_comma + 1));
+            framing.chunked = iequals(last, "chunked");
+        }
+    }
+
+    if (has_transfer_encoding && (!framing.chunked || framing.has_content_length)) {
+        framing.valid = false;
+    }
+    return framing;
+}
+
+ChunkedStatus decode_chunked(std::string_view data, std::string& out, size_t& consumed, size_t max_size) {
+    out.clear();
+    size_t pos = 0;
+    while (true) {
+        size_t line_end = data.find("\r\n", pos);
+        if (line_end == std::string_view::npos) {
+            // A chunk-size line longer than this is not something we accept.
+            return data.size() - pos > 1024 ? ChunkedStatus::Invalid : ChunkedStatus::Incomplete;
+        }
+
+        std::string_view size_line = data.substr(pos, line_end - pos);
+        size_t ext = size_line.find(';');
+        std::string_view hex = trim_ows(ext == std::string_view::npos ? size_line : size_line.substr(0, ext));
+        if (hex.empty() || hex.size() > 16) return ChunkedStatus::Invalid;
+
+        size_t chunk_size = 0;
+        for (char c : hex) {
+            int digit;
+            if (c >= '0' && c <= '9') digit = c - '0';
+            else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+            else return ChunkedStatus::Invalid;
+            if (chunk_size > (SIZE_MAX >> 4)) return ChunkedStatus::Invalid;
+            chunk_size = (chunk_size << 4) | static_cast<size_t>(digit);
+        }
+        pos = line_end + 2;
+
+        if (chunk_size == 0) {
+            // Trailer section: zero or more field lines, then an empty line.
+            while (true) {
+                size_t trailer_end = data.find("\r\n", pos);
+                if (trailer_end == std::string_view::npos) return ChunkedStatus::Incomplete;
+                bool empty_line = (trailer_end == pos);
+                pos = trailer_end + 2;
+                if (empty_line) {
+                    consumed = pos;
+                    return ChunkedStatus::Complete;
+                }
+            }
+        }
+
+        if (chunk_size > max_size || out.size() > max_size - chunk_size) return ChunkedStatus::TooLarge;
+        if (data.size() - pos < chunk_size + 2) return ChunkedStatus::Incomplete;
+        if (data.substr(pos + chunk_size, 2) != "\r\n") return ChunkedStatus::Invalid;
+        out.append(data.substr(pos, chunk_size));
+        pos += chunk_size + 2;
+    }
+}
+
+bool percent_decode(std::string_view in, std::string& out, bool plus_as_space, bool for_path) {
+    auto hexval = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    out.clear();
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        char c = in[i];
+        if (c == '%') {
+            if (i + 2 >= in.size()) return false;
+            int hi = hexval(in[i + 1]);
+            int lo = hexval(in[i + 2]);
+            if (hi < 0 || lo < 0) return false;
+            char decoded = static_cast<char>(hi * 16 + lo);
+            if (for_path && (decoded == '/' || decoded == '\\' || decoded == '\0')) return false;
+            out.push_back(decoded);
+            i += 2;
+        } else if (c == '+' && plus_as_space) {
+            out.push_back(' ');
+        } else {
+            out.push_back(c);
+        }
+    }
+    return true;
+}
+
 HttpMethod HttpParser::parse_method(std::string_view method_str) {
     if (method_str == "GET") return HttpMethod::GET;
     if (method_str == "POST") return HttpMethod::POST;
@@ -66,31 +245,48 @@ std::optional<HttpRequest> HttpParser::parse(std::string_view raw_request) {
     if (space1 != std::string_view::npos && space2 != std::string_view::npos && space1 != space2) {
         request.method = parse_method(request_line.substr(0, space1));
         std::string full_uri = std::string(request_line.substr(space1 + 1, space2 - space1 - 1));
+        request.target = full_uri;
         
         auto q_mark = full_uri.find('?');
+        std::string_view raw_path = std::string_view(full_uri).substr(0, q_mark);
+        // Routes, params and static files all see the decoded path.
+        if (!percent_decode(raw_path, request.uri, false, true)) {
+            return std::nullopt;
+        }
         if (q_mark != std::string::npos) {
-            request.uri = full_uri.substr(0, q_mark);
             std::string query_string = full_uri.substr(q_mark + 1);
             
             std::istringstream q_stream(query_string);
             std::string kv;
             while (std::getline(q_stream, kv, '&')) {
+                if (kv.empty()) continue;
                 auto eq_pos = kv.find('=');
-                if (eq_pos != std::string::npos) {
-                    request.query[kv.substr(0, eq_pos)] = kv.substr(eq_pos + 1);
-                } else {
-                    request.query[kv] = ""; // Key with no value
+                std::string key, value;
+                std::string_view raw_key = std::string_view(kv).substr(0, eq_pos);
+                std::string_view raw_value = eq_pos == std::string::npos ? std::string_view{} : std::string_view(kv).substr(eq_pos + 1);
+                if (!percent_decode(raw_key, key, true, false) || !percent_decode(raw_value, value, true, false)) {
+                    return std::nullopt;
                 }
+                request.query[key] = value; // A key with no '=' gets an empty value
             }
-        } else {
-            request.uri = full_uri;
         }
+
 
         request.http_version = std::string(request_line.substr(space2 + 1));
     } else {
         return std::nullopt;
     }
     
+    // Reject ambiguous or malformed framing before looking at anything else.
+    size_t headers_end = raw_request.find("\r\n\r\n", request_line_end);
+    std::string_view header_section = headers_end == std::string_view::npos
+        ? std::string_view{}
+        : raw_request.substr(request_line_end + 2, headers_end + 2 - (request_line_end + 2));
+    MessageFraming framing = parse_framing(header_section);
+    if (!framing.valid) {
+        return std::nullopt;
+    }
+
     // Parse Headers
     size_t headers_start = request_line_end + 2;
     while (headers_start < raw_request.length()) {
@@ -113,15 +309,25 @@ std::optional<HttpRequest> HttpParser::parse(std::string_view raw_request) {
                 value_start++;
             }
             std::string_view value = header_line.substr(value_start);
+            while (!value.empty() && (value.back() == ' ' || value.back() == '\t')) {
+                value.remove_suffix(1);
+            }
             request.headers[key] = value;
         }
         
         headers_start = line_end + 2;
     }
     
-    // Body is whatever is left
+    // The body is exactly Content-Length bytes; anything after it belongs to
+    // the next pipelined request. A chunked body is left encoded here and
+    // decoded by the connection once it is complete.
     if (headers_start < raw_request.length()) {
-        request.body = raw_request.substr(headers_start);
+        std::string_view rest = raw_request.substr(headers_start);
+        if (framing.chunked) {
+            request.body = rest;
+        } else if (framing.has_content_length) {
+            request.body = rest.substr(0, framing.content_length);
+        }
     }
     
     // Parse cookies
