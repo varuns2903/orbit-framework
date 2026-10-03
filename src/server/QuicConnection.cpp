@@ -1,5 +1,7 @@
 #include <orbit/server/QuicConnection.hpp>
 #include <orbit/utils/Logger.hpp>
+#include <openssl/rand.h>
+#include <cstdlib>
 #include <orbit/server/QuicConnectionManager.hpp>
 #include <orbit/server/QuicHttp3Session.hpp>
 #include <iostream>
@@ -261,29 +263,38 @@ int QuicConnection::on_get_new_connection_id(ngtcp2_conn *conn, ngtcp2_cid *cid,
     return 0;
 }
 
+namespace detail {
+
+bool quic_random_bytes(uint8_t* dest, size_t len) {
+    return len == 0 || RAND_bytes(dest, static_cast<int>(len)) == 1;
+}
+
+} // namespace detail
+
 void QuicConnection::rand_cb(uint8_t *dest, size_t destlen, const ngtcp2_rand_ctx *rand_ctx) {
     (void)rand_ctx;
-    for (size_t i = 0; i < destlen; ++i) {
-        dest[i] = static_cast<uint8_t>(rand() % 256);
+    if (!detail::quic_random_bytes(dest, destlen)) {
+        // ngtcp2 gives this callback no way to fail, and continuing with
+        // predictable bytes would be worse than stopping.
+        LOG_ERROR("RAND_bytes failed in QUIC rand callback; aborting");
+        std::abort();
     }
 }
 
 int QuicConnection::get_new_connection_id_cb(ngtcp2_conn *conn, ngtcp2_cid *cid, uint8_t *token, size_t cidlen, void *user_data) {
     (void)conn; (void)user_data;
     cid->datalen = cidlen;
-    for (size_t i = 0; i < cidlen; ++i) {
-        cid->data[i] = static_cast<uint8_t>(rand() % 256);
-    }
-    for (size_t i = 0; i < NGTCP2_STATELESS_RESET_TOKENLEN; ++i) {
-        token[i] = static_cast<uint8_t>(rand() % 256);
+    if (!detail::quic_random_bytes(cid->data, cidlen) ||
+        !detail::quic_random_bytes(token, NGTCP2_STATELESS_RESET_TOKENLEN)) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
     }
     return 0;
 }
 
 int QuicConnection::get_path_challenge_data_cb(ngtcp2_conn *conn, uint8_t *data, void *user_data) {
     (void)conn; (void)user_data;
-    for (size_t i = 0; i < 8; ++i) {
-        data[i] = static_cast<uint8_t>(rand() % 256);
+    if (!detail::quic_random_bytes(data, NGTCP2_PATH_CHALLENGE_DATALEN)) {
+        return NGTCP2_ERR_CALLBACK_FAILURE;
     }
     return 0;
 }

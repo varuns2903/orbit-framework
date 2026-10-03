@@ -51,8 +51,8 @@ void QuicConnectionManager::on_packet_received(const uint8_t* data, size_t datal
         // Use client's SCID as our DCID, and generate a new random SCID for the server
         ngtcp2_cid scid_struct;
         scid_struct.datalen = 8;
-        for (size_t i = 0; i < 8; ++i) {
-            scid_struct.data[i] = static_cast<uint8_t>(rand() % 256);
+        if (!detail::quic_random_bytes(scid_struct.data, scid_struct.datalen)) {
+            return; // Drop the packet rather than issue a predictable connection ID
         }
         
 

@@ -20,6 +20,19 @@
 
 namespace server {
 
+namespace detail {
+
+/**
+ * @brief Fills @p dest with bytes from the OpenSSL CSPRNG. QUIC connection
+ *        IDs, stateless reset tokens and path challenges must be
+ *        unpredictable (RFC 9000 sections 5.1, 8.2 and 10.3).
+ * @return False if the CSPRNG failed.
+ */
+bool quic_random_bytes(uint8_t* dest, size_t len);
+
+} // namespace detail
+
+
 class QuicConnectionManager;
 class QuicHttp3Session;
 
