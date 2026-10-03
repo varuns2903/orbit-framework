@@ -1,4 +1,5 @@
 #include <orbit/server/QuicConnectionManager.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <orbit/server/QuicConnection.hpp>
 #include <orbit/utils/PrometheusRegistry.hpp>
 #include <iostream>
@@ -9,7 +10,7 @@ namespace server {
 QuicConnectionManager::QuicConnectionManager(network::UdpSocket& socket, SSL_CTX* ssl_ctx)
     : socket_(socket), ssl_ctx_(ssl_ctx) {
     if (NGTCP2_CRYPTO_CONFIGURE_SERVER_CONTEXT(ssl_ctx_) != 0) {
-        std::cerr << "Failed to configure QUIC server context\n";
+        LOG_ERROR("Failed to configure QUIC server context");
     }
 }
 
@@ -26,30 +27,26 @@ void QuicConnectionManager::on_packet_received(const uint8_t* data, size_t datal
     // short_dcidlen must match the length of the SCID we generate (8 bytes).
     int rv = ngtcp2_pkt_decode_version_cid(&ver_cid, data, datalen, 8);
     if (rv < 0) {
-        std::cerr << "Failed to decode QUIC packet version and CID: " << ngtcp2_strerror(rv) << "\n";
+        LOG_DEBUG("Failed to decode QUIC packet version and CID: " << ngtcp2_strerror(rv));
         return;
     }
 
     ngtcp2_cid dcid_struct;
     ngtcp2_cid_init(&dcid_struct, ver_cid.dcid, ver_cid.dcidlen);
 
-    std::cout << "QCM: Incoming packet DCID (len=" << dcid_struct.datalen << ") = ";
-    for (size_t i = 0; i < dcid_struct.datalen; ++i) {
-        printf("%02x", dcid_struct.data[i]);
-    }
-    std::cout << "\n";
+    LOG_DEBUG("QCM: Incoming packet DCID (len=" << dcid_struct.datalen << ")");
 
     auto it = connections_.find(dcid_struct);
     if (it != connections_.end()) {
-        std::cout << "QCM: Found existing connection for DCID (len=" << dcid_struct.datalen << ")\n";
+        LOG_DEBUG("QCM: Found existing connection for DCID (len=" << dcid_struct.datalen << ")");
         it->second->process_packet(data, datalen, sender_addr);
     } else {
         if (ver_cid.version == 0) {
-            std::cout << "QCM: Dropping version negotiation packet\n";
+            LOG_DEBUG("QCM: Dropping version negotiation packet");
             return;
         }
         
-        std::cout << "QCM: Received QUIC packet for unknown connection, creating new instance (DCID len=" << dcid_struct.datalen << ")\n";
+        LOG_DEBUG("QCM: Received QUIC packet for unknown connection, creating new instance (DCID len=" << dcid_struct.datalen << ")");
         
         // Use client's SCID as our DCID, and generate a new random SCID for the server
         ngtcp2_cid scid_struct;
@@ -58,11 +55,6 @@ void QuicConnectionManager::on_packet_received(const uint8_t* data, size_t datal
             return; // Drop the packet rather than issue a predictable connection ID
         }
         
-        std::cout << "QCM: Generated SCID = ";
-        for (size_t i = 0; i < 8; ++i) {
-            printf("%02x", scid_struct.data[i]);
-        }
-        std::cout << "\n";
 
         ngtcp2_cid parsed_scid;
         ngtcp2_cid_init(&parsed_scid, ver_cid.scid, ver_cid.scidlen);
