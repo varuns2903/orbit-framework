@@ -158,7 +158,7 @@ private:
  */
 class Http2ResponseWriter : public http::ResponseWriter {
 public:
-    Http2ResponseWriter(std::weak_ptr<Http2Session> session, int32_t stream_id);
+    Http2ResponseWriter(std::weak_ptr<Http2Session> session, int32_t stream_id, bool suppress_body = false);
     
     void add_interceptor(Interceptor interceptor) override;
     void set_header(const std::string& key, const std::string& value) override;
@@ -181,6 +181,7 @@ private:
     std::unordered_map<std::string, std::string> default_headers_;
     std::vector<Interceptor> interceptors_;
     bool headers_sent_{false};
+    bool suppress_body_{false}; // HEAD request: headers only
 
     // The request body, kept alive by owner, for read_body_stream().
     std::shared_ptr<void> body_owner_;

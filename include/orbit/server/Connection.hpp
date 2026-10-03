@@ -150,6 +150,7 @@ private:
     std::atomic<bool> is_reading_{false};
     std::atomic<bool> is_writing_{false};
     bool is_chunked_{false};
+    bool is_head_request_{false}; // Responses to HEAD carry headers only
     bool is_chunk_header_mode_{true};
     size_t chunk_bytes_remaining_{0};
     size_t content_length_remaining_{0};
