@@ -40,9 +40,29 @@ bool Router::has_ws_route(const std::string& path) const {
 WsHandler Router::get_ws_route(const std::string& path) const {
     auto it = ws_routes_.find(path);
     if (it != ws_routes_.end()) {
-        return it->second;
+        return it->second.handler;
     }
     return nullptr;
+}
+
+bool Router::run_ws_middlewares(const std::string& path, http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> response_writer) const {
+    auto it = ws_routes_.find(path);
+    if (it == ws_routes_.end()) return false;
+    try {
+        for (const auto& mw : middlewares_) {
+            if (!mw(request, response_writer)) return false;
+        }
+        for (const auto& mw : it->second.middlewares) {
+            if (!mw(request, response_writer)) return false;
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Unhandled exception in WebSocket middleware for " << path << ": " << e.what());
+        http::HttpResponse res;
+        res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
+        response_writer->send(std::move(res));
+        return false;
+    }
+    return true;
 }
 
 void Router::group(const std::string& prefix, std::function<void(Router&)> callback) {
@@ -218,11 +238,18 @@ bool Router::is_stream_route(http::HttpMethod method, const std::string& path) c
 }
 
 void Router::ws(const std::string& path, WsHandler handler) {
+    ws(path, {}, std::move(handler));
+}
+
+void Router::ws(const std::string& path, std::vector<Middleware> mws, WsHandler handler) {
     std::string full_path = prefix_ + path;
+    // Group middleware wraps route middleware, exactly as for HTTP routes.
+    std::vector<Middleware> combined = local_middlewares_;
+    combined.insert(combined.end(), mws.begin(), mws.end());
     if (parent_) {
-        parent_->ws(full_path, std::move(handler));
+        parent_->ws(full_path, std::move(combined), std::move(handler));
     } else {
-        ws_routes_[full_path] = std::move(handler);
+        ws_routes_[full_path] = WsRoute{std::move(handler), std::move(combined)};
     }
 }
 
@@ -251,49 +278,68 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
             }
         }
         
-        std::string route_key = make_route_key(request.method, request.uri);
-        std::cout << "[Router] Trying to match route key: " << route_key << std::endl;
-        
-        // 2. Exact match check
-        auto it = routes_.find(route_key);
-        if (it != routes_.end()) {
-            std::cout << "[Router] Exact match found for " << route_key << std::endl;
-            it->second(request, response_writer);
-            return;
-        }
-        
-        // 3. Dynamic match check (e.g. /users/:id)
+        // Finds the handler registered for `method` on this path: exact
+        // routes first, then dynamic ones such as /users/:id.
         auto req_segments = split_path(request.uri);
-        for (const auto& dr : dynamic_routes_) {
-            if (dr.method != request.method) continue;
-            
-            std::unordered_map<std::string, std::string> extracted_params;
-            bool matches = true;
-            
-            if (req_segments.size() != dr.path_segments.size()) continue;
-            
-            for (size_t i = 0; i < dr.path_segments.size(); ++i) {
-                if (dr.path_segments[i][0] == ':') {
-                    // It's a parameter! Extract it.
-                    std::string param_name = dr.path_segments[i].substr(1);
-                    extracted_params[param_name] = req_segments[i];
-                } else if (dr.path_segments[i] != req_segments[i]) {
-                    // Static segment mismatch
-                    matches = false;
-                    break;
+        auto find_handler = [&](http::HttpMethod method, std::unordered_map<std::string, std::string>& params) -> const RouteHandler* {
+            auto it = routes_.find(make_route_key(method, request.uri));
+            if (it != routes_.end()) return &it->second;
+            for (const auto& dr : dynamic_routes_) {
+                if (dr.method != method || req_segments.size() != dr.path_segments.size()) continue;
+                std::unordered_map<std::string, std::string> extracted;
+                bool matches = true;
+                for (size_t i = 0; i < dr.path_segments.size(); ++i) {
+                    if (dr.path_segments[i][0] == ':') {
+                        extracted[dr.path_segments[i].substr(1)] = req_segments[i];
+                    } else if (dr.path_segments[i] != req_segments[i]) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) {
+                    params = std::move(extracted);
+                    return &dr.handler;
                 }
             }
-            
-            if (matches) {
-                request.params = std::move(extracted_params);
-                dr.handler(request, response_writer);
-                return;
+            return nullptr;
+        };
+
+        std::unordered_map<std::string, std::string> params;
+        const RouteHandler* handler = find_handler(request.method, params);
+        if (!handler && request.method == http::HttpMethod::HEAD) {
+            // RFC 9110 section 9.3.2: HEAD is GET without the content; the
+            // connection drops the body.
+            handler = find_handler(http::HttpMethod::GET, params);
+        }
+        if (handler) {
+            request.params = std::move(params);
+            (*handler)(request, response_writer);
+            return;
+        }
+
+        // The path exists under other methods: 405 with Allow (RFC 9110 section 15.5.6).
+        std::string allow;
+        static const http::HttpMethod kMethods[] = {
+            http::HttpMethod::GET, http::HttpMethod::HEAD, http::HttpMethod::POST, http::HttpMethod::PUT,
+            http::HttpMethod::PATCH, http::HttpMethod::DELETE, http::HttpMethod::OPTIONS
+        };
+        for (http::HttpMethod m : kMethods) {
+            std::unordered_map<std::string, std::string> ignored;
+            bool exists = find_handler(m, ignored) != nullptr ||
+                          (m == http::HttpMethod::HEAD && find_handler(http::HttpMethod::GET, ignored) != nullptr);
+            if (exists) {
+                std::string key = make_route_key(m, "");
+                if (!allow.empty()) allow += ", ";
+                allow += key.substr(0, key.size() - 1); // "GET " -> "GET"
             }
         }
-        
-        // 4. If no route matches, return a 404 Not Found
         http::HttpResponse res;
-        res.status(http::HttpStatus::NotFound).send("404 Not Found");
+        if (!allow.empty()) {
+            res.status(http::HttpStatus::MethodNotAllowed).send("405 Method Not Allowed");
+            res.headers["Allow"] = allow;
+        } else {
+            res.status(http::HttpStatus::NotFound).send("404 Not Found");
+        }
         response_writer->send(std::move(res));
         
     } catch (const std::exception& e) {
@@ -302,11 +348,11 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
         } else if (parent_ && parent_->error_handler_) {
             parent_->error_handler_(e, request, response_writer);
         } else {
+            // The exception text can contain SQL, file paths or secrets; it
+            // goes to the log, never to the client.
             LOG_ERROR("Unhandled exception in route " << request.uri << ": " << e.what());
             http::HttpResponse res;
-            res.status(http::HttpStatus::InternalServerError).send(
-                "500 Internal Server Error: " + std::string(e.what())
-            );
+            res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
             response_writer->send(std::move(res));
         }
     } catch (...) {

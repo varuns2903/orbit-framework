@@ -78,11 +78,11 @@ auto wrap_handler(Handler&& h) -> std::function<void(http::HttpRequest&, std::sh
                     res.headers["Content-Type"] = "application/json";
                 }
                 writer->send(std::move(res));
-            } catch (const std::exception& e) {
-                http::HttpResponse res;
-                res.status(http::HttpStatus::InternalServerError).send(e.what());
-                res.headers["Content-Type"] = "text/plain";
-                writer->send(std::move(res));
+            } catch (...) {
+                // Let Router::route handle it: it logs the details, runs the
+                // application's on_error handler, and never sends the
+                // exception text to the client.
+                throw;
             }
         };
     }
