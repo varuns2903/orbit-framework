@@ -2,6 +2,8 @@
 #include <string>
 #include <memory>
 #include <functional>
+#include <optional>
+#include <vector>
 #include <libpq-fe.h>
 #include <orbit/network/Proactor.hpp>
 #include <orbit/database/ResultSet.hpp>
@@ -36,6 +38,15 @@ public:
      * @param callback A callback invoked with the query result upon completion.
      */
     void query(const std::string& sql, std::function<void(const ResultSet& res)> callback);
+
+    /**
+     * @brief Executes a statement with $1, $2, ... placeholders bound to
+     *        @p params (text format; std::nullopt binds SQL NULL). Values are
+     *        sent separately from the SQL text, so they cannot change the
+     *        statement.
+     */
+    void query(const std::string& sql, const std::vector<std::optional<std::string>>& params,
+               std::function<void(const ResultSet& res)> callback);
 
 private:
     void handle_connect(std::function<void(bool)> callback);

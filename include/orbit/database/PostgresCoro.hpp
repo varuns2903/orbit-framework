@@ -3,6 +3,8 @@
 #include <coroutine>
 #include <memory>
 #include <string>
+#include <optional>
+#include <vector>
 
 namespace database {
 
@@ -40,13 +42,20 @@ struct QueryAwaiter {
     std::shared_ptr<PostgresClient> client;
     std::string sql;
     ResultSet result;
+    std::vector<std::optional<std::string>> params;
+    bool parameterized = false;
 
     bool await_ready() const noexcept { return false; }
     void await_suspend(std::coroutine_handle<> h) {
-        client->query(sql, [this, h](const ResultSet& r) {
+        auto done = [this, h](const ResultSet& r) {
             result = r;
             h.resume();
-        });
+        };
+        if (parameterized) {
+            client->query(sql, params, done);
+        } else {
+            client->query(sql, done);
+        }
     }
     ResultSet await_resume() { return result; }
 };
@@ -63,7 +72,19 @@ struct QueryAwaiter {
  * @endcode
  */
 inline QueryAwaiter query_async(std::shared_ptr<PostgresClient> client, const std::string& sql) {
-    return QueryAwaiter{std::move(client), sql, ResultSet{}};
+    return QueryAwaiter{std::move(client), sql, ResultSet{}, {}, false};
+}
+
+/**
+ * @brief Runs a statement with $1, $2, ... placeholders bound to @p params.
+ *
+ * @code
+ * co_await query_async(db, "SELECT * FROM users WHERE name = $1", {name});
+ * @endcode
+ */
+inline QueryAwaiter query_async(std::shared_ptr<PostgresClient> client, const std::string& sql,
+                                std::vector<std::optional<std::string>> params) {
+    return QueryAwaiter{std::move(client), sql, ResultSet{}, std::move(params), true};
 }
 
 } // namespace database

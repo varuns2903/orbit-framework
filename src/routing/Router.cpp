@@ -66,7 +66,14 @@ bool Router::run_ws_middlewares(const std::string& path, http::HttpRequest& requ
 }
 
 void Router::group(const std::string& prefix, std::function<void(Router&)> callback) {
-    Router group_router(prefix, this);
+    // A group registers straight into the root router with the accumulated
+    // prefix, and starts with the enclosing group's middleware. Pointing it
+    // at the enclosing group instead lost nested routes, because that group
+    // is a temporary.
+    Router* root = this;
+    while (root->parent_) root = root->parent_;
+    Router group_router(prefix_ + prefix, root);
+    group_router.local_middlewares_ = local_middlewares_;
     callback(group_router);
 }
 
@@ -180,13 +187,15 @@ Router& Router::options(const std::string& path, std::vector<Middleware> mws, Ro
 }
 
 void Router::add_stream_route(http::HttpMethod method, const std::string& path, RouteHandler handler) {
-    std::string full_path = prefix_ + path;
-    
-    if (parent_) {
-        parent_->add_stream_route(method, full_path, std::move(handler));
-        return;
-    }
+    Router* root = this;
+    while (root->parent_) root = root->parent_;
+    root->mark_stream_route(method, prefix_ + path);
 
+    // Also register it as a normal route (with this group's middleware) so it gets executed
+    add_route(method, path, std::move(handler));
+}
+
+void Router::mark_stream_route(http::HttpMethod method, const std::string& full_path) {
     if (full_path.find(':') != std::string::npos || full_path.find('*') != std::string::npos) {
         DynamicRoute dr;
         dr.method = method;
@@ -196,9 +205,6 @@ void Router::add_stream_route(http::HttpMethod method, const std::string& path, 
         std::string key = make_route_key(method, full_path);
         stream_routes_.insert(key);
     }
-    
-    // Also register it as a normal route so it gets executed
-    add_route(method, path, std::move(handler));
 }
 
 bool Router::is_stream_route(http::HttpMethod method, const std::string& path) const {
