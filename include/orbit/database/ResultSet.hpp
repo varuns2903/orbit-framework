@@ -16,6 +16,10 @@ class Row {
 public:
     Row() = default;
     Row(std::vector<std::string> values, std::shared_ptr<std::unordered_map<std::string, size_t>> col_map)
+        : values_(values.begin(), values.end()), col_map_(std::move(col_map)) {}
+
+    /// Values may be std::nullopt for SQL NULL.
+    Row(std::vector<std::optional<std::string>> values, std::shared_ptr<std::unordered_map<std::string, size_t>> col_map)
         : values_(std::move(values)), col_map_(std::move(col_map)) {}
 
     /**
@@ -62,11 +66,14 @@ public:
         if (!col_map_) return j;
         
         for (const auto& [name, index] : *col_map_) {
-            const std::string& val = values_[index];
-            
+            if (!values_[index]) {
+                j[name] = nullptr; // SQL NULL
+                continue;
+            }
+            const std::string& val = *values_[index];
             // Automatic JSON serialization heuristics (Task 52)
             if (val.empty()) {
-                j[name] = nullptr;
+                j[name] = "";
                 continue;
             }
             
@@ -101,7 +108,7 @@ public:
     }
 
 private:
-    std::vector<std::string> values_;
+    std::vector<std::optional<std::string>> values_;
     std::shared_ptr<std::unordered_map<std::string, size_t>> col_map_;
 };
 
@@ -113,6 +120,18 @@ public:
     ResultSet() = default;
     ResultSet(std::vector<Row> rows, uint64_t affected_rows = 0) 
         : rows_(std::move(rows)), affected_rows_(affected_rows) {}
+
+    /// A result describing a failed query.
+    static ResultSet failure(std::string message) {
+        ResultSet r;
+        r.error_ = std::move(message);
+        if (r.error_.empty()) r.error_ = "unknown database error";
+        return r;
+    }
+
+    /// False if the query failed; error() then says why.
+    bool ok() const { return error_.empty(); }
+    const std::string& error() const { return error_; }
 
     const std::vector<Row>& rows() const { return rows_; }
     size_t size() const { return rows_.size(); }
@@ -140,6 +159,7 @@ public:
 private:
     std::vector<Row> rows_;
     uint64_t affected_rows_{0};
+    std::string error_;
 };
 
 } // namespace database

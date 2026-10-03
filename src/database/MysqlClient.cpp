@@ -1,3 +1,4 @@
+#include <cstring>
 #include <orbit/database/MysqlClient.hpp>
 #include <iostream>
 
@@ -122,10 +123,15 @@ void MysqlClient::QueryAwaiter::process_result_cont() {
             std::vector<Row> rows;
             MYSQL_ROW current_row;
             while ((current_row = mysql_fetch_row(res))) {
-                std::vector<std::string> vals;
+                unsigned long* lengths = mysql_fetch_lengths(res);
+                std::vector<std::optional<std::string>> vals;
                 vals.reserve(num_fields);
                 for(unsigned int i = 0; i < num_fields; i++) {
-                    vals.push_back(current_row[i] ? current_row[i] : "");
+                    if (current_row[i]) {
+                        vals.emplace_back(std::string(current_row[i], lengths ? lengths[i] : std::strlen(current_row[i])));
+                    } else {
+                        vals.push_back(std::nullopt); // SQL NULL
+                    }
                 }
                 rows.emplace_back(std::move(vals), col_map);
             }

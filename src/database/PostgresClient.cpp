@@ -47,12 +47,12 @@ void PostgresClient::handle_connect(std::function<void(bool)> callback) {
 
 void PostgresClient::query(const std::string& sql, std::function<void(const ResultSet&)> callback) {
     if (!connected_) {
-        callback(ResultSet{});
+        callback(ResultSet::failure("not connected"));
         return;
     }
 
     if (PQsendQuery(conn_, sql.c_str()) == 0) {
-        callback(ResultSet{});
+        callback(ResultSet::failure(PQerrorMessage(conn_)));
         return;
     }
 
@@ -62,7 +62,7 @@ void PostgresClient::query(const std::string& sql, std::function<void(const Resu
 void PostgresClient::query(const std::string& sql, const std::vector<std::optional<std::string>>& params,
                            std::function<void(const ResultSet&)> callback) {
     if (!connected_) {
-        callback(ResultSet{});
+        callback(ResultSet::failure("not connected"));
         return;
     }
 
@@ -74,7 +74,7 @@ void PostgresClient::query(const std::string& sql, const std::vector<std::option
 
     if (PQsendQueryParams(conn_, sql.c_str(), static_cast<int>(values.size()), nullptr,
                           values.empty() ? nullptr : values.data(), nullptr, nullptr, 0) == 0) {
-        callback(ResultSet{});
+        callback(ResultSet::failure(PQerrorMessage(conn_)));
         return;
     }
 
@@ -91,13 +91,13 @@ void PostgresClient::handle_query(std::function<void(const ResultSet&)> callback
         });
         return;
     } else if (flush_res == -1) {
-        callback(ResultSet{});
+        callback(ResultSet::failure(PQerrorMessage(conn_)));
         return;
     }
 
     // Flush done, now wait for read
     if (PQconsumeInput(conn_) == 0) {
-        callback(ResultSet{});
+        callback(ResultSet::failure(PQerrorMessage(conn_)));
         return;
     }
 
@@ -110,11 +110,25 @@ void PostgresClient::handle_query(std::function<void(const ResultSet&)> callback
     }
 
     // Not busy, can get result
-    PGresult* res = PQgetResult(conn_);
-    // Read all remaining results until null
+    // Collect every result: a multi-statement query stops at its first
+    // failing statement, and that error must not be masked.
+    PGresult* res = nullptr;
+    std::string error;
     while (PGresult* next = PQgetResult(conn_)) {
-        PQclear(res);
+        ExecStatusType st = PQresultStatus(next);
+        if (st != PGRES_TUPLES_OK && st != PGRES_COMMAND_OK && st != PGRES_EMPTY_QUERY && error.empty()) {
+            const char* msg = PQresultErrorMessage(next);
+            error = (msg && *msg) ? msg : PQresStatus(st);
+        }
+        if (res) PQclear(res);
         res = next;
+    }
+
+    if (!error.empty()) {
+        if (res) PQclear(res);
+        while (!error.empty() && (error.back() == '\n' || error.back() == ' ')) error.pop_back();
+        callback(ResultSet::failure(error));
+        return;
     }
 
     if (!res) {
@@ -123,11 +137,6 @@ void PostgresClient::handle_query(std::function<void(const ResultSet&)> callback
     }
 
     ExecStatusType status = PQresultStatus(res);
-    if (status != PGRES_TUPLES_OK && status != PGRES_COMMAND_OK) {
-        PQclear(res);
-        callback(ResultSet{});
-        return;
-    }
 
     uint64_t affected_rows = 0;
     if (status == PGRES_COMMAND_OK) {
@@ -148,13 +157,13 @@ void PostgresClient::handle_query(std::function<void(const ResultSet&)> callback
     rows.reserve(num_rows);
 
     for (int r = 0; r < num_rows; ++r) {
-        std::vector<std::string> vals;
+        std::vector<std::optional<std::string>> vals;
         vals.reserve(num_fields);
         for (int c = 0; c < num_fields; ++c) {
             if (PQgetisnull(res, r, c)) {
-                vals.push_back("");
+                vals.push_back(std::nullopt);
             } else {
-                vals.push_back(PQgetvalue(res, r, c));
+                vals.emplace_back(std::string(PQgetvalue(res, r, c), static_cast<size_t>(PQgetlength(res, r, c))));
             }
         }
         rows.emplace_back(std::move(vals), col_map);

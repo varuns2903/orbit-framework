@@ -5,6 +5,10 @@
 #include <orbit/orm/QueryBuilder.hpp>
 #include <orbit/concurrency/Task.hpp>
 #include <orbit/network/EpollProactor.hpp>
+#include <orbit/orm/MigrationRunner.hpp>
+#include <orbit/http/HttpResponse.hpp>
+#include <orbit/http/ResponseWriter.hpp>
+#include <fstream>
 
 #include <atomic>
 #include <chrono>
@@ -152,5 +156,120 @@ TEST_F(OrmPostgresTest, ValuesAreBoundNotSpliced) {
     EXPECT_TRUE(r.bad_operator_threw);
     EXPECT_EQ(r.row_count, "2"); // table still there, nothing extra inserted
     EXPECT_EQ(r.param_query_value, "it's; fine");
+}
+
+namespace {
+
+class MigrationWriter : public http::ResponseWriter {
+public:
+    std::promise<std::pair<int, std::string>> result;
+    void send(http::HttpResponse&& r) override { result.set_value({static_cast<int>(r.status_code), r.body}); }
+    void send_headers(http::HttpResponse&) override {}
+    void write_chunk(std::string_view) override {}
+    void end() override {}
+    void add_interceptor(Interceptor) override {}
+    void set_header(const std::string&, const std::string&) override {}
+    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
+    void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
+    void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
+};
+
+struct ErrorResults {
+    bool connected = false;
+    bool missing_ok = true;
+    std::string missing_error;
+    bool null_is_nullopt = false;
+    std::string empty_value = "unset";
+    nlohmann::json row_json;
+    std::string tracked;
+    bool mig_b_exists = true;
+};
+
+concurrency::Task error_scenario(std::shared_ptr<database::PostgresClient> db, ErrorResults* r, std::promise<void>* done) {
+    r->connected = co_await database::connect_async(db);
+    if (r->connected) {
+        auto missing = co_await database::query_async(db, "SELECT * FROM no_such_table;");
+        r->missing_ok = missing.ok();
+        r->missing_error = missing.error();
+
+        auto nulls = co_await database::query_async(db, "SELECT NULL::text AS a, ''::text AS b;");
+        if (nulls.ok() && nulls.size() == 1) {
+            r->null_is_nullopt = !nulls[0].get(0).has_value();
+            r->empty_value = nulls[0].get(1).value_or("nullopt");
+            r->row_json = nulls[0].to_json();
+        }
+    }
+    done->set_value();
+}
+
+concurrency::Task inspect_migrations(std::shared_ptr<database::PostgresClient> db, ErrorResults* r, std::promise<void>* done) {
+    auto tracked = co_await database::query_async(db, "SELECT string_agg(version, ',' ORDER BY version) FROM orbit_migrations;");
+    if (tracked.ok() && tracked.size() == 1) r->tracked = tracked[0].get(0).value_or("");
+    auto exists = co_await database::query_async(db, "SELECT to_regclass('mig_b') IS NOT NULL;");
+    if (exists.ok() && exists.size() == 1) r->mig_b_exists = exists[0].get(0).value_or("") == "t";
+    done->set_value();
+}
+
+} // namespace
+
+TEST_F(OrmPostgresTest, ErrorsNullsAndTransactionalMigrations) {
+    network::EpollProactor proactor;
+    std::atomic<bool> running{true};
+    std::thread loop([&] {
+        while (running) proactor.run_once(50);
+    });
+    auto db = std::make_shared<database::PostgresClient>(
+        &proactor, "host=" + socket_dir + " port=" + std::to_string(kPgPort) + " user=postgres dbname=postgres");
+
+    ErrorResults r;
+    {
+        std::promise<void> done;
+        auto f = done.get_future();
+        error_scenario(db, &r, &done);
+        ASSERT_EQ(f.wait_for(std::chrono::seconds(20)), std::future_status::ready);
+    }
+    ASSERT_TRUE(r.connected);
+    EXPECT_FALSE(r.missing_ok);
+    EXPECT_NE(r.missing_error.find("no_such_table"), std::string::npos) << r.missing_error;
+    EXPECT_TRUE(r.null_is_nullopt);
+    EXPECT_EQ(r.empty_value, "");
+    EXPECT_TRUE(r.row_json["a"].is_null());
+    EXPECT_EQ(r.row_json["b"], "");
+
+    // Migrations: 001 succeeds, 002 fails half-way and must leave nothing behind.
+    auto dir = std::filesystem::temp_directory_path() / ("orbit_migrations_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "001_a.sql") << "CREATE TABLE mig_a (x int);";
+    std::ofstream(dir / "002_b.sql") << "CREATE TABLE mig_b (x int); SELECT * FROM does_not_exist;";
+
+    auto run = [&]() {
+        auto writer = std::make_shared<MigrationWriter>();
+        auto f = writer->result.get_future();
+        orm::MigrationRunner<database::PostgresClient>::run_migrations(db, dir.string(), writer);
+        EXPECT_EQ(f.wait_for(std::chrono::seconds(20)), std::future_status::ready);
+        return f.get();
+    };
+
+    auto first = run();
+    EXPECT_EQ(first.first, 500) << first.second;
+    {
+        std::promise<void> done;
+        auto f = done.get_future();
+        inspect_migrations(db, &r, &done);
+        ASSERT_EQ(f.wait_for(std::chrono::seconds(20)), std::future_status::ready);
+    }
+    EXPECT_EQ(r.tracked, "001_a.sql"); // 002 was not recorded as applied
+    EXPECT_FALSE(r.mig_b_exists);      // and its partial work was rolled back
+
+    std::ofstream(dir / "002_b.sql", std::ios::trunc) << "CREATE TABLE mig_b (x int);";
+    auto second = run();
+    EXPECT_EQ(second.first, 200);
+    EXPECT_EQ(second.second, "Successfully applied 1 migrations.");
+
+    std::filesystem::remove_all(dir);
+    running = false;
+    loop.join();
 }
 #endif
