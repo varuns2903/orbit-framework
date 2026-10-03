@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 #include <cstdint>
+#include <atomic>
 
 #include <zlib.h>
 
@@ -40,6 +41,26 @@ struct FrameHeader {
  * @return True if a complete frame is available at the front of the buffer.
  */
 bool parse_frame_header(const std::vector<char>& buffer, FrameHeader& header);
+
+/**
+ * @brief Progress of parsing the frame at the front of a buffer.
+ */
+enum class FrameStatus {
+    NeedHeader,   ///< The frame header has not fully arrived.
+    NeedPayload,  ///< The header is parsed (payload_length is known); the payload has not fully arrived.
+    Complete,     ///< The whole frame is in the buffer.
+    Invalid       ///< The frame violates RFC 6455 and the connection must be failed.
+};
+
+/**
+ * @brief Parses the frame header at the front of @p buffer.
+ *
+ * Unlike parse_frame_header(), this distinguishes a protocol violation from
+ * a frame that is still arriving, and reports the payload length as soon as
+ * the header is available so callers can reject oversized frames without
+ * buffering them.
+ */
+FrameStatus inspect_frame(const std::vector<char>& buffer, FrameHeader& header);
 
 /**
  * @brief Unmasks a frame payload in place using the frame's masking key.
@@ -83,6 +104,20 @@ public:
      */
     void close();
 
+    /**
+     * @brief Internal: the underlying transport has gone away (peer disconnect,
+     *        timeout or I/O error). Fires the close handler once, if it has not
+     *        already run, and makes further send() calls no-ops.
+     */
+    void handle_transport_closed();
+
+    /**
+     * @brief Sets the largest message payload accepted from the client, after
+     *        decompression. Larger messages close the connection with 1009.
+     * @param bytes Limit in bytes (default 16 MiB).
+     */
+    void set_max_message_size(size_t bytes) { max_message_size_ = bytes; }
+
     // Internal API called by Connection::handle_read when in WEBSOCKET state
     void process_raw_data(std::vector<char>& buffer);
 
@@ -91,7 +126,10 @@ private:
     std::function<void(const std::string&)> message_handler_;
     std::function<void()> close_handler_;
     
-    bool is_closed_{false};
+    std::atomic<bool> is_closed_{false};
+    size_t max_message_size_{16 * 1024 * 1024};
+
+    void fail_connection(uint16_t status_code);
 
     bool deflate_enabled_{false};
     z_stream inflate_stream_{};
@@ -101,7 +139,7 @@ private:
     void init_streams();
     void cleanup_streams();
     std::string deflate_payload(const std::string& payload);
-    std::string inflate_payload(const std::string& payload);
+    bool inflate_payload(const std::string& payload, std::string& out);
 };
 
 } // namespace websocket

@@ -32,6 +32,13 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
       connection_manager_(*proactor_, router, thread_pool_, timer_manager_, config.max_body_size, tls_context),
       quic_socket_(quic_socket),
       quic_manager_(quic_manager) {
+
+    ConnectionTimeouts timeouts;
+    timeouts.header = config.header_timeout;
+    timeouts.keep_alive = config.keep_alive_timeout;
+    timeouts.idle = config.idle_timeout;
+    timeouts.websocket_idle = config.websocket_idle_timeout;
+    connection_manager_.set_timeouts(timeouts);
     
     do_accept();
 
