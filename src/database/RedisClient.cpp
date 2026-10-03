@@ -2,6 +2,9 @@
 #include <orbit/utils/Logger.hpp>
 #include <orbit/network/PlatformSocket.hpp>
 #include <sstream>
+#ifndef _WIN32
+#include <netdb.h>
+#endif
 
 namespace database {
 
@@ -15,26 +18,44 @@ RedisClient::~RedisClient() {
 
 bool RedisClient::connect() {
     std::lock_guard<std::mutex> lock(mutex_);
+    return connect_locked();
+}
+
+bool RedisClient::connect_locked() {
     if (fd_ != -1) return true;
 
-    struct hostent* he = gethostbyname(host_.c_str());
-    if (!he) {
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* result = nullptr;
+    std::string port_str = std::to_string(port_);
+    if (getaddrinfo(host_.c_str(), port_str.c_str(), &hints, &result) != 0 || !result) {
         LOG_ERROR("Redis DNS resolution failed for " << host_);
         return false;
     }
+    sockaddr_in addr = *reinterpret_cast<sockaddr_in*>(result->ai_addr);
+    freeaddrinfo(result);
 
-    fd_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd_ < 0) return false;
+    fd_ = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
+    if (fd_ < 0) {
+        fd_ = -1;
+        return false;
+    }
 
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port_);
-    addr.sin_addr = *(struct in_addr*)he->h_addr_list[0];
+    // Bound every blocking call so a stalled Redis cannot pin worker threads.
+#ifdef _WIN32
+    DWORD timeout_ms = 2000;
+    setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+    setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+#else
+    timeval tv{2, 0};
+    setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
 
     // Connect synchronously (this runs on worker threads, so it's okay)
-    if (::connect(fd_, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        network::close_socket(fd_);
-        fd_ = -1;
+    if (::connect(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        close_locked();
         LOG_ERROR("Failed to connect to Redis at " << host_ << ":" << port_);
         return false;
     }
@@ -43,12 +64,16 @@ bool RedisClient::connect() {
     return true;
 }
 
-void RedisClient::disconnect() {
-    std::lock_guard<std::mutex> lock(mutex_);
+void RedisClient::close_locked() {
     if (fd_ != -1) {
         network::close_socket(fd_);
         fd_ = -1;
     }
+}
+
+void RedisClient::disconnect() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    close_locked();
 }
 
 std::string RedisClient::send_command(const std::vector<std::string>& args) {
@@ -60,24 +85,33 @@ std::string RedisClient::send_command(const std::vector<std::string>& args) {
     
     std::string req = oss.str();
     
+    // connect_locked() rather than connect(): mutex_ is not recursive, and
+    // re-locking it here deadlocked every caller after the first disconnect.
     std::lock_guard<std::mutex> lock(mutex_);
-    if (fd_ == -1 && !connect()) return "";
+    if (fd_ == -1 && !connect_locked()) return "";
 
     size_t total_sent = 0;
     while (total_sent < req.size()) {
         ssize_t s = send(fd_, req.data() + total_sent, req.size() - total_sent, 0);
         if (s <= 0) {
-            network::close_socket(fd_);
-            fd_ = -1;
+            close_locked();
             return ""; // Connection dropped
         }
-        total_sent += s;
+        total_sent += static_cast<size_t>(s);
     }
 
-    return read_response();
+    bool ok = false;
+    std::string response = read_response(ok);
+    if (!ok) {
+        // A failed or partial read leaves the stream at an unknown position;
+        // start over on a fresh connection next time.
+        close_locked();
+    }
+    return response;
 }
 
-std::string RedisClient::read_response() {
+std::string RedisClient::read_response(bool& ok) {
+    ok = false;
     // A simple, unoptimized RESP reader for synchronous reading.
     char c;
     std::string line;
@@ -90,46 +124,58 @@ std::string RedisClient::read_response() {
         }
     }
 
-    if (line.empty()) return "";
+    if (line.size() < 3 || line.substr(line.size() - 2) != "\r\n") return "";
 
     char type = line[0];
     line = line.substr(1, line.size() - 3); // Remove type char and \r\n
 
     if (type == '+') {
         // Simple string
+        ok = true;
         return line;
     } else if (type == '-') {
-        // Error
+        // Error reply: the stream is still in sync.
         LOG_ERROR("Redis Error: " << line);
+        ok = true;
         return "";
     } else if (type == ':') {
         // Integer
+        ok = true;
         return line;
     } else if (type == '$') {
         // Bulk string
-        long long len = std::stoll(line);
-        if (len == -1) return ""; // Null
+        long long len = 0;
+        try {
+            len = std::stoll(line);
+        } catch (...) {
+            return "";
+        }
+        if (len == -1) {
+            ok = true;
+            return ""; // Null
+        }
+        if (len < 0 || len > 512LL * 1024 * 1024) return "";
         
         std::string bulk;
-        bulk.resize(len);
+        bulk.resize(static_cast<size_t>(len));
         
         size_t total_read = 0;
-        while (total_read < len) {
-            ssize_t r = recv(fd_, &bulk[0] + total_read, len - total_read, 0);
+        while (total_read < static_cast<size_t>(len)) {
+            ssize_t r = recv(fd_, &bulk[0] + total_read, static_cast<size_t>(len) - total_read, 0);
             if (r <= 0) return "";
-            total_read += r;
+            total_read += static_cast<size_t>(r);
         }
         
         // consume trailing \r\n
         char crlf[2];
-        recv(fd_, crlf, 2, 0);
+        if (recv(fd_, crlf, 2, MSG_WAITALL) != 2) return "";
         
+        ok = true;
         return bulk;
-    } else if (type == '*') {
-        // Arrays not strictly needed yet for basic session management, returning stringified count
-        return "ARRAY:" + line; 
     }
 
+    // Arrays and other types are not used by this client; the stream can't be
+    // resynchronised without parsing them, so report failure.
     return "";
 }
 
