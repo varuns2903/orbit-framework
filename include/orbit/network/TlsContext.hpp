@@ -26,7 +26,13 @@ private:
 
 class ClientTlsContext {
 public:
-    ClientTlsContext();
+    /**
+     * @param verify_peer Verify the server certificate chain. Hostname checks
+     *        are enabled per connection with SSL_set1_host().
+     * @param ca_file Optional PEM bundle of trusted CAs; the system store is
+     *        used when empty.
+     */
+    explicit ClientTlsContext(bool verify_peer = true, const std::string& ca_file = "");
     ~ClientTlsContext();
 
     ClientTlsContext(const ClientTlsContext&) = delete;
