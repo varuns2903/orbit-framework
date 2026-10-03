@@ -16,3 +16,12 @@ TEST_F(WebSocketTest, ValidHandshakeGeneration) {
     
     EXPECT_EQ(generated_accept, expected_accept);
 }
+
+TEST(WebSocketHandshakeKeyTest, ValidatesClientKeyFormat) {
+    using http::websocket::Handshake;
+    EXPECT_TRUE(Handshake::is_valid_client_key("dGhlIHNhbXBsZSBub25jZQ=="));
+    EXPECT_FALSE(Handshake::is_valid_client_key(""));
+    EXPECT_FALSE(Handshake::is_valid_client_key("dGhlIHNhbXBsZSBub25jZQ="));   // 23 chars
+    EXPECT_FALSE(Handshake::is_valid_client_key("dGhlIHNhbXBsZSBub25jZQAA"));  // no padding
+    EXPECT_FALSE(Handshake::is_valid_client_key("dGhlIHNhbXBsZSBub25jZ!=="));  // bad character
+}

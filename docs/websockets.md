@@ -41,6 +41,29 @@ app.ws("/chat", [](http::websocket::WebSocketConnection& ws) {
 });
 ```
 
+## Securing WebSocket Routes
+
+Global middleware (`app.use`), group middleware and route middleware run before
+the handshake is accepted, exactly as for HTTP routes. A middleware that stops
+the request (for example `jwt_auth` returning 401) aborts the upgrade.
+
+Browsers do not apply CORS to WebSocket handshakes, so check `Origin` to prevent
+cross-site WebSocket hijacking:
+
+```cpp
+#include <orbit/middleware/Cors.hpp>
+#include <orbit/middleware/JwtAuth.hpp>
+
+app.ws("/chat",
+       {middleware::require_origin({"https://app.example.com"}),
+        middleware::jwt_auth(secret)},
+       [](http::websocket::WebSocketConnection& ws) { /* ... */ });
+```
+
+Handshakes that are not `GET`, lack `Connection: Upgrade`, carry a malformed
+`Sec-WebSocket-Key`, or request a version other than 13 are answered with
+`400 Bad Request`.
+
 ## Broadcasting
 
 To build a chat server, you can store `WebSocketConnection` references or broadcast messages globally. The underlying sockets are non-blocking, making `send()` extremely fast.
