@@ -173,6 +173,14 @@ private:
     BIO* wbio_{nullptr};
     bool is_tls_handshake_complete_{false};
     std::vector<char> tls_write_buffer_; // For holding ciphertext before sending
+    // OpenSSL objects are not thread-safe: SSL_read runs on the event loop and
+    // SSL_write on whichever thread sends. tls_mutex_ guards ssl_, the BIOs and
+    // tls_write_buffer_ (encrypted bytes waiting to be written).
+    std::mutex tls_mutex_;
+    // Encrypted bytes handed to the proactor. Only the thread holding
+    // is_writing_ touches it, so it is never reallocated during a write.
+    std::vector<char> tls_inflight_;
+    void drain_tls_output_locked();
     
     std::atomic<bool> is_processing_request_{false};
     
