@@ -77,7 +77,7 @@ TlsContext::~TlsContext() {
     }
 }
 
-ClientTlsContext::ClientTlsContext() {
+ClientTlsContext::ClientTlsContext(bool verify_peer, const std::string& ca_file) {
     const SSL_METHOD* method = TLS_client_method();
     ctx_ = SSL_CTX_new(method);
     if (!ctx_) {
@@ -85,8 +85,19 @@ ClientTlsContext::ClientTlsContext() {
     }
     
     SSL_CTX_set_min_proto_version(ctx_, TLS1_2_VERSION);
-    // Optional: Load default verify paths for CA certificates
-    SSL_CTX_set_default_verify_paths(ctx_);
+
+    if (!ca_file.empty()) {
+        if (SSL_CTX_load_verify_locations(ctx_, ca_file.c_str(), nullptr) != 1) {
+            SSL_CTX_free(ctx_);
+            ctx_ = nullptr;
+            throw std::runtime_error("Failed to load CA file: " + ca_file);
+        }
+    } else {
+        SSL_CTX_set_default_verify_paths(ctx_);
+    }
+
+    // Without SSL_VERIFY_PEER the handshake succeeds against any certificate.
+    SSL_CTX_set_verify(ctx_, verify_peer ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, nullptr);
 }
 
 ClientTlsContext::~ClientTlsContext() {
