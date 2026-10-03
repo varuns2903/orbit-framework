@@ -11,15 +11,7 @@
 #endif
 #include <iostream>
 #include <orbit/network/PlatformSocket.hpp>
-#ifdef _WIN32
-#include <io.h>
-#define close _close
-#define open _open
-inline ssize_t pread(int fd, void* buf, size_t count, long offset) {
-    _lseek(fd, offset, SEEK_SET);
-    return _read(fd, buf, static_cast<unsigned int>(count));
-}
-#endif
+#include <orbit/utils/FileIO.hpp>
 
 
 namespace server {
@@ -50,7 +42,7 @@ Connection::~Connection() {
         SSL_free(ssl_);
     }
     if (file_fd_ != -1) {
-        close(file_fd_);
+        utils::file::close(file_fd_);
     }
 }
 
@@ -112,7 +104,29 @@ void Connection::on_removed() {
     removed_ = true;
 }
 
+namespace {
+
+// True if a proactor I/O result means "not ready yet" rather than failure.
+// epoll and kqueue report -1 with errno; io_uring reports -errno. IOCP
+// completions never mean would-block.
+bool would_block(ssize_t result) {
+#ifdef _WIN32
+    (void)result;
+    return false;
+#else
+    if (result == -EAGAIN || result == -EWOULDBLOCK || result == -EINTR) return true;
+    return result == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+#endif
+}
+
+} // namespace
+
 void Connection::on_read_complete(ssize_t bytes_read) {
+    if (bytes_read < 0 && would_block(bytes_read)) {
+        // Spurious wakeup: nothing to read yet. Not a closed connection.
+        trigger_read();
+        return;
+    }
     if (bytes_read <= 0) {
         if (state_ == ConnectionState::RAW_STREAM && raw_stream_on_close_) {
             raw_stream_on_close_();
@@ -140,6 +154,7 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         bool handshake_failed = false;
         bool handshake_pending = false;
         bool negotiated_h2 = false;
+        bool tls_closed = false; // peer sent close_notify, or the TLS stream failed
         {
             std::lock_guard<std::mutex> tls_lock(tls_mutex_);
             BIO_write(rbio_, async_read_buf_, static_cast<int>(bytes_read));
@@ -166,7 +181,16 @@ void Connection::on_read_complete(ssize_t bytes_read) {
                 char clear_buf[8192];
                 while (true) {
                     int ret = SSL_read(ssl_, clear_buf, sizeof(clear_buf));
-                    if (ret <= 0) break;
+                    if (ret <= 0) {
+                        int err = SSL_get_error(ssl_, ret);
+                        // WANT_READ: the record is incomplete, wait for more bytes.
+                        // ZERO_RETURN (close_notify) or any other error: this TLS
+                        // stream will not deliver more data.
+                        if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+                            tls_closed = true;
+                        }
+                        break;
+                    }
                     plaintext.insert(plaintext.end(), clear_buf, clear_buf + ret);
                 }
             }
@@ -178,6 +202,15 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         if (handshake_failed) {
             manager_.remove_connection(socket_.fd());
             return;
+        }
+        if (tls_closed) {
+            if (plaintext.empty() && !is_processing_request_) {
+                // Nothing left to answer: close as for a TCP FIN.
+                on_read_complete(0);
+                return;
+            }
+            // Answer what was already received, then close.
+            should_close_ = true;
         }
         if (handshake_pending) {
             if (have_tls_output) {
@@ -513,13 +546,20 @@ void Connection::set_header(const std::string& key, const std::string& value) {
     default_headers_[key] = value;
 }
 
+// set_header() may run on another thread (e.g. middleware on a worker while
+// a previous response is still being sent), so copy under its lock.
+std::unordered_map<std::string, std::string> Connection::default_headers_snapshot() {
+    std::lock_guard<std::mutex> lock(write_mutex_);
+    return default_headers_;
+}
+
 void Connection::add_interceptor(std::function<void(http::HttpResponse&)> interceptor) {
     std::lock_guard<std::mutex> lock(write_mutex_);
     interceptors_.push_back(std::move(interceptor));
 }
 
 void Connection::send_headers(http::HttpResponse& response) {
-    for (const auto& [k, v] : default_headers_) {
+    for (const auto& [k, v] : default_headers_snapshot()) {
         if (response.headers.find(k) == response.headers.end()) {
             response.headers[k] = v;
         }
@@ -534,9 +574,9 @@ void Connection::send_headers(http::HttpResponse& response) {
     // Default to chunked transfer if no Content-Length
     if (response.headers.find("Content-Length") == response.headers.end()) {
         response.headers["Transfer-Encoding"] = "chunked";
-        is_chunked_ = true;
+        response_chunked_ = true;
     } else {
-        is_chunked_ = false;
+        response_chunked_ = false;
     }
     
     std::string serialized = response.serialize_headers();
@@ -551,7 +591,7 @@ void Connection::send(http::HttpResponse&& response) {
         }
     }
 
-    for (const auto& [k, v] : default_headers_) {
+    for (const auto& [k, v] : default_headers_snapshot()) {
         if (response.headers.find(k) == response.headers.end()) {
             response.headers[k] = v;
         }
@@ -639,7 +679,7 @@ void Connection::continue_after_response() {
 
 void Connection::write_chunk(std::string_view chunk) {
     if (is_head_request_) return;
-    if (is_chunked_) {
+    if (response_chunked_) {
         std::string formatted_chunk;
         char hex_len[32];
         snprintf(hex_len, sizeof(hex_len), "%zx\r\n", chunk.size());
@@ -655,7 +695,7 @@ void Connection::write_chunk(std::string_view chunk) {
 void Connection::end() {
     const bool last_response = should_close_;
     // Closes once everything queued is written.
-    send_data(is_chunked_ && !is_head_request_ ? "0\r\n\r\n" : "", last_response);
+    send_data(response_chunked_ && !is_head_request_ ? "0\r\n\r\n" : "", last_response);
     if (last_response) {
         return;
     }
@@ -720,7 +760,7 @@ void Connection::trigger_write() {
             if (file_fd_ != -1 && file_offset_ < file_size_ && tls_write_buffer_.empty() && tls_inflight_.empty()) {
                 char file_buf[16384];
                 size_t to_read = static_cast<size_t>(std::min(static_cast<off_t>(sizeof(file_buf)), file_size_ - file_offset_));
-                ssize_t bytes_read = pread(file_fd_, file_buf, to_read, file_offset_);
+                ssize_t bytes_read = utils::file::pread(file_fd_, file_buf, to_read, file_offset_);
                 if (bytes_read > 0) {
                     SSL_write(ssl_, file_buf, static_cast<int>(bytes_read));
                     file_offset_ += bytes_read;
@@ -742,7 +782,7 @@ void Connection::trigger_write() {
         }
         
         if (file_fd_ != -1 && file_offset_ >= file_size_) {
-            close(file_fd_);
+            utils::file::close(file_fd_);
             file_fd_ = -1;
         }
         
@@ -794,7 +834,7 @@ void Connection::trigger_write() {
         }
         
         if (file_fd_ != -1 && file_offset_ >= file_size_) {
-            close(file_fd_);
+            utils::file::close(file_fd_);
             file_fd_ = -1;
         }
     }
@@ -844,6 +884,12 @@ bool Connection::has_pending_output(bool& close_requested, bool& resume) {
 }
 
 void Connection::on_write_complete(ssize_t bytes_written) {
+    if (bytes_written < 0 && would_block(bytes_written)) {
+        // Socket buffer full: wait for writability and resend what is in flight.
+        is_writing_ = false;
+        trigger_write();
+        return;
+    }
     if (bytes_written <= 0) {
         manager_.remove_connection(socket_.fd());
         return;
@@ -869,6 +915,11 @@ void Connection::on_write_complete(ssize_t bytes_written) {
 }
 
 void Connection::on_sendfile_complete(ssize_t bytes_written) {
+    if (bytes_written < 0 && would_block(bytes_written)) {
+        is_writing_ = false;
+        trigger_write();
+        return;
+    }
     if (bytes_written <= 0) {
         manager_.remove_connection(socket_.fd());
         return;
@@ -936,7 +987,7 @@ void Connection::process_streaming_data() {
     // Do not consume data until the handler has registered the callback!
     if (!body_stream_on_data_) return;
     
-    if (is_chunked_) {
+    if (request_chunked_) {
         while (!read_buffer_.empty()) {
             if (is_chunk_header_mode_) {
                 std::string_view buf(read_buffer_.data(), read_buffer_.size());
@@ -1049,10 +1100,10 @@ RequestState Connection::check_request_state() {
         
         if (router_.is_stream_route(method, uri)) {
             if (framing.chunked) {
-                is_chunked_ = true;
+                request_chunked_ = true;
                 is_chunk_header_mode_ = true;
             } else {
-                is_chunked_ = false;
+                request_chunked_ = false;
                 // Without Content-Length the stream runs until the peer closes,
                 // matching the previous streaming-route behaviour.
                 content_length_remaining_ = framing.has_content_length

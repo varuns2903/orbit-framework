@@ -150,7 +150,8 @@ private:
     
     char async_read_buf_[16384]; // Buffer for kernel to write into asynchronously
 
-    std::unordered_map<std::string, std::string> default_headers_; // Populated by middlewares
+    std::unordered_map<std::string, std::string> default_headers_; // Populated by middlewares; guarded by write_mutex_
+    std::unordered_map<std::string, std::string> default_headers_snapshot();
     std::string current_request_buffer_; // Holds the request data for string_views during async processing
     std::atomic<bool> is_reading_{false};
 
@@ -169,7 +170,10 @@ private:
     std::mutex io_mutex_;
     bool removed_ = false; // guarded by io_mutex_
     std::atomic<bool> is_writing_{false};
-    bool is_chunked_{false};
+    // Separate flags: a handler may start a chunked response while a
+    // chunked request body is still being streamed in.
+    bool request_chunked_{false};  // decoding the incoming body (event-loop thread)
+    bool response_chunked_{false}; // encoding the outgoing body (handler threads)
     bool is_head_request_{false}; // Responses to HEAD carry headers only
     bool is_chunk_header_mode_{true};
     size_t chunk_bytes_remaining_{0};
@@ -177,14 +181,15 @@ private:
 
     RequestState check_request_state();
     std::string request_body_storage_; // Owns a decoded chunked request body
-    bool should_close_{false};
+    std::atomic<bool> should_close_{false};
     // Set (under write_mutex_) together with the final response's bytes;
     // the connection closes when everything queued has been written.
     bool close_after_write_{false};
     // Set (under write_mutex_) while a file response is being sent; the
     // next pipelined request waits for it.
     bool resume_after_write_{false};
-    ConnectionState state_{ConnectionState::HTTP};
+    // Written by handler threads (upgrades, streaming) and read by the event loop.
+    std::atomic<ConnectionState> state_{ConnectionState::HTTP};
     uint64_t current_timer_id_{0};
     std::mutex timer_mutex_;
     ConnectionTimeouts timeouts_;

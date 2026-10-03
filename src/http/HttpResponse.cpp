@@ -1,9 +1,5 @@
 #include <orbit/http/HttpResponse.hpp>
-#ifdef _WIN32
-#include <io.h>
-#define open _open
-#define close _close
-#endif
+#include <orbit/utils/FileIO.hpp>
 #include <algorithm>
 #include <sstream>
 #include <fcntl.h>
@@ -30,7 +26,7 @@ HttpResponse::HttpResponse(HttpResponse&& other) noexcept
 
 HttpResponse& HttpResponse::operator=(HttpResponse&& other) noexcept {
     if (this != &other) {
-        if (file_fd != -1) close(file_fd);
+        if (file_fd != -1) utils::file::close(file_fd);
         status_code = other.status_code;
         headers = std::move(other.headers);
         cookies = std::move(other.cookies);
@@ -45,7 +41,7 @@ HttpResponse& HttpResponse::operator=(HttpResponse&& other) noexcept {
 
 HttpResponse::~HttpResponse() {
     if (file_fd != -1) {
-        close(file_fd);
+        utils::file::close(file_fd);
     }
 }
 
@@ -69,15 +65,11 @@ void HttpResponse::render(const std::string& template_path, const nlohmann::json
 
 void HttpResponse::send_file(const std::string& path, const std::string& content_type) {
     if (file_fd != -1) {
-        close(file_fd);
+        utils::file::close(file_fd);
     }
     
     file_offset = 0;
-#ifdef _WIN32
-    file_fd = open(path.c_str(), O_RDONLY | O_BINARY); // no newline translation
-#else
-    file_fd = open(path.c_str(), O_RDONLY);
-#endif
+    file_fd = utils::file::open_read_only(path.c_str());
     if (file_fd == -1) {
         status_code = HttpStatus::NotFound;
         set_body("<h1>404 Not Found</h1>", "text/html");
@@ -90,7 +82,7 @@ void HttpResponse::send_file(const std::string& path, const std::string& content
         headers["Content-Length"] = std::to_string(file_size);
         headers["Content-Type"] = content_type;
     } else {
-        close(file_fd);
+        utils::file::close(file_fd);
         file_fd = -1;
         status_code = HttpStatus::InternalServerError;
         set_body("<h1>500 Internal Error</h1>", "text/html");
