@@ -91,3 +91,46 @@ TEST(HttpParserTest, RecordsHttpVersionOneOne) {
     ASSERT_TRUE(req.has_value());
     EXPECT_EQ(req->http_version, "HTTP/1.1");
 }
+
+// --- Percent-decoding (issue #24) ---
+
+TEST(PercentDecodingTest, PathIsDecoded) {
+    auto req = HttpParser::parse("GET /files/my%20doc%C3%A9.txt HTTP/1.1\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_EQ(req->uri, "/files/my doc\xC3\xA9.txt");
+}
+
+TEST(PercentDecodingTest, QueryKeysAndValuesAreDecoded) {
+    auto req = HttpParser::parse("GET /s?q=a%26b&name=John+Doe&empty&%6Bey=v%3D1 HTTP/1.1\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_EQ(req->uri, "/s");
+    EXPECT_EQ(req->query["q"], "a&b");
+    EXPECT_EQ(req->query["name"], "John Doe");
+    EXPECT_EQ(req->query["empty"], "");
+    EXPECT_EQ(req->query["key"], "v=1");
+}
+
+TEST(PercentDecodingTest, PlusIsLiteralInPath) {
+    auto req = HttpParser::parse("GET /c++/a+b HTTP/1.1\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_EQ(req->uri, "/c++/a+b");
+}
+
+TEST(PercentDecodingTest, RejectsEncodedSeparatorsAndNulInPath) {
+    EXPECT_FALSE(HttpParser::parse("GET /a%2F..%2Fetc HTTP/1.1\r\n\r\n").has_value());
+    EXPECT_FALSE(HttpParser::parse("GET /a%2f..%2fetc HTTP/1.1\r\n\r\n").has_value());
+    EXPECT_FALSE(HttpParser::parse("GET /a%5C..%5Cetc HTTP/1.1\r\n\r\n").has_value());
+    EXPECT_FALSE(HttpParser::parse("GET /a%00.txt HTTP/1.1\r\n\r\n").has_value());
+}
+
+TEST(PercentDecodingTest, RejectsMalformedEscapes) {
+    EXPECT_FALSE(HttpParser::parse("GET /a%zz HTTP/1.1\r\n\r\n").has_value());
+    EXPECT_FALSE(HttpParser::parse("GET /a% HTTP/1.1\r\n\r\n").has_value());
+    EXPECT_FALSE(HttpParser::parse("GET /a?q=%4 HTTP/1.1\r\n\r\n").has_value());
+}
+
+TEST(PercentDecodingTest, SlashAllowedInQuery) {
+    auto req = HttpParser::parse("GET /cb?code=4%2F0Ab HTTP/1.1\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_EQ(req->query["code"], "4/0Ab");
+}

@@ -32,6 +32,13 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
       connection_manager_(*proactor_, router, thread_pool_, timer_manager_, config.max_body_size, tls_context),
       quic_socket_(quic_socket),
       quic_manager_(quic_manager) {
+
+    ConnectionTimeouts timeouts;
+    timeouts.header = config.header_timeout;
+    timeouts.keep_alive = config.keep_alive_timeout;
+    timeouts.idle = config.idle_timeout;
+    timeouts.websocket_idle = config.websocket_idle_timeout;
+    connection_manager_.set_timeouts(timeouts);
     
     do_accept();
 
@@ -80,7 +87,7 @@ void EventLoop::stop_accepting() {
 void EventLoop::do_accept() {
     proactor_->async_accept(listener_.fd(), [this](int client_fd, sockaddr_in addr) {
         if (client_fd >= 0) {
-            std::cout << "Accepted new connection! FD: " << client_fd << std::endl;
+            LOG_DEBUG("Accepted new connection! FD: " << client_fd);
             std::string client_ip = inet_ntoa(addr.sin_addr);
             network::Socket client(client_fd);
             connection_manager_.add_connection(std::move(client), client_ip);
