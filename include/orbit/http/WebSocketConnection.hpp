@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 #include <cstdint>
+#include <atomic>
 
 #include <zlib.h>
 
@@ -104,6 +105,13 @@ public:
     void close();
 
     /**
+     * @brief Internal: the underlying transport has gone away (peer disconnect,
+     *        timeout or I/O error). Fires the close handler once, if it has not
+     *        already run, and makes further send() calls no-ops.
+     */
+    void handle_transport_closed();
+
+    /**
      * @brief Sets the largest message payload accepted from the client, after
      *        decompression. Larger messages close the connection with 1009.
      * @param bytes Limit in bytes (default 16 MiB).
@@ -118,7 +126,7 @@ private:
     std::function<void(const std::string&)> message_handler_;
     std::function<void()> close_handler_;
     
-    bool is_closed_{false};
+    std::atomic<bool> is_closed_{false};
     size_t max_message_size_{16 * 1024 * 1024};
 
     void fail_connection(uint16_t status_code);

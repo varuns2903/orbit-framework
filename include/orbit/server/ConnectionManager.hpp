@@ -28,6 +28,11 @@ public:
     ConnectionManager(network::Proactor& proactor, const routing::Router& router, concurrency::ThreadPool& thread_pool, TimerManager& timer_manager, size_t max_body_size, network::TlsContext* tls_context = nullptr);
 
     /**
+     * @brief Sets the timeouts applied to connections accepted from now on.
+     */
+    void set_timeouts(const ConnectionTimeouts& timeouts) { timeouts_ = timeouts; }
+
+    /**
      * @brief Adds a new connection to the manager.
      * @param socket The connection socket.
      * @param client_ip The client's IP address.
@@ -51,6 +56,7 @@ private:
     const routing::Router& router_;
     concurrency::ThreadPool& thread_pool_;
     TimerManager& timer_manager_;
+    ConnectionTimeouts timeouts_;
     
     std::unordered_map<int, std::shared_ptr<Connection>> connections_;
     mutable std::mutex map_mutex_;
