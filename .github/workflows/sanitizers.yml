@@ -1,0 +1,100 @@
+name: Sanitizers and Static Analysis
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  sanitize:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan + UBSan
+            flags: -DENABLE_SANITIZERS=ON -DORBIT_ENABLE_TSAN=OFF
+            blocking: true
+          # Reports data races. Not blocking yet: known races are being
+          # triaged; the log is uploaded either way.
+          - name: TSan
+            flags: -DENABLE_SANITIZERS=OFF -DORBIT_ENABLE_TSAN=ON
+            blocking: false
+    continue-on-error: ${{ !matrix.blocking }}
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      TSAN_OPTIONS: halt_on_error=0:second_deadlock_stack=1
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Cache vcpkg dependencies
+      uses: actions/cache@v6
+      with:
+        path: |
+          build/vcpkg_installed
+          vcpkg/downloads
+        key: ${{ runner.os }}-vcpkg-manifest-v1-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-manifest-v1-
+
+    - name: Setup vcpkg (pinned to builtin-baseline)
+      run: |
+        mkdir -p vcpkg
+        cd vcpkg
+        if [ ! -d ".git" ]; then
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+        fi
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
+        ./bootstrap-vcpkg.sh -disableMetrics
+
+    - name: Configure (Debug)
+      run: |
+        cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+          -DCMAKE_BUILD_TYPE=Debug -DORBIT_ENABLE_GRPC=OFF -DORBIT_BUILD_EXAMPLES=OFF \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ${{ matrix.flags }}
+
+    - name: Build
+      # Sanitizer builds take several GB per compile job.
+      run: cmake --build build --parallel 2 --target http_server_tests
+
+    - name: Run tests
+      working-directory: build
+      run: ctest --output-on-failure --timeout 300 2>&1 | tee ../sanitizer.log
+
+    - name: Upload log
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ matrix.name == 'TSan' && 'tsan-log' || 'asan-log' }}
+        path: sanitizer.log
+        if-no-files-found: ignore
+
+    - name: clang-tidy on changed files (report only)
+      if: github.event_name == 'pull_request' && matrix.blocking
+      continue-on-error: true
+      run: |
+        sudo apt-get update && sudo apt-get install -y clang-tidy
+        FILES=$(git diff --name-only --diff-filter=AM "origin/${{ github.base_ref }}...HEAD" -- 'src/*.cpp')
+        if [ -z "$FILES" ]; then
+          echo "No changed source files."
+          exit 0
+        fi
+        echo "Checking: $FILES"
+        clang-tidy -p build --quiet $FILES

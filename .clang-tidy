@@ -1,0 +1,15 @@
+# Checks run on changed files in CI (.github/workflows/sanitizers.yml).
+# Kept to high-signal checks; style is not enforced here.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  clang-analyzer-*,
+  -clang-analyzer-optin.*,
+  performance-*,
+  -performance-avoid-endl,
+  concurrency-mt-unsafe
+HeaderFilterRegex: '.*/include/orbit/.*'
+FormatStyle: none
