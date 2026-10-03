@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <orbit/server/App.hpp>
 #include <orbit/middleware/OAuth2.hpp>
+#include <orbit/network/PlatformSocket.hpp>
 
 #include <chrono>
 #include <memory>
@@ -145,6 +146,18 @@ protected:
 
     static void TearDownTestSuite() {
         provider->stop();
+        // stop() only sets a flag. If no test sent the provider a request, its
+        // event loop is blocked waiting for I/O with no timeout, so connect
+        // once to wake it; otherwise join() never returns.
+        {
+            network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(kProviderPort);
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+            network::close_socket(fd);
+        }
         if (provider_thread.joinable()) provider_thread.join();
         delete provider;
     }
