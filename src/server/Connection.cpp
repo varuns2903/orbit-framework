@@ -572,10 +572,6 @@ void Connection::send(http::HttpResponse&& response) {
         serialized_data = response.serialize_headers();
     } else if (is_file) {
         serialized_data = response.serialize_headers();
-        this->file_fd_ = response.file_fd;
-        this->file_size_ = response.file_size;
-        this->file_offset_ = 0;
-        response.file_fd = -1; // Prevent the destructor from closing it
     } else {
         serialized_data = response.serialize();
     }
@@ -584,12 +580,32 @@ void Connection::send(http::HttpResponse&& response) {
     // the request was parsed, keeps an earlier pipelined response's write
     // completion from closing the socket before this one is queued.
     const bool last_response = should_close_;
+
+    // The connection holds one file at a time. The next pipelined request
+    // is processed only once this file is fully written; otherwise its
+    // response would overwrite the file state mid-transfer (or put its
+    // headers on the wire before this file's bytes).
+    const bool sends_file = is_file && !is_head_request_;
+    if (sends_file) {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        file_fd_ = response.file_fd;
+        file_size_ = response.file_size;
+        file_offset_ = response.file_offset;
+        response.file_fd = -1; // Prevent the destructor from closing it
+        if (!last_response) resume_after_write_ = true;
+    }
+
     send_data(serialized_data, last_response);
 
-    if (last_response) {
-        return; // No further requests are read on this connection.
+    if (last_response || sends_file) {
+        return; // Closing, or continued by trigger_write() once the file is sent.
     }
-    
+    continue_after_response();
+}
+
+// Moves on after a complete response: serves the next pipelined request if
+// it has already arrived, otherwise goes back to reading.
+void Connection::continue_after_response() {
     RequestState state = check_request_state();
     if (state == RequestState::COMPLETE) {
         // We already hold is_processing_request_ == true from the current request
@@ -643,34 +659,7 @@ void Connection::end() {
     if (last_response) {
         return;
     }
-    
-    RequestState state = check_request_state();
-    if (state == RequestState::COMPLETE) {
-        auto self = shared_from_this();
-        thread_pool_.enqueue([self]() {
-            self->process_request();
-        });
-    } else if (state == RequestState::ERROR_PAYLOAD_TOO_LARGE) {
-        send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
-    } else if (state == RequestState::ERROR_HEADERS_TOO_LARGE) {
-        send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
-    } else if (state == RequestState::ERROR_BAD_REQUEST) {
-        send_error(http::HttpStatus::BadRequest, "400 Bad Request");
-    } else {
-        is_processing_request_ = false;
-        arm_timer_for_current_phase();
-        if (check_request_state() == RequestState::COMPLETE) {
-            bool expected = false;
-            if (is_processing_request_.compare_exchange_strong(expected, true)) {
-                auto self = shared_from_this();
-                thread_pool_.enqueue([self]() {
-                    self->process_request();
-                });
-            }
-            return;
-        }
-        trigger_read();
-    }
+    continue_after_response();
 }
 
 void Connection::send_sse_event(std::string_view data, std::string_view event, std::string_view id) {
@@ -816,7 +805,8 @@ void Connection::trigger_write() {
     // buffers and clearing is_writing_ saw "already writing" and left it to
     // us. Pick it up, or it would sit unsent until the next write.
     bool close_requested = false;
-    if (has_pending_output(close_requested)) {
+    bool resume = false;
+    if (has_pending_output(close_requested, resume)) {
         trigger_write();
         return;
     }
@@ -826,21 +816,31 @@ void Connection::trigger_write() {
         return;
     }
 
+    if (resume) {
+        // A file response has been fully sent: move on to the next request.
+        continue_after_response();
+        return;
+    }
+
     // Everything queued has been written; go back to waiting on the peer.
     arm_timer_for_current_phase();
 }
 
-bool Connection::has_pending_output(bool& close_requested) {
-    {
-        std::lock_guard<std::mutex> lock(write_mutex_);
-        close_requested = close_after_write_;
-        if (!write_buffer_.empty() || !active_write_buffer_.empty()) return true;
-    }
-    if (ssl_) {
+bool Connection::has_pending_output(bool& close_requested, bool& resume) {
+    std::lock_guard<std::mutex> lock(write_mutex_);
+    close_requested = close_after_write_;
+    bool pending = !write_buffer_.empty() || !active_write_buffer_.empty() ||
+                   (file_fd_ != -1 && file_offset_ < file_size_);
+    if (!pending && ssl_) {
         std::lock_guard<std::mutex> tls_lock(tls_mutex_);
-        if (!tls_write_buffer_.empty()) return true;
+        pending = !tls_write_buffer_.empty();
     }
-    return file_fd_ != -1 && file_offset_ < file_size_;
+    // Claimed here, under the lock, so exactly one caller resumes.
+    if (!pending && resume_after_write_) {
+        resume_after_write_ = false;
+        resume = true;
+    }
+    return pending;
 }
 
 void Connection::on_write_complete(ssize_t bytes_written) {

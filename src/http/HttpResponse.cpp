@@ -4,6 +4,7 @@
 #define open _open
 #define close _close
 #endif
+#include <algorithm>
 #include <sstream>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -22,7 +23,8 @@ HttpResponse::HttpResponse(HttpResponse&& other) noexcept
       cookies(std::move(other.cookies)),
       body(std::move(other.body)),
       file_fd(other.file_fd),
-      file_size(other.file_size) {
+      file_size(other.file_size),
+      file_offset(other.file_offset) {
     other.file_fd = -1; // Steal ownership
 }
 
@@ -35,6 +37,7 @@ HttpResponse& HttpResponse::operator=(HttpResponse&& other) noexcept {
         body = std::move(other.body);
         file_fd = other.file_fd;
         file_size = other.file_size;
+        file_offset = other.file_offset;
         other.file_fd = -1;
     }
     return *this;
@@ -69,7 +72,12 @@ void HttpResponse::send_file(const std::string& path, const std::string& content
         close(file_fd);
     }
     
+    file_offset = 0;
+#ifdef _WIN32
+    file_fd = open(path.c_str(), O_RDONLY | O_BINARY); // no newline translation
+#else
     file_fd = open(path.c_str(), O_RDONLY);
+#endif
     if (file_fd == -1) {
         status_code = HttpStatus::NotFound;
         set_body("<h1>404 Not Found</h1>", "text/html");
@@ -87,6 +95,15 @@ void HttpResponse::send_file(const std::string& path, const std::string& content
         status_code = HttpStatus::InternalServerError;
         set_body("<h1>500 Internal Error</h1>", "text/html");
     }
+}
+
+void HttpResponse::set_file_range(off_t start, off_t end) {
+    if (file_fd == -1) return;
+    end = std::min(end, file_size);
+    start = std::min(start, end);
+    file_offset = start;
+    file_size = end;
+    headers["Content-Length"] = std::to_string(end - start);
 }
 
 const char* reason_phrase(int status_code) {

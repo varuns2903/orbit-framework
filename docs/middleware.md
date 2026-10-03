@@ -121,6 +121,27 @@ app.post("/users", {middleware::validate_json(user_schema)}, [](HttpRequest& req
 });
 ```
 
+### Static Files
+Serves files from a directory for `GET` and `HEAD`; anything not found falls through to
+the next middleware or route.
+```cpp
+#include <orbit/middleware/StaticFiles.hpp>
+app.use(middleware::static_files("public"));
+
+middleware::StaticFilesOptions opts;
+opts.max_age = std::chrono::hours(24); // Cache-Control: public, max-age=86400
+opts.index = "index.html";            // served for directory requests; "" disables
+opts.serve_dotfiles = false;          // .env, .git/ ... are hidden (the default)
+app.use(middleware::static_files("public", opts));
+```
+- Paths that resolve outside the directory, including through symlinks, get `403`.
+- Responses carry `ETag`, `Last-Modified`, `Cache-Control` and `Accept-Ranges: bytes`.
+  `If-None-Match` and `If-Modified-Since` give `304`.
+- A single byte range (`Range: bytes=0-1023`, `bytes=-500`, ...) gives `206` with
+  `Content-Range`, or `416` if it starts past the end. `If-Range` is honoured. Multi-range
+  requests get the whole file.
+- `middleware::mime_type_for_extension(".woff2")` exposes the built-in type table.
+
 ### Rate Limiting
 Global in-memory or Redis-backed distributed rate limiting.
 ```cpp
