@@ -97,15 +97,15 @@ void IocpProactor::run_once(int timeout_ms) {
     } else {
         if (ctx->type == IocpOperationType::ACCEPT) {
             
-            // GetAcceptExSockaddrs is statically linked from mswsock
-            // but we might need GetAcceptExSockaddrs function pointer too.
-            // Assuming it's linked dynamically if we include mswsock.h
-            // For now, let's just trigger the callback
-            
             // Update context in accepted socket
             setsockopt(ctx->accept_socket, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, (char*)&ctx->fd, sizeof(ctx->fd));
             
-            sockaddr_in addr{}; // We can fill this if needed
+            // With the accept context updated, getpeername() reports the
+            // client address. Without it every client appeared as 0.0.0.0,
+            // which broke per-IP rate limiting and X-Forwarded-For.
+            sockaddr_in addr{};
+            int addr_len = sizeof(addr);
+            getpeername(ctx->accept_socket, reinterpret_cast<sockaddr*>(&addr), &addr_len);
             ctx->accept_callback(ctx->accept_socket, addr);
         } else if (ctx->type == IocpOperationType::CONNECT) {
             setsockopt(ctx->fd, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);

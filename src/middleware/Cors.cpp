@@ -84,4 +84,22 @@ routing::Middleware cors(CorsOptions options) {
     };
 }
 
+routing::Middleware require_origin(std::vector<std::string> allowed_origins) {
+    return [allowed_origins](http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> writer) -> bool {
+        auto it = request.headers.find("Origin");
+        if (it == request.headers.end()) {
+            return true;
+        }
+        for (const auto& allowed : allowed_origins) {
+            if (allowed == it->second) {
+                return true;
+            }
+        }
+        http::HttpResponse res;
+        res.status(http::HttpStatus::Forbidden).send("403 Forbidden");
+        writer->send(std::move(res));
+        return false;
+    };
+}
+
 } // namespace middleware

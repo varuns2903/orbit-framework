@@ -7,7 +7,10 @@
     "openssl",
     "zlib",
     "libpq",
-    "curl",
+    {
+      "name": "curl",
+      "features": ["http2"]
+    },
     "libmariadb",
     "mongo-c-driver",
     "nghttp2",
@@ -16,7 +19,6 @@
       "name": "ngtcp2",
       "features": ["openssl"]
     },
-    "hiredis",
     "pkgconf",
     {
       "name": "liburing",
