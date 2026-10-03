@@ -315,7 +315,8 @@ void Http2Session::dispatch_request(std::shared_ptr<StreamContext> stream_ctx) {
     }
     
     req.client_ip = client_ip_;
-    auto writer = std::make_shared<Http2ResponseWriter>(weak_from_this(), stream_ctx->stream_id);
+    auto writer = std::make_shared<Http2ResponseWriter>(weak_from_this(), stream_ctx->stream_id,
+                                                        req.method == http::HttpMethod::HEAD);
     writer->body_owner_ = stream_ctx;
     writer->body_ = stream_ctx->backing_body;
     
@@ -434,8 +435,8 @@ void Http2Session::end_stream(int32_t stream_id) {
 
 // ---------------- Http2ResponseWriter ----------------
 
-Http2ResponseWriter::Http2ResponseWriter(std::weak_ptr<Http2Session> session, int32_t stream_id)
-    : session_(std::move(session)), stream_id_(stream_id) {}
+Http2ResponseWriter::Http2ResponseWriter(std::weak_ptr<Http2Session> session, int32_t stream_id, bool suppress_body)
+    : session_(std::move(session)), stream_id_(stream_id), suppress_body_(suppress_body) {}
 
 std::shared_ptr<Http2Session> Http2ResponseWriter::session_or_throw() {
     auto session = session_.lock();
@@ -475,7 +476,10 @@ void Http2ResponseWriter::send(http::HttpResponse&& response) {
     if (headers_sent_) return;
     headers_sent_ = true;
     apply_response_hooks(response);
-    bool has_body = !response.body.empty() || response.file_fd != -1;
+    // HEAD, 1xx, 204 and 304 responses carry headers only.
+    int code = static_cast<int>(response.status_code);
+    bool bodiless = suppress_body_ || code < 200 || code == 204 || code == 304;
+    bool has_body = !bodiless && (!response.body.empty() || response.file_fd != -1);
     if (auto session = session_.lock()) {
         session->submit_response(stream_id_, response, has_body);
     }
@@ -486,8 +490,9 @@ void Http2ResponseWriter::send_headers(http::HttpResponse& response) {
     headers_sent_ = true;
     apply_response_hooks(response);
     if (auto session = session_.lock()) {
-        // The body follows through write_chunk() and ends with end().
-        session->submit_response(stream_id_, response, true, true);
+        // The body follows through write_chunk() and ends with end(); for
+        // HEAD the headers end the stream and later chunks are dropped.
+        session->submit_response(stream_id_, response, !suppress_body_, !suppress_body_);
     }
 }
 
