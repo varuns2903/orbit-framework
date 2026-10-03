@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
+#include <orbit/utils/Logger.hpp>
 #include <vector>
+#include <optional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -42,7 +44,7 @@ public:
 
         // 3. Scan directory
         if (!std::filesystem::exists(migrations_dir)) {
-            std::cout << "[Migrations] Directory '" << migrations_dir << "' not found. Skipping migrations.\n";
+            LOG_INFO("[Migrations] Directory '" << migrations_dir << "' not found. Skipping migrations.");
             res->send(http::HttpResponse().status(http::HttpStatus::OK).send("Migrations skipped - no directory"));
             co_return;
         }
@@ -61,11 +63,11 @@ public:
             std::string filename = std::filesystem::path(filepath).filename().string();
             
             if (std::find(applied_versions.begin(), applied_versions.end(), filename) == applied_versions.end()) {
-                std::cout << "[Migrations] Applying " << filename << "..." << std::endl;
+                LOG_INFO("[Migrations] Applying " << filename << "...");
                 
                 std::ifstream ifs(filepath);
                 if (!ifs.is_open()) {
-                    std::cerr << "[Migrations] Failed to open " << filepath << std::endl;
+                    LOG_ERROR("[Migrations] Failed to open " << filepath);
                     continue;
                 }
                 
@@ -75,8 +77,11 @@ public:
                 co_await database::query_async(db, sql);
 
                 // Record it in the tracking table
-                std::string insert_tracking = "INSERT INTO orbit_migrations (version) VALUES ('" + filename + "');";
-                co_await database::query_async(db, insert_tracking);
+                // A named vector, not a braced list: GCC 13 crashes on braced
+                // initializer lists inside co_await expressions.
+                std::vector<std::optional<std::string>> tracking_params;
+                tracking_params.emplace_back(filename);
+                co_await database::query_async(db, "INSERT INTO orbit_migrations (version) VALUES ($1);", tracking_params);
                 
                 executed++;
             }

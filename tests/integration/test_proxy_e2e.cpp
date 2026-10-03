@@ -37,6 +37,23 @@ network::socket_t connect_to(uint16_t port) {
     return fd;
 }
 
+// Polls until something accepts TCP connections on the port.
+bool wait_until_listening(uint16_t port) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (std::chrono::steady_clock::now() < deadline) {
+        network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        bool ok = ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
+        network::close_socket(fd);
+        if (ok) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return false;
+}
+
 void send_all(network::socket_t fd, const std::string& data) {
     ::send(fd, data.data(), static_cast<int>(data.size()), 0);
 }
@@ -182,7 +199,11 @@ protected:
         t1 = std::thread([] { upstream->listen(); });
         t2 = std::thread([] { tls_upstream->listen(); });
         t3 = std::thread([] { proxy_app->listen(); });
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        // Wait until every server accepts connections. A fixed sleep was not
+        // enough under Valgrind, where startup takes hundreds of milliseconds.
+        for (uint16_t port : {kUpstreamPort, kTlsUpstreamPort, kProxyPort}) {
+            ASSERT_TRUE(wait_until_listening(port)) << "server on port " << port << " did not start";
+        }
     }
 
     static void TearDownTestSuite() {

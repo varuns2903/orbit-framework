@@ -1,4 +1,5 @@
 #include <orbit/network/IocpProactor.hpp>
+#include <orbit/utils/Logger.hpp>
 #ifdef _WIN32
 #include <mswsock.h>
 #include <io.h>
@@ -65,7 +66,7 @@ void IocpProactor::run_once(int timeout_ms) {
 
     if (overlapped == nullptr) {
         if (result == FALSE && GetLastError() != WAIT_TIMEOUT) {
-            std::cerr << "IOCP error\n";
+            LOG_ERROR("IOCP error");
         }
         return;
     }
