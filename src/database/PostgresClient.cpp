@@ -59,6 +59,28 @@ void PostgresClient::query(const std::string& sql, std::function<void(const Resu
     handle_query(std::move(callback));
 }
 
+void PostgresClient::query(const std::string& sql, const std::vector<std::optional<std::string>>& params,
+                           std::function<void(const ResultSet&)> callback) {
+    if (!connected_) {
+        callback(ResultSet{});
+        return;
+    }
+
+    std::vector<const char*> values;
+    values.reserve(params.size());
+    for (const auto& p : params) {
+        values.push_back(p ? p->c_str() : nullptr);
+    }
+
+    if (PQsendQueryParams(conn_, sql.c_str(), static_cast<int>(values.size()), nullptr,
+                          values.empty() ? nullptr : values.data(), nullptr, nullptr, 0) == 0) {
+        callback(ResultSet{});
+        return;
+    }
+
+    handle_query(std::move(callback));
+}
+
 void PostgresClient::handle_query(std::function<void(const ResultSet&)> callback) {
     int flush_res = PQflush(conn_);
     if (flush_res == 1) {

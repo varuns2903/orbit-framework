@@ -42,6 +42,24 @@ Task db_handler(HttpRequest& req, std::shared_ptr<ResponseWriter> writer) {
 }
 ```
 
+## Parameters and SQL Injection
+
+Never build SQL by concatenating request data. Bind values instead:
+
+```cpp
+// $1, $2, ... are bound by PostgreSQL; the values never become SQL text.
+co_await query_async(pg_client, "SELECT * FROM users WHERE email = $1 AND age > $2",
+                     {email, std::to_string(min_age)});
+```
+
+The ORM does this for you. `orm::Col("name") == value`, `where(field, op, value)`
+and `insert_async(model)` bind every value (as `$n` parameters on PostgreSQL, or
+as literals escaped with `mysql_real_escape_string` on MariaDB/MySQL). Column and
+table names cannot be bound, so they must be plain identifiers (`name`,
+`users.created_at`) and `where()` only accepts the operators `=`, `!=`, `<>`,
+`<`, `<=`, `>`, `>=`, `[NOT] LIKE` and `[NOT] ILIKE`; anything else throws
+`std::invalid_argument`.
+
 ## Hooking into Router
 
 Simply pass your Coroutine handler to the standard `app.get()` router:

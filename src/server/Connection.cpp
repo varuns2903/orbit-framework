@@ -1,4 +1,5 @@
 #include <orbit/server/Connection.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <orbit/server/ConnectionManager.hpp>
 #include <orbit/http/HttpParser.hpp>
 #include <orbit/http/WebSocket.hpp>
@@ -114,7 +115,7 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         if (state_ == ConnectionState::WEBSOCKET && ws_connection_) {
             ws_connection_->handle_transport_closed();
         }
-        std::cout << "on_read_complete closed with bytes_read=" << bytes_read << std::endl;
+        LOG_DEBUG("on_read_complete closed with bytes_read=" << bytes_read);
         manager_.remove_connection(socket_.fd());
         return;
     }
@@ -983,7 +984,11 @@ RequestState Connection::check_request_state() {
         http::HttpMethod method = http::HttpParser::parse_method(request_line.substr(0, space1));
         std::string_view full_uri = request_line.substr(space1 + 1, space2 - space1 - 1);
         size_t q_mark = full_uri.find('?');
-        std::string uri(q_mark != std::string_view::npos ? full_uri.substr(0, q_mark) : full_uri);
+        // Match stream routes on the decoded path, as the router does.
+        std::string uri;
+        if (!http::percent_decode(full_uri.substr(0, q_mark), uri, false, true)) {
+            uri.clear();
+        }
         
         if (router_.is_stream_route(method, uri)) {
             if (framing.chunked) {

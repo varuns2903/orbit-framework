@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <orbit/network/Proactor.hpp>
 #include <orbit/server/Listener.hpp>
 #include <orbit/routing/Router.hpp>
@@ -54,6 +55,13 @@ public:
     void stop_accepting();
 
     /**
+     * @brief Registers a function the loop calls on every iteration, on the
+     *        loop thread. The loop wakes at least every 200 ms, so the hook
+     *        also runs when no I/O happens.
+     */
+    void set_tick_hook(std::function<void()> hook) { tick_hook_ = std::move(hook); }
+
+    /**
      * @brief Gets the thread pool.
      * @return Reference to the thread pool.
      */
@@ -73,6 +81,7 @@ private:
     
     
     std::atomic<bool> is_running_{true};
+    std::function<void()> tick_hook_;
     std::atomic<bool> is_accepting_{true};
 };
 

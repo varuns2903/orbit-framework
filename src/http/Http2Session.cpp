@@ -1,5 +1,6 @@
 #include <orbit/http/Http2Session.hpp>
 #include <orbit/utils/Logger.hpp>
+#include <orbit/http/HttpParser.hpp>
 #ifdef _WIN32
 #include <io.h>
 #define close _close
@@ -295,23 +296,33 @@ void Http2Session::dispatch_request(std::shared_ptr<StreamContext> stream_ctx) {
         }
     }
 
-    // :path carries the query string; route on the path and expose the query
-    // exactly as the HTTP/1.1 parser does.
-    size_t q = stream_ctx->backing_uri.find('?');
-    if (q != std::string::npos) {
-        req.uri = stream_ctx->backing_uri.substr(0, q);
-        std::string_view query = std::string_view(stream_ctx->backing_uri).substr(q + 1);
+    // :path carries the query string. Route on the decoded path and expose a
+    // decoded query, exactly as the HTTP/1.1 parser does.
+    std::string_view target = stream_ctx->backing_uri;
+    size_t q = target.find('?');
+    bool target_ok = http::percent_decode(target.substr(0, q), req.uri, false, true);
+    if (target_ok && q != std::string_view::npos) {
+        std::string_view query = target.substr(q + 1);
         size_t pos = 0;
-        while (pos <= query.size()) {
+        while (target_ok && pos <= query.size()) {
             size_t amp = query.find('&', pos);
             std::string_view kv = query.substr(pos, amp == std::string_view::npos ? std::string_view::npos : amp - pos);
             if (!kv.empty()) {
                 size_t eq = kv.find('=');
-                req.query[std::string(kv.substr(0, eq))] = eq == std::string_view::npos ? "" : std::string(kv.substr(eq + 1));
+                std::string key, value;
+                target_ok = http::percent_decode(kv.substr(0, eq), key, true, false) &&
+                            http::percent_decode(eq == std::string_view::npos ? std::string_view{} : kv.substr(eq + 1), value, true, false);
+                if (target_ok) req.query[key] = value;
             }
             if (amp == std::string_view::npos) break;
             pos = amp + 1;
         }
+    }
+    if (!target_ok) {
+        // Malformed escape, or an encoded '/', '\\' or NUL in the path: 400,
+        // as for HTTP/1.1. Called from nghttp2 callbacks, so the lock is held.
+        submit_status_locked(stream_ctx->stream_id, http::HttpStatus::BadRequest);
+        return;
     }
     
     req.client_ip = client_ip_;
