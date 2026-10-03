@@ -30,6 +30,8 @@ public:
     // Removes closed or stale connections
     void cleanup_stale_connections();
 
+    ~ConnectionPool();
+
 private:
     ConnectionPool() = default;
     

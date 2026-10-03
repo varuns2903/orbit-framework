@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: '0 2 * * *' # Run nightly
 
+# Least privilege for GITHUB_TOKEN: these jobs only read the repository.
+permissions:
+  contents: read
+
 jobs:
   fuzz:
     runs-on: ubuntu-latest
