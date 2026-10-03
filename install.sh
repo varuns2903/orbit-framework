@@ -45,7 +45,7 @@ if [ -z "$VERSION" ]; then
     VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
     if [ -z "$VERSION" ]; then
-        echo "❌ Could not determine the latest release. Set ORBIT_VERSION (e.g. ORBIT_VERSION=v1.5.1)." >&2
+        echo "❌ Could not determine the latest release. Set ORBIT_VERSION (e.g. ORBIT_VERSION=v1.6.0)." >&2
         exit 1
     fi
 fi
