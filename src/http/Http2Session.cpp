@@ -1,15 +1,7 @@
 #include <orbit/http/Http2Session.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <orbit/http/HttpParser.hpp>
-#ifdef _WIN32
-#include <io.h>
-#define close _close
-#define open _open
-inline ssize_t pread(int fd, void* buf, size_t count, long offset) {
-    _lseek(fd, offset, SEEK_SET);
-    return _read(fd, buf, static_cast<unsigned int>(count));
-}
-#endif
+#include <orbit/utils/FileIO.hpp>
 #include <orbit/server/Connection.hpp>
 #include <iostream>
 #ifndef _WIN32
@@ -140,7 +132,7 @@ Http2Session::~Http2Session() {
     }
     for (auto& [id, ctx] : streams_) {
         if (ctx->file_fd != -1) {
-            close(ctx->file_fd);
+            utils::file::close(ctx->file_fd);
             ctx->file_fd = -1;
         }
     }
@@ -244,7 +236,7 @@ int Http2Session::on_stream_close(nghttp2_session* session, int32_t stream_id, u
     auto it = self->streams_.find(stream_id);
     if (it != self->streams_.end()) {
         if (it->second->file_fd != -1) {
-            close(it->second->file_fd);
+            utils::file::close(it->second->file_fd);
         }
         self->streams_.erase(it);
     }
@@ -351,7 +343,7 @@ ssize_t Http2Session::data_provider_read(nghttp2_session *session, int32_t strea
             *data_flags |= NGHTTP2_DATA_FLAG_EOF;
             return 0;
         }
-        ssize_t bytes = pread(stream_ctx->file_fd, buf, to_read, stream_ctx->file_offset);
+        ssize_t bytes = utils::file::pread(stream_ctx->file_fd, buf, to_read, stream_ctx->file_offset);
         if (bytes < 0) {
             return NGHTTP2_ERR_TEMPORAL_CALLBACK_FAILURE;
         }
