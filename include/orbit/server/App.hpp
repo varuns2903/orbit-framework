@@ -229,12 +229,23 @@ public:
      * @param version The API version.
      * @param docs_path The URL path for Swagger UI.
      * @param json_path The URL path for the OpenAPI JSON.
+     * @param assets_url Where the Swagger UI files (swagger-ui.css and
+     *        swagger-ui-bundle.js from swagger-ui-dist 5.11.0) are loaded
+     *        from. Defaults to the unpkg CDN; point it at your own copy
+     *        (e.g. "/swagger-ui" served by static_files) to keep the docs
+     *        page off third-party origins. Either way the page pins the
+     *        files with Subresource Integrity hashes, so modified files are
+     *        refused by the browser.
      * @return Reference to the App instance for chaining.
+     *
+     * The docs page is only registered when this is called; enable it only
+     * in environments where the API description may be public.
      */
     App& enable_openapi(const std::string& title = "Orbit Framework API", 
                         const std::string& version = "1.0.0", 
                         const std::string& docs_path = "/docs", 
-                        const std::string& json_path = "/swagger.json");
+                        const std::string& json_path = "/swagger.json",
+                        const std::string& assets_url = "https://unpkg.com/swagger-ui-dist@5.11.0");
 
     // Start the server (blocking)
     /**

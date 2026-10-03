@@ -121,7 +121,51 @@ App& App::enable_metrics(const std::string& path) {
     return *this;
 }
 
-App& App::enable_openapi(const std::string& title, const std::string& version, const std::string& docs_path, const std::string& json_path) {
+namespace {
+
+// Subresource Integrity hashes of swagger-ui-dist 5.11.0 (identical on unpkg
+// and jsDelivr). Changing the Swagger UI version means recomputing them:
+//   curl -fsSL <url> | openssl dgst -sha384 -binary | openssl base64 -A
+constexpr const char* kSwaggerCssIntegrity =
+    "sha384-+yyzNgM3K92sROwsXxYCxaiLWxWJ0G+v/9A+qIZ2rgefKgkdcmJI+L601cqPD/Ut";
+constexpr const char* kSwaggerBundleIntegrity =
+    "sha384-qn5tagrAjZi8cSmvZ+k3zk4+eDEEUcP9myuR2J6V+/H6rne++v6ChO7EeHAEzqxQ";
+
+// Escapes a value for an HTML attribute.
+std::string html_attribute(const std::string& in) {
+    std::string out;
+    for (char c : in) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '"': out += "&quot;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            default: out += c;
+        }
+    }
+    return out;
+}
+
+// Escapes a value for a single-quoted JavaScript string inside <script>.
+std::string js_string(const std::string& in) {
+    std::string out;
+    for (char c : in) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '\'': out += "\\'"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '<': out += "\\x3c"; break; // no "</script>" inside the string
+            default: out += c;
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+App& App::enable_openapi(const std::string& title, const std::string& version, const std::string& docs_path,
+                         const std::string& json_path, const std::string& assets_url) {
     this->get(json_path, [title, version](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
         std::string json = openapi::OpenApiRegistry::instance().generate_swagger_json(title, version);
         http::HttpResponse response;
@@ -130,29 +174,35 @@ App& App::enable_openapi(const std::string& title, const std::string& version, c
         res->send(std::move(response));
     });
 
-    this->get(docs_path, [json_path](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
-        std::string html = R"(
-<!DOCTYPE html>
+    std::string base = assets_url;
+    while (!base.empty() && base.back() == '/') base.pop_back();
+
+    // Built once: the page only depends on the arguments above.
+    const std::string html = R"(<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Swagger UI</title>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />
+    <link rel="stylesheet" href=")" + html_attribute(base + "/swagger-ui.css") + R"("
+          integrity=")" + kSwaggerCssIntegrity + R"(" crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
 <body>
     <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+    <script src=")" + html_attribute(base + "/swagger-ui-bundle.js") + R"("
+            integrity=")" + kSwaggerBundleIntegrity + R"(" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script>
     window.onload = () => {
         window.ui = SwaggerUIBundle({
-            url: ')" + json_path + R"(',
+            url: ')" + js_string(json_path) + R"(',
             dom_id: '#swagger-ui',
         });
     };
     </script>
 </body>
 </html>)";
+
+    this->get(docs_path, [html](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
         http::HttpResponse response;
         response.status(http::HttpStatus::OK);
         response.set_body(html, "text/html");
