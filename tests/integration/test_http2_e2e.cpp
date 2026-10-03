@@ -152,6 +152,14 @@ protected:
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
     }
 
+    void SetUp() override {
+        // Without HTTP/2 in libcurl these requests silently fall back to
+        // HTTP/1.1 and would no longer test the HTTP/2 code at all.
+        if (!(curl_version_info(CURLVERSION_NOW)->features & CURL_VERSION_HTTP2)) {
+            GTEST_SKIP() << "libcurl was built without HTTP/2 support";
+        }
+    }
+
     static void TearDownTestSuite() {
         app->stop();
         h2_request("/ok", "", 500);
