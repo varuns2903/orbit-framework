@@ -179,7 +179,9 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         }
         if (negotiated_h2) {
             state_ = ConnectionState::HTTP2;
-            h2_session_ = std::make_shared<http::h2::Http2Session>(*this, router_, thread_pool_);
+            h2_session_ = std::make_shared<http::h2::Http2Session>(
+                std::weak_ptr<Connection>(shared_from_this()), proactor_, router_, thread_pool_,
+                client_ip_, max_body_size_);
         }
         if (!plaintext.empty()) {
             std::lock_guard<std::mutex> lock(read_mutex_);
