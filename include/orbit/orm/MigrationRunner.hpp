@@ -2,6 +2,7 @@
 #include <string>
 #include <orbit/utils/Logger.hpp>
 #include <vector>
+#include <optional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -76,8 +77,11 @@ public:
                 co_await database::query_async(db, sql);
 
                 // Record it in the tracking table
-                std::string insert_tracking = "INSERT INTO orbit_migrations (version) VALUES ('" + filename + "');";
-                co_await database::query_async(db, insert_tracking);
+                // A named vector, not a braced list: GCC 13 crashes on braced
+                // initializer lists inside co_await expressions.
+                std::vector<std::optional<std::string>> tracking_params;
+                tracking_params.emplace_back(filename);
+                co_await database::query_async(db, "INSERT INTO orbit_migrations (version) VALUES ($1);", tracking_params);
                 
                 executed++;
             }
