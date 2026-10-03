@@ -38,7 +38,7 @@ Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performan
 ### 1. Install
 
 ```bash
-curl -sL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh | bash
 ```
 
 Windows, and every other way to get Orbit — FetchContent, vcpkg, Conan, Docker,
@@ -148,12 +148,12 @@ hand. Full list and licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ### One-Command Installer
 
-Builds Orbit in Release mode, installs the library to `/usr/local`, and puts the
-`orbit` CLI on your `PATH`.
+Builds Orbit in Release mode, installs the library (to `/usr/local` by default),
+and installs the `orbit` CLI.
 
 **Linux / macOS**
 ```bash
-curl -sL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh | bash
 ```
 
 **Windows (PowerShell as Administrator)**
@@ -161,13 +161,27 @@ curl -sL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/insta
 iwr -useb https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.ps1 | iex
 ```
 
-The script clones Orbit, bootstraps its own vcpkg, compiles every dependency,
-and installs. Expect 20–40 minutes on first run; a binary cache under
+The script installs the **latest release** (not the development branch),
+bootstraps vcpkg pinned to the release's dependency baseline, compiles every
+dependency, and installs. Expect 20–40 minutes on first run; a binary cache under
 `~/.cache/vcpkg-binary-cache` makes repeat runs far quicker.
 
+| Variable | Default | Meaning |
+|---|---|---|
+| `ORBIT_VERSION` | latest release | Tag to install, e.g. `v1.5.1`; `main` installs the development branch |
+| `ORBIT_PREFIX` | `/usr/local` (Windows: `C:\Program Files\OrbitFramework`) | Install location; `sudo` is only used if it is not writable |
+| `ORBIT_JOBS` | limited by free memory (~2 GB per job) | Parallel build jobs |
+
+```bash
+# Example: a specific release, installed for your user only, without sudo
+curl -fsSL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh \
+  | ORBIT_VERSION=v1.5.1 ORBIT_PREFIX="$HOME/.local" bash
+```
+
 > Piping a script into a shell runs arbitrary code as you, with `sudo` for the
-> install step. Read [install.sh](install.sh) first if that matters to you, or
-> use [FetchContent](#cmake-fetchcontent), which needs no system install at all.
+> install step when the prefix needs it. Read [install.sh](install.sh) first if
+> that matters to you, or use [FetchContent](#cmake-fetchcontent), which needs no
+> system install at all.
 
 ---
 

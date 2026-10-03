@@ -1,72 +1,135 @@
-Write-Host "🚀 Welcome to the Orbit Framework Installer for Windows!" -ForegroundColor Cyan
-Write-Host "This script will download, build, and install Orbit and its CLI tool."
+# Orbit Framework installer for Windows.
+#
+#   iwr -useb https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.ps1 | iex
+#
+# Environment variables:
+#   ORBIT_VERSION  Release tag to install (default: the latest release).
+#                  Set to "main" to install the unreleased development branch.
+#   ORBIT_PREFIX   Installation prefix (default: C:\Program Files\OrbitFramework).
+#   ORBIT_JOBS     Parallel build jobs (default: limited by free memory, since
+#                  each C++ compile job needs roughly 2 GB).
 
-# Requires Administrator for copying to Program Files and system PATH
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-Not $isAdmin) {
-    Write-Host "⚠️ Warning: You are not running as Administrator. Installation to Program Files might fail." -ForegroundColor Yellow
-    Write-Host "Restart PowerShell as Administrator if you encounter permission errors."
+$ErrorActionPreference = "Stop"
+$Repo = "varuns2903/orbit-framework"
+
+# Native commands do not throw on failure; stop on a non-zero exit code.
+function Invoke-Checked {
+    param([string]$Description, [scriptblock]$Command)
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Description failed with exit code $LASTEXITCODE"
+    }
 }
 
-# 1. Clone the repository
+Write-Host "🚀 Welcome to the Orbit Framework Installer for Windows!" -ForegroundColor Cyan
+
+foreach ($tool in @("git", "cmake")) {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+        throw "'$tool' is required but was not found on PATH."
+    }
+}
+
+# --- Version ------------------------------------------------------------------
+# Install a published release, not whatever happens to be on main right now.
+$Version = $env:ORBIT_VERSION
+if (-not $Version) {
+    $Version = (Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$Repo/releases/latest").tag_name
+    if (-not $Version) {
+        throw "Could not determine the latest release. Set ORBIT_VERSION (e.g. `$env:ORBIT_VERSION = 'v1.5.1')."
+    }
+}
+if ($Version -eq "main") {
+    Write-Host "⚠️ Installing the development branch (main), not a release." -ForegroundColor Yellow
+} else {
+    Write-Host "📌 Installing Orbit $Version" -ForegroundColor Green
+}
+
+$Prefix = if ($env:ORBIT_PREFIX) { $env:ORBIT_PREFIX } else { Join-Path $env:ProgramFiles "OrbitFramework" }
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin -and $Prefix.StartsWith($env:ProgramFiles)) {
+    Write-Host "⚠️ Installing to $Prefix needs an elevated PowerShell. Re-run as Administrator, or set `$env:ORBIT_PREFIX to a folder you own." -ForegroundColor Yellow
+}
+
+# --- Parallelism --------------------------------------------------------------
+if ($env:ORBIT_JOBS) {
+    $Jobs = [int]$env:ORBIT_JOBS
+} else {
+    $Cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
+    if (-not $Cores) { $Cores = 2 }
+    $FreeGB = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB)
+    $Jobs = [math]::Max(1, [math]::Min($Cores, [math]::Floor($FreeGB / 2)))
+}
+Write-Host "🧮 Building with $Jobs parallel job(s) (override with ORBIT_JOBS)."
+
+# --- Workspace ----------------------------------------------------------------
 $TmpDir = Join-Path $env:TEMP "orbit_installer_$(Get-Random)"
 New-Item -ItemType Directory -Force -Path $TmpDir | Out-Null
-Set-Location $TmpDir
+$OriginalLocation = Get-Location
 
-Write-Host "📥 Cloning Orbit Framework..." -ForegroundColor Green
-git clone --depth 1 https://github.com/varuns2903/orbit-framework.git
-Set-Location orbit-framework
+try {
+    Set-Location $TmpDir
 
-# 2. Bootstrap vcpkg
-Write-Host "📦 Setting up vcpkg..." -ForegroundColor Green
-git clone --depth 1 https://github.com/microsoft/vcpkg.git
-.\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+    Write-Host "📥 Downloading Orbit $Version..." -ForegroundColor Green
+    Invoke-Checked "git clone" { git clone --quiet --depth 1 --branch $Version "https://github.com/$Repo.git" orbit-framework }
+    Set-Location orbit-framework
 
-# Reuse already-built dependency binaries across installer runs instead of
-# recompiling OpenSSL/curl/mongo-c-driver/etc. from source every time.
-$BinaryCacheDir = if ($env:VCPKG_DEFAULT_BINARY_CACHE) { $env:VCPKG_DEFAULT_BINARY_CACHE } else { Join-Path $env:LOCALAPPDATA "vcpkg-binary-cache" }
-New-Item -ItemType Directory -Force -Path $BinaryCacheDir | Out-Null
-$env:VCPKG_BINARY_SOURCES = "clear;files,$BinaryCacheDir,readwrite"
+    # --- Dependencies ---------------------------------------------------------
+    # Pin vcpkg to the baseline the release was tested with.
+    $Baseline = (Get-Content vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+    Write-Host "📦 Setting up vcpkg (baseline $Baseline)..." -ForegroundColor Green
+    if ($Baseline) {
+        New-Item -ItemType Directory -Path vcpkg | Out-Null
+        Invoke-Checked "git init" { git -C vcpkg init --quiet }
+        Invoke-Checked "git remote add" { git -C vcpkg remote add origin https://github.com/microsoft/vcpkg.git }
+        Invoke-Checked "git fetch" { git -C vcpkg fetch --quiet --depth 1 origin $Baseline }
+        Invoke-Checked "git checkout" { git -C vcpkg checkout --quiet FETCH_HEAD }
+    } else {
+        Invoke-Checked "git clone vcpkg" { git clone --quiet --depth 1 https://github.com/microsoft/vcpkg.git }
+    }
+    Invoke-Checked "vcpkg bootstrap" { .\vcpkg\bootstrap-vcpkg.bat -disableMetrics }
 
-# 3. Build the framework
-Write-Host "🔨 Building Orbit Framework (this may take a few minutes)..." -ForegroundColor Green
-$Cores = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors
-if (-not $Cores) { $Cores = 4 }
+    # Reuse already-built dependency binaries across installer runs.
+    $BinaryCacheDir = if ($env:VCPKG_DEFAULT_BINARY_CACHE) { $env:VCPKG_DEFAULT_BINARY_CACHE } else { Join-Path $env:LOCALAPPDATA "vcpkg-binary-cache" }
+    New-Item -ItemType Directory -Force -Path $BinaryCacheDir | Out-Null
+    $env:VCPKG_BINARY_SOURCES = "clear;files,$BinaryCacheDir,readwrite"
 
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake .
-cmake --build build -j $Cores --config Release
+    # --- Build ----------------------------------------------------------------
+    Write-Host "🔨 Building Orbit Framework (this may take a while)..." -ForegroundColor Green
+    Invoke-Checked "cmake configure" {
+        cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_INSTALL_PREFIX=$Prefix" `
+            -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake `
+            -DORBIT_BUILD_TESTS=OFF -DORBIT_BUILD_EXAMPLES=OFF .
+    }
+    Invoke-Checked "cmake build" { cmake --build build -j $Jobs --config Release }
 
-# 4. Install the framework
-Write-Host "💾 Installing framework libraries to system..." -ForegroundColor Green
-cmake --install build --config Release
+    # --- Install --------------------------------------------------------------
+    Write-Host "💾 Installing the framework to $Prefix..." -ForegroundColor Green
+    Invoke-Checked "cmake install" { cmake --install build --config Release }
 
-# 5. Install the CLI
-Write-Host "🛠️ Installing orbit-cli..." -ForegroundColor Green
-$InstallDir = "C:\Program Files\OrbitFramework\bin"
-if (-Not (Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    Write-Host "🛠️ Installing the orbit CLI..." -ForegroundColor Green
+    $BinDir = Join-Path $Prefix "bin"
+    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    # Copy the Python script and a batch wrapper so it runs from cmd/PowerShell.
+    Copy-Item tools\cli\orbit (Join-Path $BinDir "orbit.py") -Force
+    Set-Content -Path (Join-Path $BinDir "orbit.bat") -Value "@echo off`npython `"%~dp0orbit.py`" %*"
+
+    # Add to PATH: machine-wide when elevated, otherwise for this user.
+    $Scope = if ($isAdmin) { "Machine" } else { "User" }
+    $Path = [Environment]::GetEnvironmentVariable("PATH", $Scope)
+    if ($Path -notmatch [regex]::Escape($BinDir)) {
+        Write-Host "Adding $BinDir to the $Scope PATH..."
+        [Environment]::SetEnvironmentVariable("PATH", "$Path;$BinDir", $Scope)
+        Write-Host "⚠️ Restart your terminal for the 'orbit' command to be recognized." -ForegroundColor Yellow
+    }
 }
-
-# Copy python script and create a batch wrapper so it can be executed from cmd/powershell
-Copy-Item tools\cli\orbit "$InstallDir\orbit.py" -Force
-$BatContent = "@echo off`npython `"%~dp0orbit.py`" %*"
-Set-Content -Path "$InstallDir\orbit.bat" -Value $BatContent
-
-# Add to Machine PATH if not exists
-$Path = [Environment]::GetEnvironmentVariable("PATH", "Machine")
-if ($Path -notmatch [regex]::Escape($InstallDir)) {
-    Write-Host "Adding $InstallDir to System PATH..."
-    [Environment]::SetEnvironmentVariable("PATH", $Path + ";$InstallDir", "Machine")
-    Write-Host "⚠️ You may need to restart your terminal for the 'orbit' command to be recognized." -ForegroundColor Yellow
+finally {
+    Set-Location $OriginalLocation
+    Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
 }
-
-# Cleanup
-Set-Location $env:USERPROFILE
-Remove-Item -Recurse -Force $TmpDir
 
 Write-Host ""
-Write-Host "✅ Installation Complete!" -ForegroundColor Green
-Write-Host "You can now create a new project by running:"
+Write-Host "✅ Orbit $Version installed to $Prefix." -ForegroundColor Green
+Write-Host "Create a project with:"
 Write-Host "    orbit new my_project"
 Write-Host "    cd my_project"
 Write-Host "    orbit build"

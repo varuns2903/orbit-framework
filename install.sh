@@ -1,83 +1,152 @@
 #!/usr/bin/env bash
-set -e
+#
+# Orbit Framework installer for Linux and macOS.
+#
+#   curl -fsSL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh | bash
+#
+# Environment variables:
+#   ORBIT_VERSION  Release tag to install (default: the latest release).
+#                  Set to "main" to install the unreleased development branch.
+#   ORBIT_PREFIX   Installation prefix (default: /usr/local). sudo is only used
+#                  when this directory is not writable, so e.g.
+#                  ORBIT_PREFIX="$HOME/.local" installs without root.
+#   ORBIT_JOBS     Parallel build jobs (default: limited by free memory, since
+#                  each C++ compile job needs roughly 2 GB).
+set -euo pipefail
+
+REPO="varuns2903/orbit-framework"
+PREFIX="${ORBIT_PREFIX:-/usr/local}"
 
 echo "🚀 Welcome to the Orbit Framework Installer!"
-echo "This script will download, build, and install Orbit and its CLI tool."
 
-# Check for root/sudo
-if [ "$EUID" -ne 0 ]; then 
-  SUDO="sudo"
-  echo "⚠️ This script requires sudo to install to /usr/local"
-else
-  SUDO=""
-fi
-
-# Detect OS
-OS="$(uname -s)"
-case "${OS}" in
-    Linux*)     MACHINE=Linux;;
-    Darwin*)    MACHINE=Mac;;
-    CYGWIN*|MINGW*|MSYS*) MACHINE=Windows;;
-    *)          MACHINE="UNKNOWN"
+# --- Platform -----------------------------------------------------------------
+case "$(uname -s)" in
+    Linux*)  MACHINE=Linux ;;
+    Darwin*) MACHINE=Mac ;;
+    CYGWIN*|MINGW*|MSYS*)
+        echo "❌ This script is for Linux/macOS. On Windows, use install.ps1." >&2
+        exit 1 ;;
+    *)
+        echo "❌ Unsupported platform: $(uname -s)" >&2
+        exit 1 ;;
 esac
 
-if [ "$MACHINE" == "Windows" ]; then
-    echo "❌ Error: This bash script is for Linux/macOS. For Windows, please use install.ps1"
-    exit 1
-fi
+for tool in git cmake curl; do
+    if ! command -v "$tool" > /dev/null; then
+        echo "❌ '$tool' is required but was not found." >&2
+        exit 1
+    fi
+done
 
-# Detect core count for parallel build
-if command -v nproc > /dev/null; then
-    CORES=$(nproc)
-elif command -v sysctl > /dev/null; then
-    CORES=$(sysctl -n hw.ncpu)
+# --- Version ------------------------------------------------------------------
+# Install a published release, not whatever happens to be on main right now.
+VERSION="${ORBIT_VERSION:-}"
+if [ -z "$VERSION" ]; then
+    VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
+    if [ -z "$VERSION" ]; then
+        echo "❌ Could not determine the latest release. Set ORBIT_VERSION (e.g. ORBIT_VERSION=v1.5.1)." >&2
+        exit 1
+    fi
+fi
+if [ "$VERSION" = "main" ]; then
+    echo "⚠️  Installing the development branch (main), not a release."
 else
-    CORES=4
+    echo "📌 Installing Orbit ${VERSION}"
 fi
 
-# 1. Clone the repository
-TMP_DIR=$(mktemp -d)
-cd $TMP_DIR
-echo "📥 Cloning Orbit Framework..."
-git clone --depth 1 https://github.com/varuns2903/orbit-framework.git
+# --- Privileges ---------------------------------------------------------------
+SUDO=""
+mkdir -p "$PREFIX" 2> /dev/null || true
+if [ ! -w "$PREFIX" ]; then
+    if [ "$(id -u)" -ne 0 ]; then
+        if ! command -v sudo > /dev/null; then
+            echo "❌ $PREFIX is not writable and sudo is not available. Set ORBIT_PREFIX to a writable directory." >&2
+            exit 1
+        fi
+        SUDO="sudo"
+        echo "🔐 $PREFIX is not writable; sudo will be used for the install step only."
+    fi
+fi
+
+# --- Parallelism --------------------------------------------------------------
+if [ -n "${ORBIT_JOBS:-}" ]; then
+    JOBS="$ORBIT_JOBS"
+else
+    if command -v nproc > /dev/null; then
+        CORES="$(nproc)"
+    else
+        CORES="$(sysctl -n hw.ncpu 2> /dev/null || echo 2)"
+    fi
+    if [ "$MACHINE" = "Linux" ] && [ -r /proc/meminfo ]; then
+        MEM_GB="$(awk '/MemAvailable/ {printf "%d", $2 / 1048576}' /proc/meminfo)"
+    else
+        MEM_GB="$(( $(sysctl -n hw.memsize 2> /dev/null || echo 4294967296) / 1073741824 ))"
+    fi
+    MEM_JOBS=$(( MEM_GB / 2 ))
+    JOBS=$(( CORES < MEM_JOBS ? CORES : MEM_JOBS ))
+    if [ "$JOBS" -lt 1 ]; then JOBS=1; fi
+fi
+echo "🧮 Building with ${JOBS} parallel job(s) (override with ORBIT_JOBS)."
+
+# --- Workspace ----------------------------------------------------------------
+TMP_DIR="$(mktemp -d)"
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+cd "$TMP_DIR"
+
+echo "📥 Downloading Orbit ${VERSION}..."
+git clone --quiet --depth 1 --branch "$VERSION" "https://github.com/${REPO}.git" orbit-framework
 cd orbit-framework
 
-# 2. Bootstrap vcpkg
-echo "📦 Setting up vcpkg..."
-git clone --depth 1 https://github.com/microsoft/vcpkg.git
-if [ "$MACHINE" == "Mac" ]; then
-    # vcpkg bootstrap might need specific flags on Mac, but default usually works
-    ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+# --- Dependencies -------------------------------------------------------------
+# Pin vcpkg to the baseline the release was tested with, so dependency versions
+# are reproducible instead of tracking vcpkg's moving tip.
+BASELINE="$(sed -n 's/.*"builtin-baseline": *"\([0-9a-f]*\)".*/\1/p' vcpkg.json)"
+echo "📦 Setting up vcpkg (baseline ${BASELINE:-latest})..."
+if [ -n "$BASELINE" ]; then
+    mkdir vcpkg
+    git -C vcpkg init --quiet
+    git -C vcpkg remote add origin https://github.com/microsoft/vcpkg.git
+    git -C vcpkg fetch --quiet --depth 1 origin "$BASELINE"
+    git -C vcpkg checkout --quiet FETCH_HEAD
 else
-    ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+    git clone --quiet --depth 1 https://github.com/microsoft/vcpkg.git
 fi
+./vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
 # Reuse already-built dependency binaries across installer runs instead of
 # recompiling OpenSSL/curl/mongo-c-driver/etc. from source every time.
-export VCPKG_BINARY_SOURCES="clear;files,${VCPKG_DEFAULT_BINARY_CACHE:-$HOME/.cache/vcpkg-binary-cache},readwrite"
-mkdir -p "${VCPKG_DEFAULT_BINARY_CACHE:-$HOME/.cache/vcpkg-binary-cache}"
+CACHE_DIR="${VCPKG_DEFAULT_BINARY_CACHE:-$HOME/.cache/vcpkg-binary-cache}"
+mkdir -p "$CACHE_DIR"
+export VCPKG_BINARY_SOURCES="clear;files,${CACHE_DIR},readwrite"
 
-# 3. Build the framework
-echo "🔨 Building Orbit Framework (this may take a few minutes)..."
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake .
-cmake --build build -j${CORES}
+# --- Build --------------------------------------------------------------------
+echo "🔨 Building Orbit Framework (this may take a while)..."
+cmake -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+    -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake \
+    -DORBIT_BUILD_TESTS=OFF \
+    -DORBIT_BUILD_EXAMPLES=OFF \
+    .
+cmake --build build -j "$JOBS"
 
-# 4. Install the framework
-echo "💾 Installing framework libraries to system..."
+# --- Install ------------------------------------------------------------------
+echo "💾 Installing the framework to ${PREFIX}..."
 $SUDO cmake --install build
 
-# 5. Install the CLI
-echo "🛠️ Installing orbit-cli to /usr/local/bin..."
-$SUDO cp tools/cli/orbit /usr/local/bin/orbit
-$SUDO chmod +x /usr/local/bin/orbit
-
-# Cleanup
-cd ~
-rm -rf $TMP_DIR
+echo "🛠️  Installing the orbit CLI to ${PREFIX}/bin..."
+$SUDO mkdir -p "${PREFIX}/bin"
+$SUDO install -m 0755 tools/cli/orbit "${PREFIX}/bin/orbit"
 
 echo ""
-echo "✅ Installation Complete!"
-echo "You can now create a new project by running:"
+echo "✅ Orbit ${VERSION} installed to ${PREFIX}."
+case ":${PATH}:" in
+    *":${PREFIX}/bin:"*) ;;
+    *) echo "ℹ️  Add ${PREFIX}/bin to your PATH to use the 'orbit' command." ;;
+esac
+echo "Create a project with:"
 echo "    orbit new my_project"
 echo "    cd my_project"
 echo "    orbit build"
