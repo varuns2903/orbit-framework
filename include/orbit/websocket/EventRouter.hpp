@@ -1,5 +1,6 @@
 #pragma once
 #include <orbit/server/App.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <orbit/http/WebSocketConnection.hpp>
 #include <orbit/http/json.hpp>
 #include <string>
@@ -92,7 +93,7 @@ public:
                 handler(ws, data);
             } catch (const std::exception& e) {
                 // Ignore or log bad payload
-                std::cerr << "[EventRouter] Invalid payload for event '" << event << "': " << e.what() << "\n";
+                LOG_DEBUG("[EventRouter] Invalid payload for event '" << event << "': " << e.what());
             }
         };
     }

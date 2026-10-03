@@ -87,7 +87,7 @@ void EventLoop::stop_accepting() {
 void EventLoop::do_accept() {
     proactor_->async_accept(listener_.fd(), [this](int client_fd, sockaddr_in addr) {
         if (client_fd >= 0) {
-            std::cout << "Accepted new connection! FD: " << client_fd << std::endl;
+            LOG_DEBUG("Accepted new connection! FD: " << client_fd);
             std::string client_ip = inet_ntoa(addr.sin_addr);
             network::Socket client(client_fd);
             connection_manager_.add_connection(std::move(client), client_ip);
