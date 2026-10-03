@@ -216,6 +216,7 @@ std::optional<HttpRequest> HttpParser::parse(std::string_view raw_request) {
     if (space1 != std::string_view::npos && space2 != std::string_view::npos && space1 != space2) {
         request.method = parse_method(request_line.substr(0, space1));
         std::string full_uri = std::string(request_line.substr(space1 + 1, space2 - space1 - 1));
+        request.target = full_uri;
         
         auto q_mark = full_uri.find('?');
         if (q_mark != std::string::npos) {
