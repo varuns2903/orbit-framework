@@ -94,8 +94,10 @@ public:
      * @param has_body True if the response includes a body.
      */
     /// Takes ownership of response.file_fd when a file body is sent.
-    void submit_response(int32_t stream_id, http::HttpResponse& response, bool has_body);
-    void submit_data(int32_t stream_id);
+    void submit_response(int32_t stream_id, http::HttpResponse& response, bool has_body, bool streaming = false);
+    /// Appends @p chunk to a streaming response (see Http2ResponseWriter::send_headers).
+    void submit_data(int32_t stream_id, std::string_view chunk);
+    /// Ends a streaming response.
     void end_stream(int32_t stream_id);
 
     network::Proactor& proactor() { return proactor_; }
@@ -124,6 +126,9 @@ private:
         // For writing response bodies
         std::string response_body;
         size_t response_offset{0};
+        bool streaming{false};     // Body produced by write_chunk() until end()
+        bool stream_ended{false};
+        std::string backing_cookie; // All cookie fields joined (HTTP/2 may split them)
         
         // For sendfile
         int file_fd{-1};
@@ -176,6 +181,14 @@ private:
     std::unordered_map<std::string, std::string> default_headers_;
     std::vector<Interceptor> interceptors_;
     bool headers_sent_{false};
+
+    // The request body, kept alive by owner, for read_body_stream().
+    std::shared_ptr<void> body_owner_;
+    std::string_view body_;
+
+    void apply_response_hooks(http::HttpResponse& response);
+
+    friend class Http2Session;
 };
 
 } // namespace h2

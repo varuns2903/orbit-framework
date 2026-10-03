@@ -1,4 +1,5 @@
 #include <orbit/http/Http2Session.hpp>
+#include <orbit/utils/Logger.hpp>
 #ifdef _WIN32
 #include <io.h>
 #define close _close
@@ -263,13 +264,59 @@ ssize_t Http2Session::send_callback(nghttp2_session* session, const uint8_t* dat
 }
 
 void Http2Session::dispatch_request(std::shared_ptr<StreamContext> stream_ctx) {
-    stream_ctx->request.body = stream_ctx->backing_body;
+    auto& req = stream_ctx->request;
+    req.body = stream_ctx->backing_body;
+
+    // RFC 9113 section 8.2.3: the Cookie field may arrive split across
+    // several "cookie" fields; join them before anyone reads it.
     for (const auto& pair : stream_ctx->backing_headers) {
-        stream_ctx->request.headers[pair.first] = pair.second;
+        if (pair.first == "cookie") {
+            if (!stream_ctx->backing_cookie.empty()) stream_ctx->backing_cookie += "; ";
+            stream_ctx->backing_cookie += pair.second;
+        } else {
+            req.headers[pair.first] = pair.second;
+        }
+    }
+    if (!stream_ctx->backing_cookie.empty()) {
+        req.headers["cookie"] = stream_ctx->backing_cookie;
+        std::string_view cookies = stream_ctx->backing_cookie;
+        size_t pos = 0;
+        while (pos < cookies.size()) {
+            while (pos < cookies.size() && cookies[pos] == ' ') ++pos;
+            size_t semi = cookies.find(';', pos);
+            std::string_view pair = cookies.substr(pos, semi == std::string_view::npos ? std::string_view::npos : semi - pos);
+            size_t eq = pair.find('=');
+            if (eq != std::string_view::npos) {
+                req.cookies[std::string(pair.substr(0, eq))] = std::string(pair.substr(eq + 1));
+            }
+            if (semi == std::string_view::npos) break;
+            pos = semi + 1;
+        }
+    }
+
+    // :path carries the query string; route on the path and expose the query
+    // exactly as the HTTP/1.1 parser does.
+    size_t q = stream_ctx->backing_uri.find('?');
+    if (q != std::string::npos) {
+        req.uri = stream_ctx->backing_uri.substr(0, q);
+        std::string_view query = std::string_view(stream_ctx->backing_uri).substr(q + 1);
+        size_t pos = 0;
+        while (pos <= query.size()) {
+            size_t amp = query.find('&', pos);
+            std::string_view kv = query.substr(pos, amp == std::string_view::npos ? std::string_view::npos : amp - pos);
+            if (!kv.empty()) {
+                size_t eq = kv.find('=');
+                req.query[std::string(kv.substr(0, eq))] = eq == std::string_view::npos ? "" : std::string(kv.substr(eq + 1));
+            }
+            if (amp == std::string_view::npos) break;
+            pos = amp + 1;
+        }
     }
     
-    stream_ctx->request.client_ip = client_ip_;
+    req.client_ip = client_ip_;
     auto writer = std::make_shared<Http2ResponseWriter>(weak_from_this(), stream_ctx->stream_id);
+    writer->body_owner_ = stream_ctx;
+    writer->body_ = stream_ctx->backing_body;
     
     // The task owns the session and stream context, so both outlive the
     // handler even if the client disconnects meanwhile.
@@ -301,15 +348,25 @@ ssize_t Http2Session::data_provider_read(nghttp2_session *session, int32_t strea
         }
         return bytes;
     } else {
+        const bool more_to_come = stream_ctx->streaming && !stream_ctx->stream_ended;
         size_t to_read = (std::min)(length, stream_ctx->response_body.size() - stream_ctx->response_offset);
         if (to_read == 0) {
+            if (more_to_come) {
+                return NGHTTP2_ERR_DEFERRED; // resumed by submit_data()/end_stream()
+            }
             *data_flags |= NGHTTP2_DATA_FLAG_EOF;
             return 0;
         }
         std::memcpy(buf, stream_ctx->response_body.data() + stream_ctx->response_offset, to_read);
         stream_ctx->response_offset += to_read;
         if (stream_ctx->response_offset >= stream_ctx->response_body.size()) {
-            *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+            if (more_to_come) {
+                // Everything written so far is sent; drop it.
+                stream_ctx->response_body.clear();
+                stream_ctx->response_offset = 0;
+            } else {
+                *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+            }
         }
         return static_cast<ssize_t>(to_read);
     }
@@ -322,7 +379,7 @@ void Http2Session::submit_status_locked(int32_t stream_id, http::HttpStatus stat
     nghttp2_submit_response(session_, stream_id, headers.nvs.data(), headers.nvs.size(), nullptr);
 }
 
-void Http2Session::submit_response(int32_t stream_id, http::HttpResponse& response, bool has_body) {
+void Http2Session::submit_response(int32_t stream_id, http::HttpResponse& response, bool has_body, bool streaming) {
     std::lock_guard<std::mutex> lock(session_mutex_);
     auto it = streams_.find(stream_id);
     if (it == streams_.end()) return;
@@ -340,6 +397,7 @@ void Http2Session::submit_response(int32_t stream_id, http::HttpResponse& respon
         
         ctx->response_body = response.body;
         ctx->response_offset = 0;
+        ctx->streaming = streaming;
         // Take ownership: the response's destructor would otherwise close the
         // descriptor while this stream is still reading from it.
         ctx->file_fd = response.file_fd;
@@ -355,14 +413,22 @@ void Http2Session::submit_response(int32_t stream_id, http::HttpResponse& respon
     send_pending();
 }
 
-void Http2Session::submit_data(int32_t stream_id) {
-    (void)stream_id;
-    // For streaming chunks, this requires deferred resuming. Not fully implemented yet.
+void Http2Session::submit_data(int32_t stream_id, std::string_view chunk) {
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    auto it = streams_.find(stream_id);
+    if (it == streams_.end() || !it->second->streaming || it->second->stream_ended) return;
+    it->second->response_body.append(chunk);
+    nghttp2_session_resume_data(session_, stream_id);
+    send_pending();
 }
 
 void Http2Session::end_stream(int32_t stream_id) {
-    (void)stream_id;
-    // For streaming chunks end.
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    auto it = streams_.find(stream_id);
+    if (it == streams_.end() || !it->second->streaming || it->second->stream_ended) return;
+    it->second->stream_ended = true;
+    nghttp2_session_resume_data(session_, stream_id);
+    send_pending();
 }
 
 // ---------------- Http2ResponseWriter ----------------
@@ -392,14 +458,22 @@ concurrency::ThreadPool& Http2ResponseWriter::thread_pool() {
     return session_or_throw()->thread_pool();
 }
 
-void Http2ResponseWriter::send(http::HttpResponse&& response) {
-    if (headers_sent_) return;
-    headers_sent_ = true;
+void Http2ResponseWriter::apply_response_hooks(http::HttpResponse& response) {
+    // Same order as the HTTP/1.1 connection: interceptors, then defaults.
+    for (auto& interceptor : interceptors_) {
+        interceptor(response);
+    }
     for (const auto& [k, v] : default_headers_) {
         if (response.headers.find(k) == response.headers.end()) {
             response.headers[k] = v;
         }
     }
+}
+
+void Http2ResponseWriter::send(http::HttpResponse&& response) {
+    if (headers_sent_) return;
+    headers_sent_ = true;
+    apply_response_hooks(response);
     bool has_body = !response.body.empty() || response.file_fd != -1;
     if (auto session = session_.lock()) {
         session->submit_response(stream_id_, response, has_body);
@@ -409,20 +483,18 @@ void Http2ResponseWriter::send(http::HttpResponse&& response) {
 void Http2ResponseWriter::send_headers(http::HttpResponse& response) {
     if (headers_sent_) return;
     headers_sent_ = true;
-    for (const auto& [k, v] : default_headers_) {
-        if (response.headers.find(k) == response.headers.end()) {
-            response.headers[k] = v;
-        }
-    }
+    apply_response_hooks(response);
     if (auto session = session_.lock()) {
-        session->submit_response(stream_id_, response, true);
+        // The body follows through write_chunk() and ends with end().
+        session->submit_response(stream_id_, response, true, true);
     }
 }
 
 void Http2ResponseWriter::write_chunk(std::string_view chunk) {
-    (void)chunk;
-    // Chunked not natively supported yet in this basic HTTP/2 implementation.
-    // HTTP/2 DATA frames serve this purpose.
+    if (chunk.empty()) return;
+    if (auto session = session_.lock()) {
+        session->submit_data(stream_id_, chunk);
+    }
 }
 
 void Http2ResponseWriter::end() {
@@ -432,18 +504,32 @@ void Http2ResponseWriter::end() {
 }
 
 void Http2ResponseWriter::send_sse_event(std::string_view data, std::string_view event, std::string_view id) {
-    (void)data;
-    (void)event;
-    (void)id;
-    // Not implemented yet
+    std::string msg;
+    if (!event.empty()) msg += "event: " + std::string(event) + "\n";
+    if (!id.empty()) msg += "id: " + std::string(id) + "\n";
+    size_t start = 0;
+    while (start < data.size()) {
+        size_t nl = data.find('\n', start);
+        msg += "data: " + std::string(data.substr(start, nl == std::string_view::npos ? std::string_view::npos : nl - start)) + "\n";
+        if (nl == std::string_view::npos) break;
+        start = nl + 1;
+    }
+    msg += "\n";
+    write_chunk(msg);
 }
 
 void Http2ResponseWriter::upgrade_to_raw_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_close) {
-    // Not supported in HTTP/2
+    (void)on_data;
+    (void)on_close;
+    // HTTP/2 has no connection-level upgrade (that needs RFC 8441 extended CONNECT).
+    LOG_WARN("upgrade_to_raw_stream is not supported on HTTP/2 connections");
 }
 
 void Http2ResponseWriter::read_body_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_end) {
-    // TODO: HTTP/2 body streaming
+    // HTTP/2 requests are dispatched once the whole body has arrived, so the
+    // "stream" is the buffered body delivered at once.
+    if (!body_.empty() && on_data) on_data(body_);
+    if (on_end) on_end();
 }
 
 } // namespace h2
