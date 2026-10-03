@@ -62,6 +62,28 @@ requests reach your routes. `allow_credentials` is ignored when
 `allowed_origins` contains `"*"`, because allowing credentials from every origin
 would let any website act as the signed-in user.
 
+## JWT Authentication
+
+`middleware::jwt_auth()` verifies an `Authorization: Bearer <token>` header and
+stores the token's claims in `req.user`. Only HS256 tokens are accepted: the
+algorithm comes from the server configuration, never from the token header.
+
+```cpp
+#include <orbit/middleware/JwtAuth.hpp>
+
+middleware::JwtOptions jwt;
+jwt.secret = std::getenv("JWT_SECRET");   // at least 32 random bytes
+jwt.issuer = "https://auth.example.com";  // optional "iss" check
+jwt.audience = "orders-api";              // optional "aud" check
+jwt.require_exp = true;                   // reject tokens that never expire
+jwt.leeway = std::chrono::seconds(30);    // tolerated clock skew
+app.use(middleware::jwt_auth(jwt));
+```
+
+`exp` and `nbf` are enforced whenever they are present. Failures return
+`401` with `WWW-Authenticate: Bearer`. An empty secret throws
+`std::invalid_argument`; secrets shorter than 32 bytes log a warning.
+
 ## Route-Specific Middleware
 
 You can inject middleware into specific routes using an initializer list `vector<Middleware>`:
