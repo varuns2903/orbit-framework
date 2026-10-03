@@ -10,8 +10,7 @@
 namespace middleware {
 
 /**
- * @ingroup middlewares
- * @brief Configuration for OAuth2 middleware.
+ * @brief Provider endpoints, client credentials and flow settings for OAuth2.
  */
 struct OAuth2Config {
     std::string client_id;
@@ -21,63 +20,55 @@ struct OAuth2Config {
     std::string token_endpoint;
     std::string userinfo_endpoint;
     std::vector<std::string> scopes;
+
+    bool use_pkce = true;             ///< Send an S256 PKCE challenge (RFC 7636)
+    bool secure_cookies = false;      ///< Mark the state/PKCE cookies Secure (enable behind HTTPS)
+    long connect_timeout_seconds = 5; ///< Provider connection timeout
+    long request_timeout_seconds = 10;///< Total time allowed per provider request
 };
 
 /**
- * @ingroup middlewares
- * @brief Middleware for handling OAuth2 authentication.
+ * @brief Authorization-code flow helper.
+ *
+ * login_handler() redirects to the provider with a random `state` (and a PKCE
+ * challenge), remembered in short-lived HttpOnly cookies. callback_handler()
+ * rejects callbacks whose `state` does not match, which prevents login CSRF,
+ * then exchanges the code (with the PKCE verifier) and fetches the user info.
+ *
+ * The handlers copy the configuration, so the OAuth2 object may be a temporary.
+ * Provider requests block the calling worker thread for at most
+ * request_timeout_seconds.
  */
 class OAuth2 {
 public:
-    /**
-     * @brief Constructs an OAuth2 middleware with the given config.
-     * 
-     * @param config The OAuth2 configuration.
-     */
+    using Handler = std::function<void(http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)>;
+
     OAuth2(const OAuth2Config& config);
 
-    /**
-     * @brief Handler to redirect the user to the OAuth2 provider's consent page.
-     * 
-     * @return std::function A middleware handler for login redirection.
-     */
-    std::function<void(http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)> login_handler();
+    Handler login_handler() const;
 
-    /**
-     * @brief Handler to process the redirect callback, exchange the code for an access token, and fetch user info.
-     * 
-     * @param on_success Callback executed upon successful authentication.
-     * @param on_error Callback executed if an error occurs during authentication.
-     * @return std::function A middleware handler for the callback route.
-     */
-    std::function<void(http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)> callback_handler(
+    Handler callback_handler(
         std::function<void(const nlohmann::json& user_info, http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)> on_success,
         std::function<void(const std::string& error, http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)> on_error
-    );
+    ) const;
 
-    /**
-     * @brief Pre-configured factory for Google OAuth2.
-     * 
-     * @param client_id The Google client ID.
-     * @param client_secret The Google client secret.
-     * @param redirect_uri The redirect URI.
-     * @return OAuth2 A configured OAuth2 instance.
-     */
     static OAuth2 google(const std::string& client_id, const std::string& client_secret, const std::string& redirect_uri);
 
-    /**
-     * @brief Pre-configured factory for GitHub OAuth2.
-     * 
-     * @param client_id The GitHub client ID.
-     * @param client_secret The GitHub client secret.
-     * @param redirect_uri The redirect URI.
-     * @return OAuth2 A configured OAuth2 instance.
-     */
     static OAuth2 github(const std::string& client_id, const std::string& client_secret, const std::string& redirect_uri);
+
+    const OAuth2Config& config() const { return config_; }
 
 private:
     OAuth2Config config_;
-    std::string fetch_sync(const std::string& url, const std::string& method, const std::string& body, const std::string& auth_header = "") const;
 };
+
+namespace detail {
+/// application/x-www-form-urlencoded / URI component encoding (RFC 3986 unreserved kept).
+std::string url_encode(const std::string& value);
+/// Decodes %XX escapes and '+' as space.
+std::string url_decode(const std::string& value);
+/// RFC 7636 S256: base64url(SHA-256(verifier)) without padding.
+std::string pkce_challenge(const std::string& verifier);
+} // namespace detail
 
 } // namespace middleware

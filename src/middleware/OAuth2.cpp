@@ -1,128 +1,285 @@
 #include <orbit/middleware/OAuth2.hpp>
-#include <orbit/utils/Logger.hpp>
+#include <orbit/http/HttpResponse.hpp>
 #include <curl/curl.h>
-#include <iostream>
+// After curl.h: on Windows it pulls in <windows.h>, which #defines ERROR;
+// Logger.hpp #undefs it again so LOG_ERROR expands correctly.
+#include <orbit/utils/Logger.hpp>
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/sha.h>
+#include <cctype>
+#include <mutex>
+#include <stdexcept>
 
 namespace middleware {
 
 namespace {
 
+constexpr const char* kStateCookie = "oauth_state";
+constexpr const char* kVerifierCookie = "oauth_pkce";
+constexpr long kFlowCookieSeconds = 600;
+
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp) {
     size_t total_size = size * nmemb;
-    userp->append((char*)contents, total_size);
+    userp->append(static_cast<char*>(contents), total_size);
     return total_size;
+}
+
+std::string base64url(const unsigned char* data, size_t len) {
+    std::string out(4 * ((len + 2) / 3) + 1, '\0');
+    int n = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(out.data()), data, static_cast<int>(len));
+    out.resize(static_cast<size_t>(n));
+    while (!out.empty() && out.back() == '=') out.pop_back();
+    for (char& c : out) {
+        if (c == '+') c = '-';
+        else if (c == '/') c = '_';
+    }
+    return out;
+}
+
+std::string random_token() {
+    unsigned char bytes[32];
+    if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
+        throw std::runtime_error("RAND_bytes failed");
+    }
+    return base64url(bytes, sizeof(bytes));
+}
+
+struct HttpResult {
+    bool ok = false;
+    long status = 0;
+    std::string body;
+    std::string error;
+};
+
+HttpResult fetch(const OAuth2Config& config, const std::string& url, const std::string& post_body,
+                 const std::string& auth_header) {
+    static std::once_flag curl_init;
+    std::call_once(curl_init, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
+
+    HttpResult result;
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        result.error = "curl_easy_init failed";
+        return result;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, config.connect_timeout_seconds);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, config.request_timeout_seconds);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L); // timeouts must not use signals in a threaded server
+#if LIBCURL_VERSION_NUM >= 0x075500
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https,http");
+#else
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS | CURLPROTO_HTTP));
+#endif
+
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "User-Agent: Orbit-Framework");
+    headers = curl_slist_append(headers, "Accept: application/json");
+    if (!auth_header.empty()) {
+        headers = curl_slist_append(headers, auth_header.c_str());
+    }
+    if (!post_body.empty()) {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_body.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(post_body.size()));
+        headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
+    }
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result.body);
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+        result.error = curl_easy_strerror(res);
+        LOG_ERROR("OAuth2 request to " << url << " failed: " << result.error);
+    } else {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.status);
+        result.ok = result.status >= 200 && result.status < 300;
+        if (!result.ok) result.error = "HTTP " + std::to_string(result.status);
+    }
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return result;
+}
+
+http::Cookie flow_cookie(const OAuth2Config& config, const std::string& name, const std::string& value, long max_age) {
+    http::Cookie c;
+    c.name = name;
+    c.value = value;
+    c.path = "/";
+    c.http_only = true;
+    c.secure = config.secure_cookies;
+    c.same_site = "Lax"; // must survive the top-level redirect back from the provider
+    c.max_age = max_age;
+    return c;
 }
 
 } // namespace
 
-OAuth2::OAuth2(const OAuth2Config& config) : config_(config) {}
+namespace detail {
 
-std::string OAuth2::fetch_sync(const std::string& url, const std::string& method, const std::string& body, const std::string& auth_header) const {
-    CURL* curl;
-    CURLcode res;
-    std::string readBuffer;
-
-    curl = curl_easy_init();
-    if(curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        
-        struct curl_slist* headers = NULL;
-        headers = curl_slist_append(headers, "User-Agent: Orbit-Framework/1.0");
-        headers = curl_slist_append(headers, "Accept: application/json");
-        
-        if (!auth_header.empty()) {
-            headers = curl_slist_append(headers, auth_header.c_str());
+std::string url_encode(const std::string& value) {
+    static const char hex[] = "0123456789ABCDEF";
+    std::string out;
+    out.reserve(value.size() * 3);
+    for (unsigned char c : value) {
+        if (std::isalnum(c) || c == '-' || c == '.' || c == '_' || c == '~') {
+            out.push_back(static_cast<char>(c));
+        } else {
+            out.push_back('%');
+            out.push_back(hex[c >> 4]);
+            out.push_back(hex[c & 0x0F]);
         }
-        
-        if (method == "POST") {
-            curl_easy_setopt(curl, CURLOPT_POST, 1L);
-            if (!body.empty()) {
-                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-                headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
-            }
-        }
-        
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-        
-        // Using thread pool for this in a real async environment, but it's okay for our current architecture
-        // since we are just bridging it in a callback. Ideally this should be async using curl_multi.
-        res = curl_easy_perform(curl);
-        
-        if(res != CURLE_OK) {
-            LOG_ERROR("curl_easy_perform() failed: " << curl_easy_strerror(res));
-        }
-        
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
     }
-    return readBuffer;
+    return out;
 }
 
-std::function<void(http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)> OAuth2::login_handler() {
-    return [this](http::HttpRequest& /*req*/, std::shared_ptr<http::ResponseWriter> writer) {
+std::string url_decode(const std::string& value) {
+    auto hexval = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    std::string out;
+    out.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i) {
+        if (value[i] == '+') {
+            out.push_back(' ');
+        } else if (value[i] == '%' && i + 2 < value.size() && hexval(value[i + 1]) >= 0 && hexval(value[i + 2]) >= 0) {
+            out.push_back(static_cast<char>(hexval(value[i + 1]) * 16 + hexval(value[i + 2])));
+            i += 2;
+        } else {
+            out.push_back(value[i]);
+        }
+    }
+    return out;
+}
+
+std::string pkce_challenge(const std::string& verifier) {
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256(reinterpret_cast<const unsigned char*>(verifier.data()), verifier.size(), digest);
+    return base64url(digest, sizeof(digest));
+}
+
+} // namespace detail
+
+OAuth2::OAuth2(const OAuth2Config& config) : config_(config) {}
+
+OAuth2::Handler OAuth2::login_handler() const {
+    // Capture a copy: OAuth2::google(...).login_handler() is a common pattern
+    // and the temporary is gone by the time a request arrives.
+    return [config = config_](http::HttpRequest& /*req*/, std::shared_ptr<http::ResponseWriter> writer) {
         std::string scopes_str;
-        for (size_t i = 0; i < config_.scopes.size(); ++i) {
-            scopes_str += config_.scopes[i];
-            if (i < config_.scopes.size() - 1) scopes_str += "%20";
+        for (size_t i = 0; i < config.scopes.size(); ++i) {
+            if (i > 0) scopes_str += " ";
+            scopes_str += config.scopes[i];
         }
 
-        std::string auth_url = config_.authorization_endpoint + 
-            "?client_id=" + config_.client_id + 
-            "&redirect_uri=" + config_.redirect_uri + 
-            "&response_type=code" + 
-            "&scope=" + scopes_str;
+        std::string state = random_token();
+        std::string auth_url = config.authorization_endpoint +
+            (config.authorization_endpoint.find('?') == std::string::npos ? "?" : "&") +
+            "client_id=" + detail::url_encode(config.client_id) +
+            "&redirect_uri=" + detail::url_encode(config.redirect_uri) +
+            "&response_type=code" +
+            "&scope=" + detail::url_encode(scopes_str) +
+            "&state=" + detail::url_encode(state);
 
         http::HttpResponse res;
         res.status(http::HttpStatus::Found);
+        res.set_cookie(flow_cookie(config, kStateCookie, state, kFlowCookieSeconds));
+
+        if (config.use_pkce) {
+            std::string verifier = random_token();
+            auth_url += "&code_challenge=" + detail::pkce_challenge(verifier) + "&code_challenge_method=S256";
+            res.set_cookie(flow_cookie(config, kVerifierCookie, verifier, kFlowCookieSeconds));
+        }
+
         res.headers["Location"] = auth_url;
         writer->send(std::move(res));
     };
 }
 
-std::function<void(http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)> OAuth2::callback_handler(
+OAuth2::Handler OAuth2::callback_handler(
     std::function<void(const nlohmann::json& user_info, http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)> on_success,
     std::function<void(const std::string& error, http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)> on_error
-) {
-    return [this, on_success, on_error](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) {
-        // Extract authorization code from query params
+) const {
+    return [config = config_, on_success, on_error](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) {
+        // One-shot values: clear them whatever the outcome.
+        writer->add_interceptor([config](http::HttpResponse& res) {
+            res.set_cookie(flow_cookie(config, kStateCookie, "", 0));
+            if (config.use_pkce) res.set_cookie(flow_cookie(config, kVerifierCookie, "", 0));
+        });
+
+        auto provider_error = req.query.find("error");
+        if (provider_error != req.query.end()) {
+            on_error("Authorization failed: " + detail::url_decode(provider_error->second), req, writer);
+            return;
+        }
+
+        // The state must round-trip through the provider unchanged; otherwise
+        // this callback was not started by this browser (login CSRF).
+        auto state_it = req.query.find("state");
+        auto cookie_it = req.cookies.find(kStateCookie);
+        std::string state = state_it == req.query.end() ? "" : detail::url_decode(state_it->second);
+        std::string expected = cookie_it == req.cookies.end() ? "" : cookie_it->second;
+        if (state.empty() || expected.empty() || state.size() != expected.size() ||
+            CRYPTO_memcmp(state.data(), expected.data(), state.size()) != 0) {
+            on_error("Invalid OAuth2 state", req, writer);
+            return;
+        }
+
         auto code_it = req.query.find("code");
         if (code_it == req.query.end()) {
             on_error("Authorization code missing", req, writer);
             return;
         }
-        std::string code = code_it->second;
+        std::string code = detail::url_decode(code_it->second);
 
-        // Exchange code for token
-        std::string token_body = "client_id=" + config_.client_id + 
-                                "&client_secret=" + config_.client_secret + 
-                                "&code=" + code + 
-                                "&redirect_uri=" + config_.redirect_uri + 
-                                "&grant_type=authorization_code";
-                                
-        // We really should dispatch this to a thread pool because libcurl blocking is bad for the event loop.
-        // Let's do it inline for now, but a production app must use thread_pool()!
-        std::string token_response = fetch_sync(config_.token_endpoint, "POST", token_body);
-        
-        try {
-            auto token_json = nlohmann::json::parse(token_response);
-            if (!token_json.contains("access_token")) {
-                on_error("Access token missing in response: " + token_response, req, writer);
+        std::string token_body = "grant_type=authorization_code"
+            "&code=" + detail::url_encode(code) +
+            "&redirect_uri=" + detail::url_encode(config.redirect_uri) +
+            "&client_id=" + detail::url_encode(config.client_id) +
+            "&client_secret=" + detail::url_encode(config.client_secret);
+        if (config.use_pkce) {
+            auto verifier_it = req.cookies.find(kVerifierCookie);
+            if (verifier_it == req.cookies.end() || verifier_it->second.empty()) {
+                on_error("PKCE verifier missing", req, writer);
                 return;
             }
-            
-            std::string access_token = token_json["access_token"];
-            std::string auth_header = "Authorization: Bearer " + access_token;
-            
-            // Fetch user info
-            std::string user_info_response = fetch_sync(config_.userinfo_endpoint, "GET", "", auth_header);
-            auto user_info = nlohmann::json::parse(user_info_response);
-            
-            on_success(user_info, req, writer);
-        } catch (const std::exception& e) {
-            on_error(std::string("JSON parse error: ") + e.what(), req, writer);
+            token_body += "&code_verifier=" + detail::url_encode(verifier_it->second);
         }
+
+        HttpResult token_response = fetch(config, config.token_endpoint, token_body, "");
+        if (!token_response.ok) {
+            on_error("Token request failed: " + token_response.error, req, writer);
+            return;
+        }
+
+        nlohmann::json token_json = nlohmann::json::parse(token_response.body, nullptr, false);
+        if (token_json.is_discarded() || !token_json.is_object() ||
+            !token_json.contains("access_token") || !token_json["access_token"].is_string()) {
+            // Do not echo the response: it may contain credentials.
+            on_error("Token response did not contain an access token", req, writer);
+            return;
+        }
+
+        std::string auth_header = "Authorization: Bearer " + token_json["access_token"].get<std::string>();
+        HttpResult user_response = fetch(config, config.userinfo_endpoint, "", auth_header);
+        if (!user_response.ok) {
+            on_error("User info request failed: " + user_response.error, req, writer);
+            return;
+        }
+        nlohmann::json user_info = nlohmann::json::parse(user_response.body, nullptr, false);
+        if (user_info.is_discarded()) {
+            on_error("User info response is not JSON", req, writer);
+            return;
+        }
+
+        on_success(user_info, req, writer);
     };
 }
 
