@@ -78,7 +78,7 @@ int main() {
 
     // Return JSON
     app.get("/api/status", []() -> nlohmann::json {
-        return {{"status", "ok"}, {"version", "1.5.1"}};
+        return {{"status", "ok"}, {"version", "1.6.0"}};
     });
 
     // Dynamic route parameters
@@ -102,7 +102,7 @@ $ curl http://localhost:8080/
 Hello from Orbit! 🚀
 
 $ curl http://localhost:8080/api/status
-{"status":"ok","version":"1.5.1"}
+{"status":"ok","version":"1.6.0"}
 
 $ curl http://localhost:8080/users/42
 {"user_id":"42"}
@@ -126,10 +126,10 @@ Orbit can be consumed in several ways. Pick by what you are doing:
 | Hack on Orbit itself | [Build from source](#build-from-source) | No |
 | Produce `.deb` / `.rpm` / `.tar.gz` | [CPack packages](#building-distributable-packages) | No |
 
-> **Version note.** Use `v1.5.1` or later. `v1.4.0` and earlier contain a CMake
-> defect that corrupted the stack of *every* consuming application, along with
-> an HTTP/2 use-after-free and an HTTP/1.0 connection hang. See
-> [CHANGELOG.md](CHANGELOG.md) and [API Stability](#-api-stability).
+> **Version note.** Use `v1.6.0` or later. `v1.5.1` and earlier contain
+> security vulnerabilities fixed in `v1.6.0`, and `v1.4.0` and earlier also
+> contain a CMake defect that corrupted the stack of *every* consuming
+> application. See [CHANGELOG.md](CHANGELOG.md) and [API Stability](#-api-stability).
 
 ### Prerequisites
 
@@ -168,14 +168,14 @@ dependency, and installs. Expect 20–40 minutes on first run; a binary cache un
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ORBIT_VERSION` | latest release | Tag to install, e.g. `v1.5.1`; `main` installs the development branch |
+| `ORBIT_VERSION` | latest release | Tag to install, e.g. `v1.6.0`; `main` installs the development branch |
 | `ORBIT_PREFIX` | `/usr/local` (Windows: `C:\Program Files\OrbitFramework`) | Install location; `sudo` is only used if it is not writable |
 | `ORBIT_JOBS` | limited by free memory (~2 GB per job) | Parallel build jobs |
 
 ```bash
 # Example: a specific release, installed for your user only, without sudo
 curl -fsSL https://raw.githubusercontent.com/varuns2903/orbit-framework/main/install.sh \
-  | ORBIT_VERSION=v1.5.1 ORBIT_PREFIX="$HOME/.local" bash
+  | ORBIT_VERSION=v1.6.0 ORBIT_PREFIX="$HOME/.local" bash
 ```
 
 > Piping a script into a shell runs arbitrary code as you, with `sudo` for the
@@ -220,7 +220,7 @@ include(FetchContent)
 FetchContent_Declare(
   OrbitFramework
   GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
-  GIT_TAG        v1.5.1        # pin a release; avoid v1.4.0 and earlier
+  GIT_TAG        v1.6.0        # pin a release; avoid v1.4.0 and earlier
 )
 FetchContent_MakeAvailable(OrbitFramework)
 

@@ -5,6 +5,155 @@ All notable changes to the Orbit Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.0] - 2026-10-03
+
+Security and robustness release. **Everyone on v1.5.1 or earlier should
+upgrade.** Security advisories for the issues below will be published on the
+repository's Security tab once this release is available.
+
+### Upgrade notes
+
+Most changes are fixes, but some intentionally tighten behaviour:
+
+- **HTTP status codes.** A wrong method gets `405` with `Allow` (it used to get
+  `404`). `HEAD` is answered from `GET` routes.
+- **Request paths.** Handlers receive percent-decoded `uri`, `query` and `params`.
+  Paths containing an encoded `/`, `\` or NUL are rejected with `400`.
+- **Error responses.** `500` bodies no longer include exception messages.
+  `on_error` also receives exceptions thrown by handlers that return values.
+- **CORS.** With an allow-list, unlisted origins receive no CORS headers.
+- **JWT.** Only HS256 is accepted, and a future `nbf` is rejected.
+  `jwt_auth("")` throws.
+- **WebSocket routes** now run the app's middleware and validate the handshake.
+- **OAuth2.** Logins must start through `login_handler()`, which sets the state cookie
+  that callbacks now require.
+- **Reverse proxy.** HTTPS upstreams with untrusted certificates are rejected. Set
+  `verify_tls = false`, or use `ca_file` for a private CA.
+- **ORM.** Values are bound as parameters instead of being spliced into SQL. Code that read
+  `orm::Expr::sql` expecting inlined values, or passed arbitrary operator strings
+  or non-identifier column names, must be updated.
+- **Database.** `PostgresClient` failures return `ResultSet::failure(message)`; check
+  `ok()` / `error()`. `to_json()` keeps `""` for empty strings and uses `null`
+  only for SQL NULL.
+- **Distributed rate limiter.** Answers `503` (fail closed) when Redis is
+  unreachable. Pass `allow_when_unavailable = true` to let requests through instead.
+- **Static files.**
+  - Dotfiles (`.env`, `.git/`) are no longer served.
+  - Text types carry `; charset=utf-8`.
+  - The ETag format changed, so cached copies revalidate once.
+- **Timeouts.** The single 10-second timer is replaced by `header_timeout`,
+  `keep_alive_timeout`, `idle_timeout` and `websocket_idle_timeout`.
+- **Listen backlog.** The default is now `SOMAXCONN` (it was 10).
+
+### Security
+
+- HTTP/1.1 request framing: conflicting or duplicate `Content-Length`, and
+  `Transfer-Encoding` combined with `Content-Length`, are rejected. This prevents
+  request smuggling, and a duplicate `Content-Length` no longer terminates the
+  process.
+- WebSocket:
+  - Frame lengths are validated and message size is bounded.
+  - A connection that drops without a close frame no longer causes a use-after-free.
+  - The upgrade no longer bypasses middleware and origin checks.
+- ORM query builder: values are bound as parameters instead of spliced into SQL
+  (SQL injection).
+- CORS: the origin allow-list is honoured and `Vary: Origin` is sent.
+- CSRF middleware no longer leaves dangling header references.
+- Session IDs, CSRF tokens and QUIC connection IDs, stateless reset tokens and
+  path challenges are drawn from a CSPRNG.
+- JWT verification: the algorithm is pinned, signatures are compared in
+  constant time, and `exp`/`nbf` are checked.
+- OAuth2: adds `state` and PKCE, encodes parameters, and puts timeouts on
+  provider calls.
+- Reverse proxy:
+  - Verifies upstream TLS.
+  - Forwards headers safely.
+  - Owns the request it forwards; it used to keep a dangling reference.
+- TLS: OpenSSL state is serialised per connection.
+- HTTP/2: file responses own their descriptors; the response could read a
+  descriptor that had already been closed.
+- Response header and cookie values are validated for CR/LF.
+- Exception messages are no longer disclosed to clients.
+- The signal handler is async-signal-safe.
+- The Redis client no longer deadlocks after losing its connection.
+- Connections that are idle, slow, or trickle their headers are bounded by
+  per-phase timeouts. Long handlers, WebSockets and SSE are no longer cut off.
+
+### Fixed
+
+- **HTTP/1.1 pipelining.**
+  - A pipelined response could be dropped, or the socket closed before the final
+    response was sent.
+  - A connection could linger after its last response.
+  - Pipelined file responses corrupted each other's offset.
+- A handler that sent a fixed-length response while a chunked request body was
+  still arriving broke the body decoding.
+- `EAGAIN`/`EINTR` from a read or write closed the connection. They now retry.
+- TLS `close_notify` and fatal TLS errors were ignored, so the connection stayed
+  open until the keep-alive timeout.
+- **Static files.**
+  - The path-containment check rejected every file on Windows. It also accepted
+    sibling directories that shared a prefix, and symlinks that point outside the
+    directory.
+  - Many common MIME types were missing.
+- **In-memory rate limiter.**
+  - Memory grew with every client address it saw; it is now bounded.
+  - Refill is continuous.
+- **Redis rate limiter.** The counter and its expiry are now set atomically, so a
+  client can no longer be locked out permanently.
+- Response interceptors and default headers leaked into later responses on a
+  keep-alive connection.
+- Nested router groups now register their routes.
+- HTTP/2 now matches HTTP/1.1 for query strings, cookies, interceptors and
+  streaming.
+- Database query errors are reported, NULL is preserved, and migrations run in a
+  transaction.
+- The thread pool's stop flag is set under its mutex.
+- Library diagnostics go through the Logger rather than `std::cout`, and respect
+  `log_level`.
+- Accept:
+  - One readiness event now accepts every queued connection.
+  - Running out of file descriptors no longer sleeps on the event-loop thread.
+- **Installers.**
+  - `install.sh` and `install.ps1` install the latest release rather than `main`.
+  - vcpkg is pinned to the manifest baseline.
+  - Build parallelism is bounded by available memory.
+  - Both scripts stop on the first error.
+
+### Added
+
+- `ServerConfig::host` (`--bind`):
+  - Accepts `127.0.0.1`, `::1`, host names, and `::` for a dual-stack listener.
+  - IPv6 client addresses are reported.
+- `ServerConfig::backlog` (`--backlog`) and `ServerConfig::max_connections`
+  (`--max-connections`). When the connection limit is reached, new connections
+  wait in the backlog until a slot frees.
+- `middleware::StaticFilesOptions`:
+  - `index`, `serve_dotfiles` and `max_age`.
+  - Responses carry `Last-Modified`, `Cache-Control` and `Accept-Ranges`.
+  - `HEAD` is supported.
+  - Single byte ranges return `206`/`416`, and `If-Range` is honoured.
+  - `If-None-Match` lists and `If-Modified-Since` are supported.
+  - `mime_type_for_extension()` is exposed.
+- `HttpResponse::file_offset` / `set_file_range()` for partial file responses
+  over HTTP/1.1 and HTTP/2.
+- `middleware::RateLimitOptions`: a custom key function and
+  `max_tracked_clients`. Both rate limiters send `Retry-After`.
+- `RedisClient::incr_with_expiry()`.
+- `WebSocketConnection::set_max_message_size()`, `ws(...)` overloads with
+  middleware, and `require_origin`.
+- `JwtOptions`, OAuth2 PKCE/state configuration, and `ProxyOptions`
+  (`use_tls`, `verify_tls`, `ca_file`).
+- `ResultSet::ok()` / `error()`, and parameterised `query`/`query_async`.
+- `HttpRequest::set_header()` / `target`.
+- `EventLoop::set_tick_hook()`.
+- `Listener::port()`.
+- Installer variables `ORBIT_VERSION`, `ORBIT_PREFIX` and `ORBIT_JOBS`.
+
+### Removed
+
+- The unused hiredis dependency.
+
 ## [v1.5.1] - 2026-09-17
 
 Packaging-only release. No library code changed — the only reason to upgrade is
@@ -223,6 +372,9 @@ project, so **upgrading from v1.4.0 or earlier is strongly recommended**.
 - CMake build system with install/export rules.
 - `nlohmann/json` integration for JSON request/response handling.
 
+[v1.6.0]: https://github.com/varuns2903/orbit-framework/compare/v1.5.1...v1.6.0
+[v1.5.1]: https://github.com/varuns2903/orbit-framework/compare/v1.5.0...v1.5.1
+[v1.5.0]: https://github.com/varuns2903/orbit-framework/compare/v1.4.0...v1.5.0
 [v1.4.0]: https://github.com/varuns2903/orbit-framework/compare/v1.3.0...v1.4.0
 [v1.3.0]: https://github.com/varuns2903/orbit-framework/compare/v1.2.1...v1.3.0
 [v1.2.1]: https://github.com/varuns2903/orbit-framework/compare/v1.2.0...v1.2.1
