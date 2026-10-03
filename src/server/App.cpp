@@ -179,7 +179,7 @@ void App::listen() {
     signal(SIGTERM, signal_handler);
 #endif
 
-    listener_ = std::make_unique<Listener>(config_.port);
+    listener_ = std::make_unique<Listener>(config_.host, config_.port, config_.backlog);
     listener_->start();
     
     network::UdpSocket* pass_quic_socket = nullptr;
@@ -222,7 +222,7 @@ void App::listen() {
         stop();
     });
     
-    LOG_INFO("App started listening on port " << config_.port);
+    LOG_INFO("App started listening on port " << listener_->port());
     event_loop_->run();
 }
 

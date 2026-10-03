@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <functional>
 #include <orbit/network/Proactor.hpp>
 #include <orbit/server/Listener.hpp>
@@ -70,6 +71,14 @@ public:
 private:
     void do_accept();
     void do_read_quic();
+    // Hands an accepted socket to the connection manager.
+    void on_accepted(network::socket_t client_fd, const sockaddr_in& addr);
+    // Accepts whatever else is already queued on the listener (POSIX).
+    void accept_pending();
+    // Stops arming accept until `until` (and while at max_connections).
+    void pause_accepting(std::chrono::steady_clock::time_point until);
+    void resume_accepting_if_ready();
+    bool at_connection_limit() const;
 
     Listener& listener_;
     TimerManager timer_manager_;
@@ -83,6 +92,14 @@ private:
     std::atomic<bool> is_running_{true};
     std::function<void()> tick_hook_;
     std::atomic<bool> is_accepting_{true};
+
+    size_t max_connections_ = 0;
+    bool nonblocking_accepts_ = true; // accepted sockets must match the proactor's own accept
+    // Loop-thread only: accept is not armed while paused (fd limit or
+    // max_connections reached); new connections wait in the backlog.
+    bool accept_paused_ = false;
+    std::chrono::steady_clock::time_point accept_resume_at_{};
+    std::chrono::steady_clock::time_point last_limit_warning_{};
 };
 
 } // namespace server

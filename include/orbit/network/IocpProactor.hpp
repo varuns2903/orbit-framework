@@ -26,7 +26,8 @@ struct IocpContext {
     
     // For AcceptEx
     socket_t accept_socket{INVALID_SOCKET_FD};
-    char accept_buffer[(sizeof(sockaddr_in) + 16) * 2];
+    // Room for IPv4 or IPv6 local and remote addresses.
+    char accept_buffer[(sizeof(sockaddr_storage) + 16) * 2];
     
     // For WSARecv/WSASend
     WSABUF wsa_buf;

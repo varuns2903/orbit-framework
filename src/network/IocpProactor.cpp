@@ -216,7 +216,14 @@ void IocpProactor::async_accept(socket_t fd, std::function<void(socket_t, sockad
     ctx->type = IocpOperationType::ACCEPT;
     ctx->accept_callback = std::move(callback);
     
-    socket_t client_sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    // AcceptEx needs a socket of the listener's address family (IPv6 for "::").
+    sockaddr_storage listen_addr{};
+    int listen_len = sizeof(listen_addr);
+    int family = AF_INET;
+    if (getsockname(fd, reinterpret_cast<sockaddr*>(&listen_addr), &listen_len) == 0) {
+        family = listen_addr.ss_family;
+    }
+    socket_t client_sock = ::socket(family, SOCK_STREAM, IPPROTO_TCP);
     ctx->accept_socket = client_sock;
 
     {
@@ -227,7 +234,7 @@ void IocpProactor::async_accept(socket_t fd, std::function<void(socket_t, sockad
     if (pAcceptEx) {
         DWORD received = 0;
         BOOL result = pAcceptEx(fd, client_sock, ctx->accept_buffer, 0, 
-                                sizeof(sockaddr_in) + 16, sizeof(sockaddr_in) + 16, 
+                                sizeof(sockaddr_storage) + 16, sizeof(sockaddr_storage) + 16, 
                                 &received, &ctx->overlapped);
         if (result == FALSE && WSAGetLastError() != WSA_IO_PENDING) {
             std::lock_guard<std::mutex> lock(mutex_);

@@ -15,6 +15,9 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
                       << "  -p, --port <port>             Port to listen on (default: 8080)\n"
+                      << "  -b, --bind <host>             Address to listen on, e.g. 127.0.0.1 or :: (default: 0.0.0.0)\n"
+                      << "      --backlog <num>           Listen backlog (default: SOMAXCONN)\n"
+                      << "      --max-connections <num>   Connections served at once, 0 = unlimited (default: 0)\n"
                       << "  -t, --threads <num>           Number of worker threads (default: hardware concurrency)\n"
                       << "  -l, --log-level <level>       Log level (DEBUG, INFO, WARN, ERROR) (default: INFO)\n"
                       << "  -s, --static-dir <dir>        Directory for static files\n"
@@ -27,6 +30,12 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             std::exit(0);
         } else if ((arg == "-p" || arg == "--port") && i + 1 < argc) {
             cfg.port = static_cast<uint16_t>(std::stoi(argv[++i]));
+        } else if ((arg == "-b" || arg == "--bind") && i + 1 < argc) {
+            cfg.host = argv[++i];
+        } else if (arg == "--backlog" && i + 1 < argc) {
+            cfg.backlog = std::stoi(argv[++i]);
+        } else if (arg == "--max-connections" && i + 1 < argc) {
+            cfg.max_connections = static_cast<size_t>(std::stoull(argv[++i]));
         } else if ((arg == "-t" || arg == "--threads") && i + 1 < argc) {
             cfg.worker_threads = static_cast<size_t>(std::stoull(argv[++i]));
         } else if ((arg == "-l" || arg == "--log-level") && i + 1 < argc) {
