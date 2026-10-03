@@ -134,7 +134,15 @@ struct RunningApp {
 
 } // namespace
 
-TEST(ListenerTest, BindsLoopbackOnAnEphemeralPort) {
+// These tests use Listener and raw sockets directly, without an App, so they
+// must start the platform networking stack themselves (WSAStartup on Windows).
+class ListenerTest : public ::testing::Test {
+protected:
+    static void SetUpTestSuite() { network::initialize_platform_networking(); }
+    static void TearDownTestSuite() { network::cleanup_platform_networking(); }
+};
+
+TEST_F(ListenerTest, BindsLoopbackOnAnEphemeralPort) {
     server::Listener listener("127.0.0.1", 0);
     listener.start();
     ASSERT_NE(listener.port(), 0);
@@ -152,13 +160,13 @@ TEST(ListenerTest, BindsLoopbackOnAnEphemeralPort) {
     network::close_socket(client);
 }
 
-TEST(ListenerTest, AddressThatIsNotLocalFailsToBind) {
+TEST_F(ListenerTest, AddressThatIsNotLocalFailsToBind) {
     // 192.0.2.0/24 is reserved for documentation; no host owns it.
     server::Listener listener("192.0.2.1", 0);
     EXPECT_THROW(listener.start(), std::runtime_error);
 }
 
-TEST(ListenerTest, Ipv6Loopback) {
+TEST_F(ListenerTest, Ipv6Loopback) {
     if (!ipv6_available()) GTEST_SKIP() << "IPv6 is not available";
     server::Listener listener("::1", 0);
     listener.start();
@@ -167,7 +175,7 @@ TEST(ListenerTest, Ipv6Loopback) {
     network::close_socket(client);
 }
 
-TEST(ListenerTest, DualStackAcceptsIpv4Clients) {
+TEST_F(ListenerTest, DualStackAcceptsIpv4Clients) {
     if (!ipv6_available()) GTEST_SKIP() << "IPv6 is not available";
     server::Listener listener("::", 0);
     listener.start();
@@ -185,7 +193,7 @@ TEST(ListenerTest, DualStackAcceptsIpv4Clients) {
     network::close_socket(client);
 }
 
-TEST(ListenerTest, ConfigParsesListenOptions) {
+TEST_F(ListenerTest, ConfigParsesListenOptions) {
     const char* argv[] = {"app", "--bind", "127.0.0.1", "--backlog", "64", "--max-connections", "5"};
     config::ServerConfig cfg = config::ServerConfig::parse(7, const_cast<char**>(argv));
     EXPECT_EQ(cfg.host, "127.0.0.1");
@@ -193,7 +201,7 @@ TEST(ListenerTest, ConfigParsesListenOptions) {
     EXPECT_EQ(cfg.max_connections, 5u);
 }
 
-TEST(ListenerTest, ManyQueuedConnectionsAreAllServed) {
+TEST_F(ListenerTest, ManyQueuedConnectionsAreAllServed) {
     config::ServerConfig cfg;
     cfg.host = "127.0.0.1";
     cfg.port = 8112;
@@ -215,7 +223,7 @@ TEST(ListenerTest, ManyQueuedConnectionsAreAllServed) {
     EXPECT_EQ(ok, 100);
 }
 
-TEST(ListenerTest, MaxConnectionsQueuesExtraClients) {
+TEST_F(ListenerTest, MaxConnectionsQueuesExtraClients) {
     config::ServerConfig cfg;
     cfg.host = "127.0.0.1";
     cfg.port = 8113;
@@ -252,7 +260,7 @@ TEST(ListenerTest, MaxConnectionsQueuesExtraClients) {
     network::close_socket(c);
 }
 
-TEST(ListenerTest, ClientIpOnDualStackServer) {
+TEST_F(ListenerTest, ClientIpOnDualStackServer) {
     if (!ipv6_available()) GTEST_SKIP() << "IPv6 is not available";
     config::ServerConfig cfg;
     cfg.host = "::";
