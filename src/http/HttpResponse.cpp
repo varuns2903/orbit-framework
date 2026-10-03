@@ -58,8 +58,9 @@ void HttpResponse::render(const std::string& template_path, const nlohmann::json
         std::string result = env.render_file(template_path, data);
         set_body(result, "text/html");
     } catch (const std::exception& e) {
+        LOG_ERROR("Template error rendering " << template_path << ": " << e.what());
         status_code = HttpStatus::InternalServerError;
-        set_body(std::string("<h1>500 Internal Server Error</h1><p>Template Error: ") + e.what() + "</p>", "text/html");
+        set_body("<h1>500 Internal Server Error</h1>", "text/html");
     }
 }
 
