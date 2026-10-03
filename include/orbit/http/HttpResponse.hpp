@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <cstddef>
 #include <cstdint>
@@ -12,23 +13,62 @@ namespace http {
  * @brief Standard HTTP status codes.
  */
 enum class HttpStatus {
+    Continue = 100,
     SwitchingProtocols = 101,
     OK = 200,
     Created = 201,
+    Accepted = 202,
     NoContent = 204,
+    PartialContent = 206,
     MovedPermanently = 301,
     Found = 302,
+    SeeOther = 303,
     NotModified = 304,
+    TemporaryRedirect = 307,
+    PermanentRedirect = 308,
     BadRequest = 400,
     Unauthorized = 401,
     Forbidden = 403,
     NotFound = 404,
+    MethodNotAllowed = 405,
+    NotAcceptable = 406,
+    RequestTimeout = 408,
+    Conflict = 409,
+    Gone = 410,
+    LengthRequired = 411,
+    PreconditionFailed = 412,
     PayloadTooLarge = 413,
+    URITooLong = 414,
+    UnsupportedMediaType = 415,
+    RangeNotSatisfiable = 416,
+    ExpectationFailed = 417,
+    UnprocessableEntity = 422,
+    UpgradeRequired = 426,
     TooManyRequests = 429,
     RequestHeaderFieldsTooLarge = 431,
-    UnprocessableEntity = 422,
-    InternalServerError = 500
+    InternalServerError = 500,
+    NotImplemented = 501,
+    BadGateway = 502,
+    ServiceUnavailable = 503,
+    GatewayTimeout = 504
 };
+
+/**
+ * @brief Reason phrase for a status code. Codes without a registered phrase
+ *        get a generic one for their class (e.g. "Client Error" for 4xx).
+ */
+const char* reason_phrase(int status_code);
+
+/**
+ * @brief True if @p name is a valid header field name (an RFC 9110 token).
+ */
+bool is_valid_header_name(std::string_view name);
+
+/**
+ * @brief True if @p value can be written as a header field value: it
+ *        contains no CR, LF or NUL, so it cannot start a new header line.
+ */
+bool is_valid_header_value(std::string_view value);
 
 /**
  * @brief Represents an HTTP cookie.

@@ -6,6 +6,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <cerrno>
+#include <functional>
 
 namespace network {
 
@@ -17,6 +19,16 @@ KqueueProactor::KqueueProactor() : events_(64) {
 }
 
 KqueueProactor::~KqueueProactor() {
+    // Pending callbacks may hold the last reference to objects whose
+    // destructors call remove() (e.g. a proxied request). Release them while
+    // ctx_mutex_ still exists: destroying contexts_ as a member happens after
+    // the mutex is gone, and macOS aborts on locking a destroyed mutex.
+    std::unordered_map<int, Context> pending;
+    {
+        std::lock_guard<std::mutex> lock(ctx_mutex_);
+        pending.swap(contexts_);
+    }
+    pending.clear();
     if (kq_fd_ >= 0) close(kq_fd_);
 }
 
@@ -35,7 +47,13 @@ void KqueueProactor::update_kqueue(Context& ctx) {
     EV_SET(&ev_write, ctx.fd, EVFILT_WRITE, needs_write ? EV_ADD : EV_DELETE, 0, 0, nullptr);
     changes.push_back(ev_write);
 
-    kevent(kq_fd_, changes.data(), changes.size(), nullptr, 0, nullptr);
+    // Apply each change on its own. With no event list, kevent() stops at the
+    // first failing change and returns -1: deleting a filter that was never
+    // added (ENOENT) used to silently drop the following EV_ADD, so e.g. the
+    // write filter for an outgoing connect was never registered.
+    for (auto& change : changes) {
+        kevent(kq_fd_, &change, 1, nullptr, 0, nullptr);
+    }
     ctx.tracked = true;
 }
 
@@ -46,7 +64,9 @@ void KqueueProactor::remove(socket_t fd) {
         struct kevent changes[2];
         EV_SET(&changes[0], fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
         EV_SET(&changes[1], fd, EVFILT_WRITE, EV_DELETE, 0, 0, nullptr);
-        kevent(kq_fd_, changes, 2, nullptr, 0, nullptr);
+        // Separately, for the same reason as in update_kqueue().
+        kevent(kq_fd_, &changes[0], 1, nullptr, 0, nullptr);
+        kevent(kq_fd_, &changes[1], 1, nullptr, 0, nullptr);
         contexts_.erase(it);
     }
 }
@@ -67,77 +87,99 @@ void KqueueProactor::run_once(int timeout_ms) {
 }
 
 void KqueueProactor::handle_event(const struct kevent& event) {
-    int fd = event.ident;
-    Context* ctx = nullptr;
-    
+    const int fd = static_cast<int>(event.ident);
+
+    // Take everything needed out of the context under the lock, then do the
+    // I/O and run the callback without it, as the epoll proactor does.
+    // Calling ctx->read_cb in place was unsafe: callbacks usually re-arm the
+    // same operation, and assigning the new std::function destroyed the one
+    // still executing (and the shared_ptr it captured). The context pointer
+    // could also be invalidated by another thread growing contexts_.
+    std::function<void()> action;
     {
         std::lock_guard<std::mutex> lock(ctx_mutex_);
         auto it = contexts_.find(fd);
         if (it == contexts_.end()) return;
-        ctx = &it->second;
-    }
+        Context& ctx = it->second;
 
-    if (event.flags & EV_EOF || event.flags & EV_ERROR) {
-        // Handle EOF/Error gracefully via the read/write logic below
-    }
-
-    if (event.filter == EVFILT_READ) {
-        if (ctx->accepting) {
-            sockaddr_in client_addr;
-            socklen_t client_len = sizeof(client_addr);
-            int new_fd = accept(fd, (struct sockaddr*)&client_addr, &client_len);
-            ctx->accepting = false;
-            update_kqueue(*ctx);
-            if (ctx->accept_cb) ctx->accept_cb(new_fd, client_addr);
-        } else if (ctx->reading) {
-            ssize_t n = ::read(fd, ctx->read_buf, ctx->read_size);
-            ctx->reading = false;
-            update_kqueue(*ctx);
-            if (ctx->read_cb) ctx->read_cb(n);
-        } else if (ctx->waiting_read) {
-            ctx->waiting_read = false;
-            update_kqueue(*ctx);
-            if (ctx->wait_read_cb) ctx->wait_read_cb();
-        }
-    }
-
-    if (event.filter == EVFILT_WRITE) {
-        if (ctx->connecting) {
-            ctx->connecting = false;
-            update_kqueue(*ctx);
-            int err = 0;
-            socklen_t len = sizeof(err);
-            getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len);
-            if (ctx->connect_cb) ctx->connect_cb(err);
-        } else if (ctx->writing) {
-            ssize_t n = ::write(fd, ctx->write_buf, ctx->write_size);
-            ctx->writing = false;
-            update_kqueue(*ctx);
-            if (ctx->write_cb) ctx->write_cb(n);
-        } else if (ctx->waiting_write) {
-            ctx->waiting_write = false;
-            update_kqueue(*ctx);
-            if (ctx->wait_write_cb) ctx->wait_write_cb();
-        } else if (ctx->sendfile_in_progress) {
-            // macOS sendfile is different from Linux sendfile
-            off_t len = ctx->sendfile_count;
-            int ret = sendfile(ctx->sendfile_in_fd, fd, ctx->sendfile_offset, &len, nullptr, 0);
-            
-            if (ret == 0 || (ret == -1 && errno == EAGAIN && len > 0)) {
-                ctx->sendfile_offset += len;
-                ctx->sendfile_count -= len;
-                if (ctx->sendfile_count == 0 || ret == 0) {
-                    ctx->sendfile_in_progress = false;
-                    update_kqueue(*ctx);
-                    if (ctx->sendfile_cb) ctx->sendfile_cb(len);
-                }
-            } else {
-                ctx->sendfile_in_progress = false;
-                update_kqueue(*ctx);
-                if (ctx->sendfile_cb) ctx->sendfile_cb(-1);
+        if (event.filter == EVFILT_READ) {
+            if (ctx.accepting) {
+                ctx.accepting = false;
+                auto cb = std::move(ctx.accept_cb);
+                update_kqueue(ctx);
+                action = [fd, cb = std::move(cb)]() {
+                    sockaddr_in client_addr{};
+                    socklen_t client_len = sizeof(client_addr);
+                    int new_fd = ::accept(fd, reinterpret_cast<struct sockaddr*>(&client_addr), &client_len);
+                    if (new_fd >= 0) {
+                        // Match accept4(SOCK_NONBLOCK | SOCK_CLOEXEC) on Linux.
+                        fcntl(new_fd, F_SETFL, fcntl(new_fd, F_GETFL, 0) | O_NONBLOCK);
+                        fcntl(new_fd, F_SETFD, fcntl(new_fd, F_GETFD, 0) | FD_CLOEXEC);
+                    }
+                    if (cb) cb(new_fd, client_addr);
+                };
+            } else if (ctx.reading) {
+                ctx.reading = false;
+                auto cb = std::move(ctx.read_cb);
+                void* buf = ctx.read_buf;
+                size_t size = ctx.read_size;
+                update_kqueue(ctx);
+                action = [fd, buf, size, cb = std::move(cb)]() {
+                    ssize_t n = ::read(fd, buf, size);
+                    if (cb) cb(n);
+                };
+            } else if (ctx.waiting_read) {
+                ctx.waiting_read = false;
+                auto cb = std::move(ctx.wait_read_cb);
+                update_kqueue(ctx);
+                action = std::move(cb);
+            }
+        } else if (event.filter == EVFILT_WRITE) {
+            if (ctx.connecting) {
+                ctx.connecting = false;
+                auto cb = std::move(ctx.connect_cb);
+                update_kqueue(ctx);
+                action = [fd, cb = std::move(cb)]() {
+                    int err = 0;
+                    socklen_t len = sizeof(err);
+                    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) err = errno;
+                    if (cb) cb(err);
+                };
+            } else if (ctx.writing) {
+                ctx.writing = false;
+                auto cb = std::move(ctx.write_cb);
+                const void* buf = ctx.write_buf;
+                size_t size = ctx.write_size;
+                update_kqueue(ctx);
+                action = [fd, buf, size, cb = std::move(cb)]() {
+                    ssize_t n = ::write(fd, buf, size);
+                    if (cb) cb(n);
+                };
+            } else if (ctx.waiting_write) {
+                ctx.waiting_write = false;
+                auto cb = std::move(ctx.wait_write_cb);
+                update_kqueue(ctx);
+                action = std::move(cb);
+            } else if (ctx.sendfile_in_progress) {
+                ctx.sendfile_in_progress = false;
+                auto cb = std::move(ctx.sendfile_cb);
+                int in_fd = ctx.sendfile_in_fd;
+                off_t offset = ctx.sendfile_offset;
+                size_t count = ctx.sendfile_count;
+                update_kqueue(ctx);
+                // One call per readiness event; the caller re-arms for the rest,
+                // as with Linux sendfile().
+                action = [fd, in_fd, offset, count, cb = std::move(cb)]() {
+                    off_t len = static_cast<off_t>(count);
+                    int ret = sendfile(in_fd, fd, offset, &len, nullptr, 0);
+                    bool progressed = (ret == 0) || ((errno == EAGAIN || errno == EINTR) && len > 0);
+                    if (cb) cb(progressed ? static_cast<ssize_t>(len) : -1);
+                };
             }
         }
     }
+
+    if (action) action();
 }
 
 // Setup methods (they mostly just set the state and call update_kqueue)
