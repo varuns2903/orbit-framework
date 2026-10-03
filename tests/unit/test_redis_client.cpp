@@ -2,6 +2,10 @@
 
 #ifdef ORBIT_ENABLE_REDIS
 #include <orbit/database/RedisClient.hpp>
+#include <orbit/http/HttpResponse.hpp>
+#include <orbit/http/ResponseWriter.hpp>
+#include <orbit/middleware/DistributedRateLimiter.hpp>
+#include <stdexcept>
 
 #include <atomic>
 #include <chrono>
@@ -14,12 +18,12 @@ namespace {
 
 constexpr int kPort = 6396;
 
-bool start_redis() {
+bool start_redis(int port = kPort) {
 #ifdef _WIN32
     return false;
 #else
     if (std::system("command -v redis-server >/dev/null 2>&1") != 0) return false;
-    std::string cmd = "redis-server --port " + std::to_string(kPort) +
+    std::string cmd = "redis-server --port " + std::to_string(port) +
                       " --save '' --appendonly no --daemonize yes >/dev/null 2>&1";
     if (std::system(cmd.c_str()) != 0) return false;
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -27,8 +31,8 @@ bool start_redis() {
 #endif
 }
 
-void stop_redis() {
-    std::string cmd = "redis-cli -p " + std::to_string(kPort) + " shutdown nosave >/dev/null 2>&1";
+void stop_redis(int port = kPort) {
+    std::string cmd = "redis-cli -p " + std::to_string(port) + " shutdown nosave >/dev/null 2>&1";
     (void)std::system(cmd.c_str());
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 }
@@ -48,6 +52,23 @@ bool finishes_within(std::chrono::milliseconds limit, Fn fn) {
     }
     return *done;
 }
+
+// Records the last response; everything else is unused by the rate limiter.
+class CaptureWriter : public http::ResponseWriter {
+public:
+    http::HttpResponse last;
+    void send(http::HttpResponse&& response) override { last = std::move(response); }
+    void send_headers(http::HttpResponse&) override {}
+    void write_chunk(std::string_view) override {}
+    void end() override {}
+    void add_interceptor(std::function<void(http::HttpResponse&)>) override {}
+    void set_header(const std::string&, const std::string&) override {}
+    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
+    void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
+    void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
+};
 
 } // namespace
 
@@ -83,6 +104,52 @@ TEST(RedisClientTest, FailsFastWhenNothingListens) {
     database::RedisClient client("127.0.0.1", 1); // port 1: connection refused
     bool done = finishes_within(std::chrono::seconds(5), [&client] { EXPECT_EQ(client.incr("k"), 0); });
     EXPECT_TRUE(done);
+}
+
+// Separate port so this can run in parallel with the restart test above.
+constexpr int kLimiterPort = 6397;
+
+TEST(RedisClientTest, IncrWithExpirySetsTtl) {
+    if (!start_redis(kLimiterPort)) GTEST_SKIP() << "redis-server not available";
+    database::RedisClient client("127.0.0.1", kLimiterPort);
+
+    EXPECT_EQ(client.incr_with_expiry("orbit:test:window", 1), 1);
+    EXPECT_EQ(client.incr_with_expiry("orbit:test:window", 1), 2);
+    // A plain INCR never expires; this key must, or the client stays locked out.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    EXPECT_EQ(client.incr_with_expiry("orbit:test:window", 1), 1);
+
+    stop_redis(kLimiterPort);
+}
+
+TEST(DistributedRateLimiterTest, RejectsOverLimitWithRetryAfter) {
+    if (!start_redis(kLimiterPort)) GTEST_SKIP() << "redis-server not available";
+    auto m = middleware::distributed_rate_limit("127.0.0.1", kLimiterPort, 2, std::chrono::seconds(30));
+    http::HttpRequest req;
+    req.client_ip = "192.0.2.10";
+    auto writer = std::make_shared<CaptureWriter>();
+
+    EXPECT_TRUE(m(req, writer));
+    EXPECT_TRUE(m(req, writer));
+    EXPECT_FALSE(m(req, writer));
+    EXPECT_EQ(writer->last.status_code, http::HttpStatus::TooManyRequests);
+    EXPECT_EQ(writer->last.headers["Retry-After"], "30");
+    EXPECT_EQ(writer->last.headers.count("Connection"), 0u);
+
+    stop_redis(kLimiterPort);
+}
+
+TEST(DistributedRateLimiterTest, RedisDownFailsClosedByDefault) {
+    http::HttpRequest req;
+    req.client_ip = "192.0.2.11";
+    auto writer = std::make_shared<CaptureWriter>();
+
+    auto closed = middleware::distributed_rate_limit("127.0.0.1", 1, 10, std::chrono::seconds(30));
+    EXPECT_FALSE(closed(req, writer));
+    EXPECT_EQ(writer->last.status_code, http::HttpStatus::ServiceUnavailable);
+
+    auto open = middleware::distributed_rate_limit("127.0.0.1", 1, 10, std::chrono::seconds(30), nullptr, true);
+    EXPECT_TRUE(open(req, writer));
 }
 
 #endif // ORBIT_ENABLE_REDIS

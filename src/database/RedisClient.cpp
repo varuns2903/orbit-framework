@@ -209,6 +209,20 @@ long long RedisClient::incr(const std::string& key) {
     }
 }
 
+long long RedisClient::incr_with_expiry(const std::string& key, int seconds) {
+    static const char* kScript =
+        "local n = redis.call('INCR', KEYS[1]) "
+        "if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end "
+        "return n";
+    std::string res = send_command({"EVAL", kScript, "1", key, std::to_string(seconds)});
+    if (res.empty()) return 0;
+    try {
+        return std::stoll(res);
+    } catch (...) {
+        return 0;
+    }
+}
+
 bool RedisClient::expire(const std::string& key, int seconds) {
     std::string res = send_command({"EXPIRE", key, std::to_string(seconds)});
     return res == "1";

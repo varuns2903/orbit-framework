@@ -67,6 +67,14 @@ public:
     long long incr(const std::string& key);
 
     /**
+     * @brief Increments a counter and, when this creates it, sets its expiry,
+     *        atomically (one Lua script). A separate INCR then EXPIRE can leave
+     *        a counter without an expiry if the second command fails.
+     * @return The new value, or 0 on error.
+     */
+    long long incr_with_expiry(const std::string& key, int seconds);
+
+    /**
      * @brief Sets a timeout on a key.
      * 
      * @param key The key to set the timeout on.
