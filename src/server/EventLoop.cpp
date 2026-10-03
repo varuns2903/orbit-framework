@@ -54,7 +54,13 @@ void EventLoop::run() {
 
     while (is_running_) {
         try {
-            proactor_->run_once(timer_manager_.get_next_timeout());
+            // Cap the wait so work signalled from outside the loop (e.g. a
+            // shutdown request from a signal handler) is picked up promptly.
+            int timeout_ms = timer_manager_.get_next_timeout();
+            if (timeout_ms < 0 || timeout_ms > 200) timeout_ms = 200;
+            proactor_->run_once(timeout_ms);
+
+            if (tick_hook_) tick_hook_();
 
             timer_manager_.handle_expired_timers([this](int fd) {
                 connection_manager_.remove_connection(fd);
