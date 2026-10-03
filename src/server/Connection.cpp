@@ -39,6 +39,12 @@ Connection::~Connection() {
     if (current_timer_id_ != 0) {
         timer_manager_.cancel_timer(current_timer_id_);
     }
+    // Whatever tore the connection down (peer close, timeout, I/O error),
+    // WebSocket users must hear about it before the object they hold a
+    // reference to is destroyed.
+    if (ws_connection_) {
+        ws_connection_->handle_transport_closed();
+    }
     if (ssl_) {
         SSL_free(ssl_);
     }
@@ -47,15 +53,42 @@ Connection::~Connection() {
     }
 }
 
-void Connection::reset_timer() {
+void Connection::arm_timer(std::chrono::milliseconds timeout) {
+    std::lock_guard<std::mutex> lock(timer_mutex_);
     if (current_timer_id_ != 0) {
         timer_manager_.cancel_timer(current_timer_id_);
+        current_timer_id_ = 0;
     }
-    current_timer_id_ = timer_manager_.add_timer(socket_.fd(), std::chrono::seconds(10));
+    if (timeout.count() > 0) {
+        current_timer_id_ = timer_manager_.add_timer(socket_.fd(), timeout);
+    }
+}
+
+// Picks the timeout for whatever the connection is waiting on right now.
+void Connection::arm_timer_for_current_phase() {
+    switch (state_) {
+        case ConnectionState::WEBSOCKET:
+        case ConnectionState::RAW_STREAM:
+            arm_timer(timeouts_.websocket_idle);
+            return;
+        case ConnectionState::HTTP2:
+        case ConnectionState::HTTP_STREAMING_BODY:
+            arm_timer(timeouts_.idle);
+            return;
+        default:
+            break;
+    }
+    if (is_processing_request_) {
+        // A handler is running (possibly a long computation, a slow database
+        // call or an SSE stream). Its duration is the application's business.
+        arm_timer(std::chrono::milliseconds(0));
+    } else {
+        arm_timer(timeouts_.keep_alive);
+    }
 }
 
 void Connection::start() {
-    reset_timer();
+    arm_timer(timeouts_.header);
     trigger_read();
 }
 
@@ -78,66 +111,81 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         if (state_ == ConnectionState::HTTP_STREAMING_BODY && body_stream_on_end_) {
             body_stream_on_end_();
         }
+        if (state_ == ConnectionState::WEBSOCKET && ws_connection_) {
+            ws_connection_->handle_transport_closed();
+        }
         std::cout << "on_read_complete closed with bytes_read=" << bytes_read << std::endl;
         manager_.remove_connection(socket_.fd());
         return;
     }
     
-    reset_timer();
+    bool buffer_was_empty;
+    {
+        std::lock_guard<std::mutex> lock(read_mutex_);
+        buffer_was_empty = read_buffer_.empty();
+    }
     
+    bool have_tls_output = false;
     if (ssl_) {
-        BIO_write(rbio_, async_read_buf_, static_cast<int>(bytes_read));
-        
-        if (!is_tls_handshake_complete_) {
-            int ret = SSL_do_handshake(ssl_);
-            if (ret == 1) {
-                is_tls_handshake_complete_ = true;
-                const unsigned char* alpn = nullptr;
-                unsigned int alpn_len = 0;
-                SSL_get0_alpn_selected(ssl_, &alpn, &alpn_len);
-                if (alpn_len == 2 && std::memcmp(alpn, "h2", 2) == 0) {
-                    state_ = ConnectionState::HTTP2;
-                    h2_session_ = std::make_shared<http::h2::Http2Session>(*this, router_, thread_pool_);
-                }
-            } else {
-                int err = SSL_get_error(ssl_, ret);
-                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-                    char wbuf[4096];
-                    while (true) {
-                        int wbytes = BIO_read(wbio_, wbuf, sizeof(wbuf));
-                        if (wbytes <= 0) break;
-                        tls_write_buffer_.insert(tls_write_buffer_.end(), wbuf, wbuf + wbytes);
-                    }
-                    if (!tls_write_buffer_.empty()) {
-                        trigger_write();
-                    }
-                    trigger_read(); // Continue reading handshake data
-                    return;
+        std::vector<char> plaintext;
+        bool handshake_failed = false;
+        bool handshake_pending = false;
+        bool negotiated_h2 = false;
+        {
+            std::lock_guard<std::mutex> tls_lock(tls_mutex_);
+            BIO_write(rbio_, async_read_buf_, static_cast<int>(bytes_read));
+            
+            if (!is_tls_handshake_complete_) {
+                int ret = SSL_do_handshake(ssl_);
+                if (ret == 1) {
+                    is_tls_handshake_complete_ = true;
+                    const unsigned char* alpn = nullptr;
+                    unsigned int alpn_len = 0;
+                    SSL_get0_alpn_selected(ssl_, &alpn, &alpn_len);
+                    negotiated_h2 = (alpn_len == 2 && std::memcmp(alpn, "h2", 2) == 0);
                 } else {
-                    manager_.remove_connection(socket_.fd());
-                    return;
-                }
-            }
-        }
-        
-        if (is_tls_handshake_complete_) {
-            while (true) {
-                char clear_buf[8192];
-                int ret = SSL_read(ssl_, clear_buf, sizeof(clear_buf));
-                if (ret > 0) {
-                    std::lock_guard<std::mutex> lock(read_mutex_);
-                    read_buffer_.insert(read_buffer_.end(), clear_buf, clear_buf + ret);
-                } else {
-                    break;
+                    int err = SSL_get_error(ssl_, ret);
+                    if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                        handshake_pending = true;
+                    } else {
+                        handshake_failed = true;
+                    }
                 }
             }
             
-            char wbuf[4096];
-            while (true) {
-                int wbytes = BIO_read(wbio_, wbuf, sizeof(wbuf));
-                if (wbytes <= 0) break;
-                tls_write_buffer_.insert(tls_write_buffer_.end(), wbuf, wbuf + wbytes);
+            if (is_tls_handshake_complete_) {
+                char clear_buf[8192];
+                while (true) {
+                    int ret = SSL_read(ssl_, clear_buf, sizeof(clear_buf));
+                    if (ret <= 0) break;
+                    plaintext.insert(plaintext.end(), clear_buf, clear_buf + ret);
+                }
             }
+
+            drain_tls_output_locked();
+            have_tls_output = !tls_write_buffer_.empty();
+        }
+
+        if (handshake_failed) {
+            manager_.remove_connection(socket_.fd());
+            return;
+        }
+        if (handshake_pending) {
+            if (have_tls_output) {
+                trigger_write();
+            }
+            trigger_read(); // Continue reading handshake data
+            return;
+        }
+        if (negotiated_h2) {
+            state_ = ConnectionState::HTTP2;
+            h2_session_ = std::make_shared<http::h2::Http2Session>(
+                std::weak_ptr<Connection>(shared_from_this()), proactor_, router_, thread_pool_,
+                client_ip_, max_body_size_);
+        }
+        if (!plaintext.empty()) {
+            std::lock_guard<std::mutex> lock(read_mutex_);
+            read_buffer_.insert(read_buffer_.end(), plaintext.begin(), plaintext.end());
         }
     } else {
         std::lock_guard<std::mutex> lock(read_mutex_);
@@ -146,10 +194,14 @@ void Connection::on_read_complete(ssize_t bytes_read) {
     
     // We defer checking max body size to check_request_state()
     
-    if (!tls_write_buffer_.empty()) {
+    if (have_tls_output) {
         trigger_write();
     }
     
+    if (state_ != ConnectionState::HTTP) {
+        arm_timer_for_current_phase();
+    }
+
     if (state_ == ConnectionState::RAW_STREAM) {
         std::lock_guard<std::mutex> lock(read_mutex_);
         if (!read_buffer_.empty() && raw_stream_on_data_) {
@@ -192,10 +244,28 @@ void Connection::on_read_complete(ssize_t bytes_read) {
     }
     
     RequestState state = check_request_state();
+
+    if (state == RequestState::INCOMPLETE && !is_processing_request_) {
+        bool headers_done;
+        {
+            std::lock_guard<std::mutex> lock(read_mutex_);
+            headers_done = std::string_view(read_buffer_.data(), read_buffer_.size()).find("\r\n\r\n") != std::string_view::npos;
+        }
+        if (headers_done) {
+            // Receiving the body: each read extends the deadline.
+            arm_timer(timeouts_.idle);
+        } else if (buffer_was_empty) {
+            // First bytes of a new request: the headers must all arrive within
+            // header_timeout. Later bytes do not extend it, so a client cannot
+            // hold the connection open by trickling header bytes.
+            arm_timer(timeouts_.header);
+        }
+    }
     
     if (state == RequestState::COMPLETE || state == RequestState::HEADERS_COMPLETE) {
         bool expected = false;
         if (is_processing_request_.compare_exchange_strong(expected, true)) {
+            arm_timer(state == RequestState::HEADERS_COMPLETE ? timeouts_.idle : std::chrono::milliseconds(0));
             if (state == RequestState::HEADERS_COMPLETE) {
                 state_ = ConnectionState::HTTP_STREAMING_BODY;
             }
@@ -213,13 +283,22 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
     } else if (state == RequestState::ERROR_HEADERS_TOO_LARGE) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
+    } else if (state == RequestState::ERROR_BAD_REQUEST) {
+        send_error(http::HttpStatus::BadRequest, "400 Bad Request");
     } else {
         trigger_read();
     }
 }
 
 void Connection::process_request() {
-    default_headers_.clear();
+    {
+        // Headers and interceptors registered by middleware belong to one
+        // request. Keeping them would re-apply them to every later response
+        // on this keep-alive connection (e.g. gzip applied twice).
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        default_headers_.clear();
+        interceptors_.clear();
+    }
     {
         std::lock_guard<std::mutex> lock(read_mutex_);
         current_request_buffer_ = std::string(read_buffer_.begin(), read_buffer_.end());
@@ -233,62 +312,102 @@ void Connection::process_request() {
         
         // WebSocket Upgrade Interception
         auto upgrade_it = req.headers.find("Upgrade");
-        if (upgrade_it != req.headers.end() && upgrade_it->second == "websocket") {
-            if (router_.has_ws_route(req.uri)) {
-                auto key_it = req.headers.find("Sec-WebSocket-Key");
-                if (key_it != req.headers.end()) {
-                    std::string accept_key = http::websocket::Handshake::generate_accept_key(std::string(key_it->second));
-                    
-                    http::HttpResponse res;
-                    res.status_code = http::HttpStatus::SwitchingProtocols;
-                    res.headers["Upgrade"] = "websocket";
-                    res.headers["Connection"] = "Upgrade";
-                    res.headers["Sec-WebSocket-Accept"] = accept_key;
-                    
-                    bool use_deflate = false;
-                    auto ext_it = req.headers.find("Sec-WebSocket-Extensions");
-                    if (ext_it != req.headers.end() && ext_it->second.find("permessage-deflate") != std::string::npos) {
-                        use_deflate = true;
-                        res.headers["Sec-WebSocket-Extensions"] = "permessage-deflate; client_no_context_takeover; server_no_context_takeover";
-                    }
-                    
-                    std::string handshake_str = res.serialize();
-                    
-                    auto ws_conn = std::make_unique<http::websocket::WebSocketConnection>(*this, use_deflate);
-                    auto handler = router_.get_ws_route(req.uri);
-                    
-                    // Erase the HTTP request from the buffer before switching states!
-                    size_t headers_end = raw_request.find("\r\n\r\n");
-                    size_t consumed_bytes = headers_end + 4;
-                    {
-                        std::lock_guard<std::mutex> lock(read_mutex_);
-                        if (consumed_bytes <= read_buffer_.size()) {
-                            read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<std::ptrdiff_t>(consumed_bytes));
-                        } else {
-                            read_buffer_.clear();
-                        }
-                    }
-                    
-                    // Queue the handshake immediately
-                    write_raw(std::vector<char>(handshake_str.begin(), handshake_str.end()));
-                    
-                    // Modify the state!
-                    upgrade_to_websocket(std::move(ws_conn));
-                    
-                    // Call the user callback (this allows them to set up on_message handlers and send initial messages)
-                    handler(*ws_connection_);
-                    
-                    // If the client pipelined a WebSocket frame immediately, process it!
-                    {
-                        std::lock_guard<std::mutex> lock(read_mutex_);
-                        if (!read_buffer_.empty()) {
-                            ws_connection_->process_raw_data(read_buffer_);
-                        }
-                    }
-                    
-                    return; // Bypass standard HTTP routing
+        if (upgrade_it != req.headers.end() &&
+            http::connection_option_present(upgrade_it->second, "websocket") &&
+            router_.has_ws_route(req.uri)) {
+            // Consume the handshake request; anything after it is WebSocket data.
+            {
+                size_t consumed_bytes = raw_request.find("\r\n\r\n") + 4;
+                std::lock_guard<std::mutex> lock(read_mutex_);
+                if (consumed_bytes <= read_buffer_.size()) {
+                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<std::ptrdiff_t>(consumed_bytes));
+                } else {
+                    read_buffer_.clear();
                 }
             }
+
+            auto writer = std::dynamic_pointer_cast<http::ResponseWriter>(shared_from_this());
+            auto reject = [&](const std::string& message) {
+                http::HttpResponse err;
+                err.status_code = http::HttpStatus::BadRequest;
+                err.headers["Sec-WebSocket-Version"] = "13";
+                err.set_body(message);
+                should_close_ = true;
+                send(std::move(err));
+            };
+
+            // RFC 6455 section 4.2.1 opening handshake requirements.
+            auto conn_it = req.headers.find("Connection");
+            auto key_it = req.headers.find("Sec-WebSocket-Key");
+            auto version_it = req.headers.find("Sec-WebSocket-Version");
+            if (req.method != http::HttpMethod::GET ||
+                conn_it == req.headers.end() || !http::connection_option_present(conn_it->second, "upgrade") ||
+                key_it == req.headers.end() || !http::websocket::Handshake::is_valid_client_key(key_it->second)) {
+                reject("400 Bad Request: invalid WebSocket handshake");
+                return;
+            }
+            if (version_it == req.headers.end() || version_it->second != "13") {
+                reject("400 Bad Request: unsupported WebSocket version");
+                return;
+            }
+
+            // Authentication, rate limiting and origin checks apply to
+            // WebSocket routes too. A middleware that stops the request has
+            // already sent its response, so the upgrade is simply abandoned.
+            should_close_ = true;
+            if (!router_.run_ws_middlewares(req.uri, req, writer)) {
+                return;
+            }
+            should_close_ = false;
+
+            std::string accept_key = http::websocket::Handshake::generate_accept_key(std::string(key_it->second));
+            
+            http::HttpResponse res;
+            res.status_code = http::HttpStatus::SwitchingProtocols;
+            {
+                std::lock_guard<std::mutex> lock(write_mutex_);
+                for (const auto& [k, v] : default_headers_) res.headers[k] = v;
+            }
+            res.headers["Upgrade"] = "websocket";
+            res.headers["Connection"] = "Upgrade";
+            res.headers["Sec-WebSocket-Accept"] = accept_key;
+            
+            bool use_deflate = false;
+            auto ext_it = req.headers.find("Sec-WebSocket-Extensions");
+            if (ext_it != req.headers.end() && ext_it->second.find("permessage-deflate") != std::string::npos) {
+                use_deflate = true;
+                res.headers["Sec-WebSocket-Extensions"] = "permessage-deflate; client_no_context_takeover; server_no_context_takeover";
+            }
+            
+            std::string handshake_str = res.serialize();
+            
+            auto ws_conn = std::make_unique<http::websocket::WebSocketConnection>(*this, use_deflate);
+            auto handler = router_.get_ws_route(req.uri);
+            
+            // Queue the handshake immediately
+            write_raw(std::vector<char>(handshake_str.begin(), handshake_str.end()));
+            
+            // Modify the state!
+            upgrade_to_websocket(std::move(ws_conn));
+            arm_timer(timeouts_.websocket_idle);
+            
+            // Call the user callback (this allows them to set up on_message handlers and send initial messages)
+            handler(*ws_connection_);
+            
+            // If the client pipelined a WebSocket frame immediately, process it!
+            {
+                std::lock_guard<std::mutex> lock(read_mutex_);
+                if (!read_buffer_.empty()) {
+                    ws_connection_->process_raw_data(read_buffer_);
+                }
+            }
+
+            // The HTTP request path only re-arms the read once a response
+            // has been sent, which never happens for an upgrade. Without
+            // this, frames the client sends after the handshake are never read.
+            trigger_read();
+            
+            return; // Bypass standard HTTP routing
         }
 
         // Decide whether the connection persists after this response.
@@ -316,18 +435,26 @@ void Connection::process_request() {
             should_close_ = true;
         }
         
-        // Erase request from read buffer
+        // Erase request from read buffer. The parser has already rejected
+        // malformed framing, so Content-Length here is a validated number.
         size_t headers_end = raw_request.find("\r\n\r\n");
         size_t consumed_bytes = headers_end + 4;
         
         if (state_ != ConnectionState::HTTP_STREAMING_BODY) {
-            auto cl_it = req.headers.find("Content-Length");
-            if (cl_it != req.headers.end()) {
-                consumed_bytes += std::stoull(std::string(cl_it->second));
-            } else if (req.headers.find("Transfer-Encoding") != req.headers.end()) {
-                // If chunked and not streaming, consume everything
-                consumed_bytes = read_buffer_.size();
+            size_t request_line_end = raw_request.find("\r\n");
+            http::MessageFraming framing = http::parse_framing(
+                raw_request.substr(request_line_end + 2, headers_end + 2 - (request_line_end + 2)));
+            if (framing.chunked) {
+                size_t encoded_size = 0;
+                http::decode_chunked(raw_request.substr(headers_end + 4), request_body_storage_,
+                                     encoded_size, max_body_size_);
+                req.body = request_body_storage_;
+                consumed_bytes += encoded_size;
+            } else if (framing.has_content_length) {
+                consumed_bytes += framing.content_length;
             }
+        } else {
+            req.body = {};
         }
         
         {
@@ -452,8 +579,11 @@ void Connection::send(http::HttpResponse&& response) {
         send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
     } else if (state == RequestState::ERROR_HEADERS_TOO_LARGE) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
+    } else if (state == RequestState::ERROR_BAD_REQUEST) {
+        send_error(http::HttpStatus::BadRequest, "400 Bad Request");
     } else {
         is_processing_request_ = false;
+        arm_timer_for_current_phase();
         // Double check state after releasing the lock, just in case data was appended concurrently
         if (check_request_state() == RequestState::COMPLETE) {
             bool expected = false;
@@ -498,8 +628,11 @@ void Connection::end() {
         send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
     } else if (state == RequestState::ERROR_HEADERS_TOO_LARGE) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
+    } else if (state == RequestState::ERROR_BAD_REQUEST) {
+        send_error(http::HttpStatus::BadRequest, "400 Bad Request");
     } else {
         is_processing_request_ = false;
+        arm_timer_for_current_phase();
         if (check_request_state() == RequestState::COMPLETE) {
             bool expected = false;
             if (is_processing_request_.compare_exchange_strong(expected, true)) {
@@ -557,36 +690,37 @@ void Connection::trigger_write() {
                 write_buffer_.clear();
             }
         }
-        if (!chunk_to_encrypt.empty()) {
-            SSL_write(ssl_, chunk_to_encrypt.data(), static_cast<int>(chunk_to_encrypt.size()));
-        }
-        
-        char buf[4096];
-        while (true) {
-            int bytes = BIO_read(wbio_, buf, sizeof(buf));
-            if (bytes <= 0) break;
-            tls_write_buffer_.insert(tls_write_buffer_.end(), buf, buf + bytes);
-        }
-        
-        if (file_fd_ != -1 && file_offset_ < file_size_ && tls_write_buffer_.empty()) {
-            char file_buf[16384];
-            size_t to_read = static_cast<size_t>(std::min(static_cast<off_t>(sizeof(file_buf)), file_size_ - file_offset_));
-            ssize_t bytes_read = pread(file_fd_, file_buf, to_read, file_offset_);
-            
-            if (bytes_read > 0) {
-                SSL_write(ssl_, file_buf, static_cast<int>(bytes_read));
-                file_offset_ += bytes_read;
-                
-                while (true) {
-                    int wbytes = BIO_read(wbio_, buf, sizeof(buf));
-                    if (wbytes <= 0) break;
-                    tls_write_buffer_.insert(tls_write_buffer_.end(), buf, buf + wbytes);
-                }
-            } else {
-                is_writing_ = false;
-                manager_.remove_connection(socket_.fd());
-                return;
+
+        bool file_read_failed = false;
+        {
+            std::lock_guard<std::mutex> tls_lock(tls_mutex_);
+            if (!chunk_to_encrypt.empty()) {
+                SSL_write(ssl_, chunk_to_encrypt.data(), static_cast<int>(chunk_to_encrypt.size()));
             }
+            drain_tls_output_locked();
+            
+            if (file_fd_ != -1 && file_offset_ < file_size_ && tls_write_buffer_.empty() && tls_inflight_.empty()) {
+                char file_buf[16384];
+                size_t to_read = static_cast<size_t>(std::min(static_cast<off_t>(sizeof(file_buf)), file_size_ - file_offset_));
+                ssize_t bytes_read = pread(file_fd_, file_buf, to_read, file_offset_);
+                if (bytes_read > 0) {
+                    SSL_write(ssl_, file_buf, static_cast<int>(bytes_read));
+                    file_offset_ += bytes_read;
+                    drain_tls_output_locked();
+                } else {
+                    file_read_failed = true;
+                }
+            }
+
+            if (tls_inflight_.empty() && !tls_write_buffer_.empty()) {
+                tls_inflight_.swap(tls_write_buffer_);
+            }
+        }
+
+        if (file_read_failed) {
+            is_writing_ = false;
+            manager_.remove_connection(socket_.fd());
+            return;
         }
         
         if (file_fd_ != -1 && file_offset_ >= file_size_) {
@@ -594,9 +728,11 @@ void Connection::trigger_write() {
             file_fd_ = -1;
         }
         
-        if (!tls_write_buffer_.empty()) {
+        // tls_inflight_ belongs to this writer until on_write_complete, so it
+        // is safe to hand its storage to the proactor outside the lock.
+        if (!tls_inflight_.empty()) {
             auto self = shared_from_this();
-            proactor_.async_write(socket_.fd(), tls_write_buffer_.data(), tls_write_buffer_.size(), [self](ssize_t written) {
+            proactor_.async_write(socket_.fd(), tls_inflight_.data(), tls_inflight_.size(), [self](ssize_t written) {
                 self->on_write_complete(written);
             });
             return; // Will clear flag in callback
@@ -636,7 +772,11 @@ void Connection::trigger_write() {
     
     if (should_close_) {
         manager_.remove_connection(socket_.fd());
+        return;
     }
+
+    // Everything queued has been written; go back to waiting on the peer.
+    arm_timer_for_current_phase();
 }
 
 void Connection::on_write_complete(ssize_t bytes_written) {
@@ -645,10 +785,12 @@ void Connection::on_write_complete(ssize_t bytes_written) {
         return;
     }
     
-    reset_timer();
+    // A write made progress; the peer is still reading.
+    arm_timer(timeouts_.idle);
     
     if (ssl_) {
-        tls_write_buffer_.erase(tls_write_buffer_.begin(), tls_write_buffer_.begin() + bytes_written);
+        size_t n = std::min(static_cast<size_t>(bytes_written), tls_inflight_.size());
+        tls_inflight_.erase(tls_inflight_.begin(), tls_inflight_.begin() + static_cast<std::ptrdiff_t>(n));
     } else {
         std::lock_guard<std::mutex> lock(write_mutex_);
         if (static_cast<size_t>(bytes_written) <= active_write_buffer_.size()) {
@@ -668,11 +810,20 @@ void Connection::on_sendfile_complete(ssize_t bytes_written) {
         return;
     }
     
-    reset_timer();
+    arm_timer(timeouts_.idle);
     file_offset_ += bytes_written;
     
     is_writing_ = false;
     trigger_write();
+}
+
+void Connection::drain_tls_output_locked() {
+    char buf[4096];
+    while (true) {
+        int bytes = BIO_read(wbio_, buf, sizeof(buf));
+        if (bytes <= 0) break;
+        tls_write_buffer_.insert(tls_write_buffer_.end(), buf, buf + bytes);
+    }
 }
 
 void Connection::write_raw(const std::vector<char>& data) {
@@ -803,115 +954,70 @@ RequestState Connection::check_request_state() {
     if (first_line_end != std::string_view::npos && first_line_end > 4096) {
         return RequestState::ERROR_HEADERS_TOO_LARGE;
     }
+    if (headers_end > 8192) {
+        return RequestState::ERROR_HEADERS_TOO_LARGE;
+    }
+
+    // Framing is decided once, strictly, from the parsed header lines. Both
+    // this check and process_request() use the same rules, so they can never
+    // disagree about where a request ends.
+    http::MessageFraming framing = http::parse_framing(
+        buf_view.substr(first_line_end + 2, headers_end + 2 - (first_line_end + 2)));
+    if (!framing.valid) {
+        return RequestState::ERROR_BAD_REQUEST;
+    }
     
     // -------------------------------------------------------------
     // Check if this route is a STREAM route. If so, return HEADERS_COMPLETE
     // -------------------------------------------------------------
-    if (first_line_end != std::string_view::npos) {
-        std::string_view request_line = buf_view.substr(0, first_line_end);
-        size_t space1 = request_line.find(' ');
-        size_t space2 = request_line.find(' ', space1 + 1);
-        if (space1 != std::string_view::npos && space2 != std::string_view::npos && space1 != space2) {
-            http::HttpMethod method = http::HttpParser::parse_method(request_line.substr(0, space1));
-            std::string_view full_uri = request_line.substr(space1 + 1, space2 - space1 - 1);
-            std::string uri;
-            size_t q_mark = full_uri.find('?');
-            if (q_mark != std::string_view::npos) {
-                uri = std::string(full_uri.substr(0, q_mark));
+    std::string_view request_line = buf_view.substr(0, first_line_end);
+    size_t space1 = request_line.find(' ');
+    size_t space2 = request_line.find(' ', space1 + 1);
+    if (space1 != std::string_view::npos && space2 != std::string_view::npos && space1 != space2) {
+        http::HttpMethod method = http::HttpParser::parse_method(request_line.substr(0, space1));
+        std::string_view full_uri = request_line.substr(space1 + 1, space2 - space1 - 1);
+        size_t q_mark = full_uri.find('?');
+        std::string uri(q_mark != std::string_view::npos ? full_uri.substr(0, q_mark) : full_uri);
+        
+        if (router_.is_stream_route(method, uri)) {
+            if (framing.chunked) {
+                is_chunked_ = true;
+                is_chunk_header_mode_ = true;
             } else {
-                uri = std::string(full_uri);
+                is_chunked_ = false;
+                // Without Content-Length the stream runs until the peer closes,
+                // matching the previous streaming-route behaviour.
+                content_length_remaining_ = framing.has_content_length
+                    ? framing.content_length
+                    : static_cast<size_t>(-1);
             }
-            
-            if (router_.is_stream_route(method, uri)) {
-                std::string_view raw_request = buf_view.substr(0, headers_end + 4);
-                
-                auto ci_find = [](std::string_view haystack, std::string_view needle) -> size_t {
-                    auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(), [](char ch1, char ch2) {
-                        return std::tolower(static_cast<unsigned char>(ch1)) == std::tolower(static_cast<unsigned char>(ch2));
-                    });
-                    if (it != haystack.end()) {
-                        return std::distance(haystack.begin(), it);
-                    }
-                    return std::string_view::npos;
-                };
-                
-                if (ci_find(raw_request, "transfer-encoding") != std::string_view::npos) {
-                    is_chunked_ = true;
-                    is_chunk_header_mode_ = true;
-                } else {
-                    is_chunked_ = false;
-                    size_t cl_pos = ci_find(raw_request, "content-length:");
-                    if (cl_pos != std::string_view::npos) {
-                        size_t end_of_line = raw_request.find("\r\n", cl_pos);
-                        std::string_view cl_str = raw_request.substr(cl_pos + 15, end_of_line - cl_pos - 15);
-                        
-                        // Trim spaces
-                        while (!cl_str.empty() && cl_str.front() == ' ') cl_str.remove_prefix(1);
-                        
-                        if (!cl_str.empty()) {
-                            try {
-                                content_length_remaining_ = std::stoull(std::string(cl_str));
-                            } catch (...) {
-                                content_length_remaining_ = static_cast<size_t>(-1);
-                            }
-                        } else {
-                            content_length_remaining_ = static_cast<size_t>(-1);
-                        }
-                    } else {
-                        content_length_remaining_ = static_cast<size_t>(-1);
-                    }
-                }
-                
-                return RequestState::HEADERS_COMPLETE;
-            }
+            return RequestState::HEADERS_COMPLETE;
         }
     }
     // -------------------------------------------------------------
-    
-    auto ci_find = [](std::string_view haystack, std::string_view needle) -> size_t {
-        auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(), [](char ch1, char ch2) {
-            return std::tolower(static_cast<unsigned char>(ch1)) == std::tolower(static_cast<unsigned char>(ch2));
-        });
-        return it != haystack.end() ? static_cast<size_t>(std::distance(haystack.begin(), it)) : std::string_view::npos;
-    };
-    
-    size_t content_length_pos = ci_find(buf_view, "content-length:");
-    if (content_length_pos != std::string_view::npos && content_length_pos < headers_end) {
-        size_t value_start = content_length_pos + 15;
-        while (value_start < headers_end && (buf_view[value_start] == ' ' || buf_view[value_start] == '	')) {
-            value_start++;
+
+    std::string_view body = buf_view.substr(headers_end + 4);
+
+    if (framing.chunked) {
+        std::string decoded;
+        size_t consumed = 0;
+        switch (http::decode_chunked(body, decoded, consumed, max_body_size_)) {
+            case http::ChunkedStatus::Complete: return RequestState::COMPLETE;
+            case http::ChunkedStatus::Incomplete: return RequestState::INCOMPLETE;
+            case http::ChunkedStatus::TooLarge: return RequestState::ERROR_PAYLOAD_TOO_LARGE;
+            case http::ChunkedStatus::Invalid: return RequestState::ERROR_BAD_REQUEST;
         }
-        
-        size_t value_end = buf_view.find("\r\n", value_start);
-        std::string_view length_str = buf_view.substr(value_start, value_end - value_start);
-        
-        try {
-            size_t content_length = std::stoull(std::string(length_str));
-            if (content_length > max_body_size_) {
-                return RequestState::ERROR_PAYLOAD_TOO_LARGE;
-            }
-            size_t total_expected = headers_end + 4 + content_length;
-            if (read_buffer_.size() >= total_expected) {
-                return RequestState::COMPLETE;
-            }
-        } catch (...) {
-            return RequestState::INCOMPLETE;
-        }
-    } else {
-        // No Content-Length. If it's chunked, we should parse chunks, but for now we just check total buffer size
-        if (read_buffer_.size() - (headers_end + 4) > max_body_size_) {
+    }
+
+    if (framing.has_content_length) {
+        if (framing.content_length > max_body_size_) {
             return RequestState::ERROR_PAYLOAD_TOO_LARGE;
         }
+        return body.size() >= framing.content_length ? RequestState::COMPLETE : RequestState::INCOMPLETE;
     }
-    
-    if (headers_end != std::string_view::npos && content_length_pos == std::string_view::npos) {
-        // If no Content-Length and not Chunked, the request is complete (GET, etc.)
-        // But if it is chunked, we might need a better check. For now, assuming complete if no Content-Length
-        // Wait, HTTP standard says if no Content-Length and no Transfer-Encoding, body length is 0.
-        return RequestState::COMPLETE;
-    }
-    
-    return RequestState::INCOMPLETE; 
+
+    // No Content-Length and no Transfer-Encoding: the body is empty (RFC 9112 section 6.3).
+    return RequestState::COMPLETE;
 }
 
 } // namespace server
