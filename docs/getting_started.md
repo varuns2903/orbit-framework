@@ -7,7 +7,7 @@ Orbit is a high-performance C++20 HTTP/3 web framework built on top of asynchron
 - **C++20 Compiler**: GCC 11+ or Clang 14+
 - **Linux Kernel 5.6+**: Required for `io_uring` support (will fallback to `epoll` on older kernels).
 - **CMake 3.15+**
-- **Libraries**: OpenSSL, liburing, hiredis, libpq
+- **Libraries**: OpenSSL, liburing, libpq
 
 ## Installation & Build
 

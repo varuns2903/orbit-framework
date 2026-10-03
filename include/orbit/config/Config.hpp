@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <cstdint>
+#include <chrono>
 
 namespace config {
 
@@ -25,6 +26,12 @@ struct ServerConfig {
     std::string ssl_key{""};
     EventEngine engine{EventEngine::Epoll}; // Default to our new fast backend!
     HttpVersion http_version{HttpVersion::Http1_1}; // Default to HTTP/1.1
+
+    // Connection timeouts. A value of zero disables that timeout.
+    std::chrono::seconds header_timeout{10};         // From the first byte of a request until its headers are complete; not extended by further bytes
+    std::chrono::seconds keep_alive_timeout{10};     // Idle time allowed between requests on a persistent connection
+    std::chrono::seconds idle_timeout{30};           // Longest pause while receiving a body or writing a response
+    std::chrono::seconds websocket_idle_timeout{0};  // Idle time on WebSocket/raw streams; 0 = never (use pings to detect dead peers)
     
     static ServerConfig parse(int argc, char* argv[]);
 };

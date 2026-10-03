@@ -21,6 +21,26 @@ app.use(logger);
 app.use(middleware::Cors::allow_all());
 ```
 
+## Sessions
+
+`middleware::session()` gives every client a session identifier stored in
+Redis and exposes it as `req.session_id`:
+
+```cpp
+#include <orbit/middleware/SessionManager.hpp>
+
+middleware::SessionOptions opts;
+opts.secure = true;          // send the cookie only over HTTPS
+opts.same_site = "Lax";
+opts.ttl_seconds = 3600;     // idle lifetime, refreshed on every request
+app.use(middleware::session("127.0.0.1", 6379, opts));
+```
+
+Identifiers are 256-bit values from the system CSPRNG (`utils::secure_random_hex`).
+A `session_id` cookie is accepted only if Redis holds that identifier, so
+clients cannot pick their own session (session fixation). Requires
+`ORBIT_ENABLE_REDIS=ON`.
+
 ## Route-Specific Middleware
 
 You can inject middleware into specific routes using an initializer list `vector<Middleware>`:

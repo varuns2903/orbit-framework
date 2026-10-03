@@ -41,13 +41,6 @@ if(ORBIT_ENABLE_MONGODB)
     endif()
 endif()
 
-if(ORBIT_ENABLE_REDIS)
-    find_package(hiredis CONFIG QUIET)
-    if(NOT hiredis_FOUND)
-        pkg_search_module(HIREDIS REQUIRED hiredis)
-    endif()
-endif()
-
 # Imported targets referenced by the exported link interface must be recreated
 # here, or the consumer's link line refers to targets that do not exist.
 pkg_check_modules(NGHTTP2 REQUIRED IMPORTED_TARGET libnghttp2)
