@@ -416,7 +416,7 @@ void Http2Session::submit_response(int32_t stream_id, http::HttpResponse& respon
         ctx->file_fd = response.file_fd;
         response.file_fd = -1;
         ctx->file_size = response.file_size;
-        ctx->file_offset = 0;
+        ctx->file_offset = response.file_offset;
         
         nghttp2_submit_response(session_, stream_id, nvs.data(), nvs.size(), &provider);
     } else {

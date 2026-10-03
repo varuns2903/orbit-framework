@@ -181,6 +181,9 @@ private:
     // Set (under write_mutex_) together with the final response's bytes;
     // the connection closes when everything queued has been written.
     bool close_after_write_{false};
+    // Set (under write_mutex_) while a file response is being sent; the
+    // next pipelined request waits for it.
+    bool resume_after_write_{false};
     ConnectionState state_{ConnectionState::HTTP};
     uint64_t current_timer_id_{0};
     std::mutex timer_mutex_;
@@ -206,8 +209,11 @@ private:
     std::vector<char> tls_inflight_;
     void drain_tls_output_locked();
     // True if anything is queued that trigger_write() would send. Also
-    // reports, consistently with the queue, whether a close was requested.
-    bool has_pending_output(bool& close_requested);
+    // reports, consistently with the queue, whether a close was requested
+    // and (when nothing is pending) whether a finished file response is
+    // waiting to resume the request pipeline.
+    bool has_pending_output(bool& close_requested, bool& resume);
+    void continue_after_response();
     
     std::atomic<bool> is_processing_request_{false};
     

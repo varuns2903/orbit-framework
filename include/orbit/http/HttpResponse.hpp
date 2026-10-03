@@ -94,9 +94,10 @@ public:
     std::unordered_map<std::string, std::string, utils::CaseInsensitiveHash, utils::CaseInsensitiveEqual> headers;
     std::string body;
     
-    // Zero-copy file descriptors
+    // Zero-copy file descriptors. Bytes [file_offset, file_size) are sent.
     int file_fd{-1};
     off_t file_size{0};
+    off_t file_offset{0};
 
     HttpResponse() = default;
 
@@ -192,6 +193,13 @@ public:
      * @param content_type The MIME type of the file.
      */
     void send_file(const std::string& path, const std::string& content_type);
+
+    /**
+     * @brief Limits a send_file() response to bytes [start, end) of the file
+     *        (clamped to its size) and updates Content-Length. The caller sets
+     *        the 206 status and Content-Range.
+     */
+    void set_file_range(off_t start, off_t end);
 
     /**
      * @brief Serializes the entire response (headers and body) to a string.
