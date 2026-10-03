@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <orbit/server/App.hpp>
+#include <orbit/network/PlatformSocket.hpp>
 
 #include <curl/curl.h>
 #include <openssl/bio.h>
@@ -47,23 +48,47 @@ size_t collect(void* data, size_t size, size_t n, void* out) {
     return size * n;
 }
 
+// curl's verbose trace, kept so a failed request can show how far it got
+// (connect, TLS handshake, ALPN, request sent, response).
+int trace(CURL*, curl_infotype type, char* data, size_t size, void* out) {
+    if (type == CURLINFO_TEXT || type == CURLINFO_HEADER_IN || type == CURLINFO_HEADER_OUT) {
+        auto* log = static_cast<std::string*>(out);
+        const char* tag = type == CURLINFO_TEXT ? "* " : type == CURLINFO_HEADER_IN ? "< " : "> ";
+        log->append(tag);
+        log->append(data, size);
+    }
+    return 0;
+}
+
 struct Result {
     CURLcode code;
     long status;
     long version;
     std::string headers;
     std::string body;
+    std::string trace;
 };
 
-Result h2(const std::string& path, const std::string& cookie = "", const std::string& post = "") {
+// Printed by failing ASSERT/EXPECTs on a request: the error plus curl's trace.
+std::string describe(const Result& r) {
+    return std::string(curl_easy_strerror(r.code)) + "\n--- curl trace ---\n" + r.trace;
+}
+
+Result h2(const std::string& path, const std::string& cookie = "", const std::string& post = "",
+          long timeout_ms = 5000) {
     Result r{};
     CURL* c = curl_easy_init();
-    std::string url = "https://localhost:" + std::to_string(kPort) + path;
+    // An IPv4 literal, not "localhost": the server listens on 0.0.0.0, and on
+    // Windows "localhost" tries ::1 first, where a refused connect is retried.
+    std::string url = "https://127.0.0.1:" + std::to_string(kPort) + path;
     curl_easy_setopt(c, CURLOPT_URL, url.c_str());
     curl_easy_setopt(c, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 5000L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, timeout_ms);
+    curl_easy_setopt(c, CURLOPT_VERBOSE, 1L);
+    curl_easy_setopt(c, CURLOPT_DEBUGFUNCTION, trace);
+    curl_easy_setopt(c, CURLOPT_DEBUGDATA, &r.trace);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, collect);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &r.body);
     curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, collect);
@@ -78,6 +103,18 @@ Result h2(const std::string& path, const std::string& cookie = "", const std::st
     curl_easy_getinfo(c, CURLINFO_HTTP_VERSION, &r.version);
     curl_easy_cleanup(c);
     return r;
+}
+
+// Wakes the event loop with a plain TCP connect. A TLS request would wait for
+// a response that a stopping server never sends.
+void poke_server() {
+    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(kPort);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    network::close_socket(fd);
 }
 
 } // namespace
@@ -139,7 +176,15 @@ protected:
         });
 
         server_thread = std::thread([] { app->listen(); });
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        // Wait until the server answers instead of sleeping a fixed time:
+        // a slow runner may not be listening (or accepting) yet.
+        Result probe{};
+        for (int i = 0; i < 50; ++i) {
+            probe = h2("/whoami", "", "", 1000);
+            if (probe.code == CURLE_OK && probe.status == 200) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        FAIL() << "server never answered: " << describe(probe);
     }
 
     void SetUp() override {
@@ -152,7 +197,7 @@ protected:
 
     static void TearDownTestSuite() {
         app->stop();
-        h2("/whoami");
+        poke_server();
         if (server_thread.joinable()) server_thread.join();
         delete app;
         std::filesystem::remove(g_cert);
@@ -165,7 +210,7 @@ std::thread Http2ParityTest::server_thread;
 
 TEST_F(Http2ParityTest, QueryCookiesAndInterceptors) {
     auto r = h2("/whoami?q=hello&x=1", "session=abc; theme=dark");
-    ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
+    ASSERT_EQ(r.code, CURLE_OK) << describe(r);
     EXPECT_EQ(r.version, static_cast<long>(CURL_HTTP_VERSION_2_0));
     EXPECT_EQ(r.status, 200); // used to 404: the query string was part of the route key
     EXPECT_EQ(r.body, "uri=/whoami q=hello session=abc theme=dark");
@@ -174,32 +219,32 @@ TEST_F(Http2ParityTest, QueryCookiesAndInterceptors) {
 
 TEST_F(Http2ParityTest, WriteChunkStreamsTheBody) {
     auto r = h2("/stream");
-    ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
+    ASSERT_EQ(r.code, CURLE_OK) << describe(r);
     EXPECT_EQ(r.body, "one,two,three");
     EXPECT_NE(r.headers.find("x-intercepted: yes"), std::string::npos) << r.headers;
 }
 
 TEST_F(Http2ParityTest, ServerSentEvents) {
     auto r = h2("/sse");
-    ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
+    ASSERT_EQ(r.code, CURLE_OK) << describe(r);
     EXPECT_EQ(r.body, "event: greet\nid: 1\ndata: hello\ndata: world\n\n");
 }
 
 TEST_F(Http2ParityTest, ReadBodyStreamDeliversTheBody) {
     auto r = h2("/upload", "", std::string(3000, 'u'));
-    ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
+    ASSERT_EQ(r.code, CURLE_OK) << describe(r);
     EXPECT_EQ(r.body, "got 3000");
 }
 
 TEST_F(Http2ParityTest, PathAndQueryArePercentDecoded) {
     auto r = h2("/who%61mi?q=hello%20world%26more");
-    ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
+    ASSERT_EQ(r.code, CURLE_OK) << describe(r);
     EXPECT_EQ(r.status, 200);
     EXPECT_EQ(r.body.rfind("uri=/whoami q=hello world&more", 0), 0u) << r.body;
 }
 
 TEST_F(Http2ParityTest, EncodedSlashInPathIsRejected) {
     auto r = h2("/a%2F..%2Fwhoami");
-    ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
+    ASSERT_EQ(r.code, CURLE_OK) << describe(r);
     EXPECT_EQ(r.status, 400);
 }
