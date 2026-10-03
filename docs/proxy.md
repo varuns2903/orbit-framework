@@ -16,6 +16,29 @@ proxy_opts.strip_prefix = true; // strips "/api" before forwarding
 app.use("/api", middleware::Proxy::create("http://localhost:8081", proxy_opts));
 ```
 
+### Proxy Options
+
+| Field | Default | Meaning |
+|---|---|---|
+| `target_host`, `target_port` | — | Upstream address |
+| `strip_prefix` | `""` | Removed from the front of the path before forwarding; the query string is kept |
+| `use_tls` | `false` | Connect over TLS (also implied by port 443) |
+| `verify_tls` | `true` | Verify the upstream certificate chain **and** that it matches `target_host` |
+| `ca_file` | `""` | PEM bundle of CAs to trust instead of the system store (e.g. an internal CA) |
+| `trust_forwarded_headers` | `false` | Keep and extend client-supplied `X-Forwarded-For` / `X-Real-IP` / `X-Forwarded-Host` |
+
+Hop-by-hop headers (`Connection`, `Keep-Alive`, `Transfer-Encoding`, `TE`,
+`Upgrade`, `Proxy-*`, and any header named in `Connection`) are not forwarded;
+`Host` and `Content-Length` are set by the proxy.
+
+By default the proxy assumes it faces clients directly, so any
+`X-Forwarded-For` a client sends is discarded and replaced with the client's
+address. Set `trust_forwarded_headers` only when every request reaches Orbit
+through another proxy you control; the client address is then appended.
+
+`LoadBalancerOptions` has the same `verify_tls`, `ca_file` and
+`trust_forwarded_headers` fields, and `TargetNode` has `use_tls`.
+
 ## Load Balancing
 
 For distributing traffic across multiple backend servers, use the `LoadBalancer` middleware. It supports connection pooling and TLS multiplexing out of the box.

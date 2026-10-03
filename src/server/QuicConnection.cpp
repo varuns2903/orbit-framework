@@ -1,4 +1,5 @@
 #include <orbit/server/QuicConnection.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <orbit/server/QuicConnectionManager.hpp>
 #include <orbit/server/QuicHttp3Session.hpp>
 #include <iostream>
@@ -44,7 +45,10 @@ QuicConnection::QuicConnection(QuicConnectionManager& manager, const ngtcp2_cid&
     callbacks.delete_crypto_cipher_ctx = ngtcp2_crypto_delete_crypto_cipher_ctx_cb;
     ngtcp2_settings settings;
     ngtcp2_settings_default(&settings);
-    settings.log_printf = my_ngtcp2_log_printf;
+    // ngtcp2 traces every packet; only wire it up when debugging.
+    if (utils::Logger::current_level <= utils::LogLevel::DEBUG) {
+        settings.log_printf = my_ngtcp2_log_printf;
+    }
     settings.initial_ts = get_timestamp();
 
     ngtcp2_transport_params params;
@@ -118,7 +122,7 @@ bool QuicConnection::init_ssl(SSL_CTX* ssl_ctx) {
 }
 
 void QuicConnection::process_packet(const uint8_t* data, size_t datalen, const sockaddr_in& remote_addr) {
-    std::cout << "QUIC: process_packet datalen=" << datalen << "\n";
+    LOG_DEBUG("QUIC: process_packet datalen=" << datalen);
     (void)remote_addr;
     ngtcp2_path path = {
         { (sockaddr*)&local_addr_, sizeof(local_addr_) },
@@ -129,7 +133,7 @@ void QuicConnection::process_packet(const uint8_t* data, size_t datalen, const s
     ngtcp2_pkt_info pi{};
     int rv = ngtcp2_conn_read_pkt(conn_, &path, &pi, data, datalen, get_timestamp()); 
     if (rv != 0) {
-        std::cerr << "ngtcp2_conn_read_pkt failed: " << ngtcp2_strerror(rv) << "\n";
+        LOG_DEBUG("ngtcp2_conn_read_pkt failed: " << ngtcp2_strerror(rv));
     }
     send_pending_data();
 }
@@ -179,7 +183,7 @@ void QuicConnection::send_pending_data() {
                                                  &datalen_written, flags, stream_id,
                                                  quic_vec, veccnt, get_timestamp());
             
-            std::cout << "QUIC: writev_stream stream=" << stream_id << " veccnt=" << veccnt << " flags=" << flags << " returned ndatalen=" << ndatalen << " datalen_written=" << datalen_written << "\n";
+            LOG_DEBUG("QUIC: writev_stream stream=" << stream_id << " veccnt=" << veccnt << " flags=" << flags << " returned ndatalen=" << ndatalen << " datalen_written=" << datalen_written);
             
             if (datalen_written > 0) {
                 nghttp3_conn_add_write_offset(h3_session_->get_conn(), stream_id, datalen_written);
@@ -199,7 +203,7 @@ void QuicConnection::send_pending_data() {
         } else {
             ndatalen = ngtcp2_conn_write_pkt(conn_, &ps.path, &pi, outbuf, sizeof(outbuf), get_timestamp());
             if (ndatalen > 0) {
-                std::cout << "QUIC: write_pkt returned ndatalen=" << ndatalen << "\n";
+                LOG_DEBUG("QUIC: write_pkt returned ndatalen=" << ndatalen);
             }
         }
         
@@ -207,14 +211,14 @@ void QuicConnection::send_pending_data() {
             break;
         }
         
-        std::cout << "QUIC: sending UDP packet of size " << ndatalen << "\n";
+        LOG_DEBUG("QUIC: sending UDP packet of size " << ndatalen);
         manager_.send_packet(outbuf, static_cast<size_t>(ndatalen), ps.path.remote.addr, ps.path.remote.addrlen);
     }
 }
 
 int QuicConnection::on_handshake_completed(ngtcp2_conn *conn, void *user_data) {
     auto self = static_cast<QuicConnection*>(user_data);
-    std::cout << "QUIC Handshake Completed!\n";
+    LOG_DEBUG("QUIC Handshake Completed!");
     
     self->h3_session_ = std::make_unique<QuicHttp3Session>(*self);
     self->h3_session_->init();
@@ -223,19 +227,19 @@ int QuicConnection::on_handshake_completed(ngtcp2_conn *conn, void *user_data) {
     int64_t ctrl_id = -1, qenc_id = -1, qdec_id = -1;
     
     rv = ngtcp2_conn_open_uni_stream(conn, &ctrl_id, nullptr);
-    if (rv != 0) std::cerr << "QUIC: Failed to open control stream: " << ngtcp2_strerror(rv) << "\n";
+    if (rv != 0) LOG_ERROR("QUIC: Failed to open control stream: " << ngtcp2_strerror(rv));
     
     rv = ngtcp2_conn_open_uni_stream(conn, &qenc_id, nullptr);
-    if (rv != 0) std::cerr << "QUIC: Failed to open qenc stream: " << ngtcp2_strerror(rv) << "\n";
+    if (rv != 0) LOG_ERROR("QUIC: Failed to open qenc stream: " << ngtcp2_strerror(rv));
     
     rv = ngtcp2_conn_open_uni_stream(conn, &qdec_id, nullptr);
-    if (rv != 0) std::cerr << "QUIC: Failed to open qdec stream: " << ngtcp2_strerror(rv) << "\n";
+    if (rv != 0) LOG_ERROR("QUIC: Failed to open qdec stream: " << ngtcp2_strerror(rv));
 
     rv = nghttp3_conn_bind_control_stream(self->h3_session_->get_conn(), ctrl_id);
-    if (rv != 0) std::cerr << "QUIC: Failed to bind control stream: " << nghttp3_strerror(rv) << "\n";
+    if (rv != 0) LOG_ERROR("QUIC: Failed to bind control stream: " << nghttp3_strerror(rv));
     
     rv = nghttp3_conn_bind_qpack_streams(self->h3_session_->get_conn(), qenc_id, qdec_id);
-    if (rv != 0) std::cerr << "QUIC: Failed to bind qpack streams: " << nghttp3_strerror(rv) << "\n";
+    if (rv != 0) LOG_ERROR("QUIC: Failed to bind qpack streams: " << nghttp3_strerror(rv));
     
     self->send_pending_data();
     
@@ -245,7 +249,7 @@ int QuicConnection::on_handshake_completed(ngtcp2_conn *conn, void *user_data) {
 int QuicConnection::on_recv_stream_data(ngtcp2_conn *conn, uint32_t flags, int64_t stream_id, uint64_t offset, const uint8_t *data, size_t datalen, void *user_data, void *stream_user_data) {
     auto self = static_cast<QuicConnection*>(user_data);
     bool fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN);
-    std::cout << "QUIC: on_recv_stream_data id=" << stream_id << " len=" << datalen << " fin=" << fin << "\n";
+    LOG_DEBUG("QUIC: on_recv_stream_data id=" << stream_id << " len=" << datalen << " fin=" << fin);
     if (self->h3_session_) {
         self->h3_session_->process_stream_data(stream_id, data, datalen, fin);
     }
