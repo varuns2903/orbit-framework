@@ -122,10 +122,34 @@ app.post("/users", {middleware::validate_json(user_schema)}, [](HttpRequest& req
 ```
 
 ### Rate Limiting
-Global in-memory or Redis-backed distributed rate limiting.
+Global in-memory or Redis-backed distributed rate limiting. Rejected requests get
+`429 Too Many Requests` with a `Retry-After` header (seconds).
+
+The in-memory limiter is a token bucket: each client may burst up to `max_requests`
+and regains capacity continuously at `max_requests / window`. Idle clients are evicted,
+and at most `max_tracked_clients` are tracked, so memory stays bounded under IP spraying.
 ```cpp
-#include "middleware/RateLimiter.hpp"
+#include <orbit/middleware/RateLimiter.hpp>
 app.use(middleware::rate_limit(100, std::chrono::seconds(10))); // 100 reqs per 10s
+
+// Behind a proxy, or per API key instead of per IP:
+middleware::RateLimitOptions opts;
+opts.max_requests = 1000;
+opts.window = std::chrono::seconds(60);
+opts.key = [](const HttpRequest& req) {
+    auto it = req.headers.find("X-Api-Key");
+    return it != req.headers.end() ? std::string(it->second) : req.client_ip;
+};
+opts.max_tracked_clients = 50000;
+app.use(middleware::rate_limit(opts));
+```
+
+The Redis-backed limiter shares a fixed window across all instances. The counter and its
+expiry are set atomically. If Redis is unreachable, requests are rejected with `503` unless
+`allow_when_unavailable` is `true`.
+```cpp
+#include <orbit/middleware/DistributedRateLimiter.hpp>
+app.use(middleware::distributed_rate_limit("127.0.0.1", 6379, 100, std::chrono::seconds(60)));
 ```
 
 ### Global Error Handling
