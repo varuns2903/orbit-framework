@@ -5,6 +5,8 @@
 #include <orbit/network/ConnectionPool.hpp>
 #include <orbit/network/PlatformSocket.hpp>
 #include <csignal>
+#include <atomic>
+#include <string>
 #include <cstring>
 #ifndef _WIN32
 #include <unistd.h>
@@ -16,19 +18,15 @@ namespace server {
 
 static App* g_app = nullptr;
 
+// The only thing the signal handler does is store the signal number. A
+// lock-free atomic store is async-signal-safe; logging, locking, allocating
+// or forking from a handler can deadlock (e.g. if the signal interrupts a
+// thread that holds the logger's mutex).
+static std::atomic<int> g_pending_signal{0};
+static_assert(std::atomic<int>::is_always_lock_free, "signal flag must be lock-free");
+
 void signal_handler(int signum) {
-    if (g_app) {
-#ifndef _WIN32
-        if (signum == SIGUSR2) {
-            LOG_INFO("SIGUSR2 received. Initiating zero-downtime hot reload...");
-            g_app->hot_reload();
-        } else
-#endif
-        {
-            LOG_INFO("Interrupt signal (" << signum << ") received. Stopping server gracefully...");
-            g_app->stop();
-        }
-    }
+    g_pending_signal.store(signum, std::memory_order_relaxed);
 }
 
 App::App(const config::ServerConfig& config) : config_(config) {
@@ -208,6 +206,21 @@ void App::listen() {
 #endif
     
     event_loop_ = std::make_unique<EventLoop>(*listener_, router_, config_, tls_context_.get(), pass_quic_socket, pass_quic_manager);
+
+    // Act on signals from the loop thread, where logging and forking are safe.
+    event_loop_->set_tick_hook([this]() {
+        int signum = g_pending_signal.exchange(0, std::memory_order_relaxed);
+        if (signum == 0) return;
+#ifndef _WIN32
+        if (signum == SIGUSR2) {
+            LOG_INFO("SIGUSR2 received. Initiating zero-downtime hot reload...");
+            hot_reload();
+            return;
+        }
+#endif
+        LOG_INFO("Interrupt signal (" << signum << ") received. Stopping server gracefully...");
+        stop();
+    });
     
     LOG_INFO("App started listening on port " << config_.port);
     event_loop_->run();
@@ -221,39 +234,43 @@ void App::stop() {
 
 void App::hot_reload() {
 #ifndef _WIN32
+    // Build argv before fork(): after fork() in a multi-threaded process the
+    // child may only call async-signal-safe functions, so no allocation or
+    // logging there.
+    std::vector<std::string> args_str;
+    int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        std::string cmdline;
+        char buf[4096];
+        ssize_t n;
+        while ((n = read(fd, buf, sizeof(buf))) > 0) {
+            cmdline.append(buf, static_cast<size_t>(n));
+        }
+        close(fd);
+        size_t pos = 0;
+        while (pos < cmdline.size()) {
+            size_t end = cmdline.find('\0', pos);
+            if (end == std::string::npos) end = cmdline.size();
+            args_str.push_back(cmdline.substr(pos, end - pos));
+            pos = end + 1;
+        }
+    }
+    if (args_str.empty()) {
+        LOG_ERROR("Hot reload needs /proc/self/cmdline, which is not available on this platform");
+        return;
+    }
+    std::vector<char*> args;
+    for (auto& s : args_str) args.push_back(s.data());
+    args.push_back(nullptr);
+
     pid_t pid = fork();
     if (pid == 0) {
-        // Child: exec current binary
-        std::vector<std::string> args_str;
-        std::vector<char*> args;
-        
-        int fd = open("/proc/self/cmdline", O_RDONLY);
-        if (fd >= 0) {
-            char buf[4096];
-            ssize_t n = read(fd, buf, sizeof(buf));
-            if (n > 0) {
-                for (ssize_t i = 0; i < n; ) {
-                    args_str.push_back(std::string(&buf[i]));
-                    i += args_str.back().length() + 1;
-                }
-            }
-            close(fd);
+        // Child: close inherited descriptors and replace the process image.
+        for (int i = 3; i < 1024; ++i) {
+            close(i);
         }
-        
-        if (!args_str.empty()) {
-            for (auto& s : args_str) args.push_back(s.data());
-            args.push_back(nullptr);
-            
-            // Close all FDs except 0, 1, 2 (stdin, stdout, stderr)
-            for (int i = 3; i < 1024; ++i) {
-                close(i);
-            }
-            
-            execv(args[0], args.data());
-            
-            LOG_ERROR("Failed to exec during hot reload: " << strerror(errno));
-            exit(1);
-        }
+        execv("/proc/self/exe", args.data());
+        _exit(127);
     } else if (pid > 0) {
         // Parent: Stop accepting new connections and drain
         if (event_loop_) {
