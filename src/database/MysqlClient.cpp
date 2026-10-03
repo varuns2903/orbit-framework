@@ -150,6 +150,13 @@ ResultSet MysqlClient::QueryAwaiter::await_resume() {
     return result;
 }
 
+std::string MysqlClient::escape(const std::string& value) {
+    std::string out(value.size() * 2 + 1, '\0');
+    unsigned long n = mysql_real_escape_string(mysql_, out.data(), value.data(), static_cast<unsigned long>(value.size()));
+    out.resize(n);
+    return out;
+}
+
 MysqlClient::QueryAwaiter MysqlClient::query_async(std::string query) {
     return QueryAwaiter{*this, std::move(query), 0, 0, {}, {}, nullptr};
 }

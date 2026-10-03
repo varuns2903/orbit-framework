@@ -110,6 +110,12 @@ public:
      */
     MYSQL* get_mysql() { return mysql_; }
 
+    /**
+     * @brief Escapes @p value for use inside a single-quoted SQL literal,
+     *        using the connection's character set (mysql_real_escape_string).
+     */
+    std::string escape(const std::string& value);
+
 private:
     network::Proactor& proactor_;
     Config config_;
