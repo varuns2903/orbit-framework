@@ -1,4 +1,5 @@
 #include <orbit/middleware/OAuth2.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <curl/curl.h>
 #include <iostream>
 
@@ -50,7 +51,7 @@ std::string OAuth2::fetch_sync(const std::string& url, const std::string& method
         res = curl_easy_perform(curl);
         
         if(res != CURLE_OK) {
-            std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+            LOG_ERROR("curl_easy_perform() failed: " << curl_easy_strerror(res));
         }
         
         curl_slist_free_all(headers);

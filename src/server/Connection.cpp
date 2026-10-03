@@ -1,4 +1,5 @@
 #include <orbit/server/Connection.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <orbit/server/ConnectionManager.hpp>
 #include <orbit/http/HttpParser.hpp>
 #include <orbit/http/WebSocket.hpp>
@@ -114,7 +115,7 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         if (state_ == ConnectionState::WEBSOCKET && ws_connection_) {
             ws_connection_->handle_transport_closed();
         }
-        std::cout << "on_read_complete closed with bytes_read=" << bytes_read << std::endl;
+        LOG_DEBUG("on_read_complete closed with bytes_read=" << bytes_read);
         manager_.remove_connection(socket_.fd());
         return;
     }
