@@ -16,7 +16,6 @@ struct Http3Stream {
     int64_t stream_id;
     http::HttpRequest request;
     std::string body_buffer;
-    std::vector<std::string> header_storage;
     bool headers_complete{false};
     std::string response_body; // To store response payload
     
