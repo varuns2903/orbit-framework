@@ -194,6 +194,11 @@ public:
      * @param handler The WebSocket handler function.
      * @return Reference to the App instance for chaining.
      */
+    App& ws(const std::string& path, std::vector<routing::Middleware> mws, routing::WsHandler handler) {
+        router_.ws(path, std::move(mws), std::move(handler));
+        return *this;
+    }
+
     App& ws(const std::string& path, routing::WsHandler handler) {
         router_.ws(path, std::move(handler));
         return *this;

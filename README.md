@@ -141,7 +141,7 @@ Common to every method that builds from source:
 
 Orbit links OpenSSL, zlib, libcurl, nghttp2, and — depending on enabled
 features — ngtcp2, nghttp3, libpq, MariaDB Connector/C, mongo-c-driver,
-hiredis, and liburing. Let vcpkg or Conan supply them rather than installing by
+and liburing. Let vcpkg or Conan supply them rather than installing by
 hand. Full list and licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
@@ -373,7 +373,7 @@ every dependency, and distribution packages are often too old for HTTP/3:
 # Debian / Ubuntu
 sudo apt install build-essential cmake pkg-config libssl-dev zlib1g-dev \
      libcurl4-openssl-dev libnghttp2-dev liburing-dev libpq-dev \
-     libmariadb-dev libmongoc-dev libhiredis-dev
+     libmariadb-dev libmongoc-dev
 
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_HTTP3=OFF
 cmake --build build --parallel
