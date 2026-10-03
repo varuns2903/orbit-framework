@@ -2,9 +2,7 @@
 #include <stdexcept>
 #include <string>
 
-#ifndef _WIN32
 #include <cstring>
-#endif
 
 namespace network {
 
@@ -49,6 +47,34 @@ void set_non_blocking(socket_t fd) {
         throw std::runtime_error(std::string("fcntl F_SETFL O_NONBLOCK failed: ") + std::strerror(errno));
     }
 #endif
+}
+
+std::string format_ip(const sockaddr* addr) {
+    char buf[INET6_ADDRSTRLEN] = {};
+    if (addr->sa_family == AF_INET) {
+        const auto* v4 = reinterpret_cast<const sockaddr_in*>(addr);
+        if (!inet_ntop(AF_INET, &v4->sin_addr, buf, sizeof(buf))) return "";
+        return buf;
+    }
+    if (addr->sa_family == AF_INET6) {
+        const auto* v6 = reinterpret_cast<const sockaddr_in6*>(addr);
+        if (IN6_IS_ADDR_V4MAPPED(&v6->sin6_addr)) {
+            in_addr v4{};
+            std::memcpy(&v4, reinterpret_cast<const unsigned char*>(&v6->sin6_addr) + 12, sizeof(v4));
+            if (!inet_ntop(AF_INET, &v4, buf, sizeof(buf))) return "";
+            return buf;
+        }
+        if (!inet_ntop(AF_INET6, &v6->sin6_addr, buf, sizeof(buf))) return "";
+        return buf;
+    }
+    return "";
+}
+
+std::string peer_ip(socket_t fd) {
+    sockaddr_storage addr{};
+    socklen_t len = sizeof(addr);
+    if (getpeername(fd, reinterpret_cast<sockaddr*>(&addr), &len) != 0) return "";
+    return format_ip(reinterpret_cast<const sockaddr*>(&addr));
 }
 
 } // namespace network

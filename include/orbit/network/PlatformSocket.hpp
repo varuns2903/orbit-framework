@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #ifdef _WIN32
     #ifndef WIN32_LEAN_AND_MEAN
     #define WIN32_LEAN_AND_MEAN
@@ -48,4 +50,12 @@ namespace network {
     void cleanup_platform_networking();
     void close_socket(socket_t fd);
     void set_non_blocking(socket_t fd);
+
+    /// Formats an IPv4 or IPv6 address; IPv4-mapped IPv6 addresses
+    /// (::ffff:1.2.3.4, seen on dual-stack listeners) come back as plain
+    /// IPv4. Returns "" for other families.
+    std::string format_ip(const sockaddr* addr);
+
+    /// The connected peer's IP address (see format_ip), or "" if unknown.
+    std::string peer_ip(socket_t fd);
 }

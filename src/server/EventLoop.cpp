@@ -31,7 +31,12 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
       thread_pool_(config.worker_threads), 
       connection_manager_(*proactor_, router, thread_pool_, timer_manager_, config.max_body_size, tls_context),
       quic_socket_(quic_socket),
-      quic_manager_(quic_manager) {
+      quic_manager_(quic_manager),
+      max_connections_(config.max_connections) {
+#if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(_WIN32)
+    // The io_uring proactor accepts blocking sockets; epoll and kqueue use non-blocking ones.
+    nonblocking_accepts_ = config.engine != config::EventEngine::IoUring;
+#endif
 
     ConnectionTimeouts timeouts;
     timeouts.header = config.header_timeout;
@@ -58,7 +63,11 @@ void EventLoop::run() {
             // shutdown request from a signal handler) is picked up promptly.
             int timeout_ms = timer_manager_.get_next_timeout();
             if (timeout_ms < 0 || timeout_ms > 200) timeout_ms = 200;
+            // While accepting is paused, check back soon for a free slot.
+            if (accept_paused_ && timeout_ms > 20) timeout_ms = 20;
             proactor_->run_once(timeout_ms);
+
+            resume_accepting_if_ready();
 
             if (tick_hook_) tick_hook_();
 
@@ -91,24 +100,93 @@ void EventLoop::stop_accepting() {
 }
 
 void EventLoop::do_accept() {
-    proactor_->async_accept(listener_.fd(), [this](int client_fd, sockaddr_in addr) {
-        if (client_fd >= 0) {
-            LOG_DEBUG("Accepted new connection! FD: " << client_fd);
-            std::string client_ip = inet_ntoa(addr.sin_addr);
-            network::Socket client(client_fd);
-            connection_manager_.add_connection(std::move(client), client_ip);
+    proactor_->async_accept(listener_.fd(), [this](network::socket_t client_fd, sockaddr_in addr) {
+        // Capture errno before anything else (logging included) can change it.
+        const int accept_error = static_cast<int>(client_fd) < 0 ? network::get_last_socket_error() : 0;
+        if (static_cast<int>(client_fd) >= 0) {
+            on_accepted(client_fd, addr);
+            accept_pending();
         } else {
-            LOG_ERROR("Accept failed. FD: " << client_fd);
-            if (client_fd == -EMFILE || client_fd == -ENFILE) {
-                // Wait briefly before retrying if we hit fd limits
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+#ifndef _WIN32
+            if (accept_error == EMFILE || accept_error == ENFILE ||
+                client_fd == -EMFILE || client_fd == -ENFILE) {
+                // Out of descriptors: the listener stays readable, so re-arming
+                // now would spin. Back off without blocking the loop.
+                LOG_WARN("Accept failed: out of file descriptors; pausing accept for 100 ms");
+                pause_accepting(std::chrono::steady_clock::now() + std::chrono::milliseconds(100));
+                return;
             }
+#endif
+            LOG_ERROR("Accept failed. FD: " << client_fd << " error: " << accept_error);
         }
         
-        if (is_accepting_) {
+        if (is_accepting_ && !accept_paused_) {
             do_accept();
         }
     });
+}
+
+bool EventLoop::at_connection_limit() const {
+    return max_connections_ != 0 && connection_manager_.get_connection_count() >= max_connections_;
+}
+
+void EventLoop::pause_accepting(std::chrono::steady_clock::time_point until) {
+    accept_paused_ = true;
+    accept_resume_at_ = until;
+}
+
+void EventLoop::resume_accepting_if_ready() {
+    if (!accept_paused_ || !is_accepting_) return;
+    if (std::chrono::steady_clock::now() < accept_resume_at_ || at_connection_limit()) return;
+    accept_paused_ = false;
+    do_accept();
+}
+
+void EventLoop::on_accepted(network::socket_t client_fd, const sockaddr_in& addr) {
+    LOG_DEBUG("Accepted new connection! FD: " << client_fd);
+    // getpeername handles IPv6 too; the proactor's sockaddr_in is IPv4-only.
+    std::string client_ip = network::peer_ip(client_fd);
+    if (client_ip.empty()) {
+        client_ip = network::format_ip(reinterpret_cast<const sockaddr*>(&addr));
+    }
+    network::Socket client(client_fd);
+    connection_manager_.add_connection(std::move(client), client_ip);
+
+    if (at_connection_limit()) {
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_limit_warning_ >= std::chrono::seconds(10)) {
+            last_limit_warning_ = now;
+            LOG_WARN("max_connections (" << max_connections_ << ") reached; new connections wait in the backlog");
+        }
+        pause_accepting(now);
+    }
+}
+
+void EventLoop::accept_pending() {
+#ifndef _WIN32
+    // One readiness event can stand for many queued connections. Take them
+    // now (bounded, so a flood cannot starve established connections)
+    // rather than one per loop iteration.
+    for (int i = 0; i < 64 && !accept_paused_ && is_accepting_; ++i) {
+        sockaddr_in addr{};
+        network::socklen_t len = sizeof(addr);
+        network::socket_t fd = ::accept(listener_.fd(), reinterpret_cast<sockaddr*>(&addr), &len);
+        if (fd < 0) {
+            int err = errno;
+            if (err == EMFILE || err == ENFILE) {
+                LOG_WARN("Accept failed: out of file descriptors; pausing accept for 100 ms");
+                pause_accepting(std::chrono::steady_clock::now() + std::chrono::milliseconds(100));
+            }
+            return; // EAGAIN: queue drained; other errors: the next event retries
+        }
+        // Match the proactor's own accept (accept4 flags on Linux, explicit on BSD,
+        // where accepted sockets inherit the listener's O_NONBLOCK).
+        int flags = fcntl(fd, F_GETFL, 0);
+        fcntl(fd, F_SETFL, nonblocking_accepts_ ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK));
+        fcntl(fd, F_SETFD, fcntl(fd, F_GETFD, 0) | FD_CLOEXEC);
+        on_accepted(fd, addr);
+    }
+#endif
 }
 
 #ifdef ORBIT_ENABLE_HTTP3

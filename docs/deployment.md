@@ -72,6 +72,26 @@ Simply run:
 docker-compose up -d --build
 ```
 
+## Listening Address and Connection Limits
+
+| Field | CLI | Default | Meaning |
+|---|---|---|---|
+| `host` | `-b, --bind` | `0.0.0.0` | Address to listen on. `0.0.0.0` = all IPv4 interfaces, `::` = all IPv6 **and** IPv4 (dual-stack), `127.0.0.1` / `::1` = local only. Host names such as `localhost` are resolved. |
+| `backlog` | `--backlog` | `0` (`SOMAXCONN`) | Length of the kernel's pending-connection queue. |
+| `max_connections` | `--max-connections` | `0` (unlimited) | Connections served at once. When reached, the server stops accepting; new connections wait in the backlog until a slot frees up. |
+
+Behind a reverse proxy on the same host, bind to `127.0.0.1` so the app port is
+not reachable from outside:
+
+```cpp
+config::ServerConfig cfg;
+cfg.host = "127.0.0.1";
+cfg.max_connections = 10000;
+```
+
+On a dual-stack listener, IPv4 clients appear in `req.client_ip` as plain
+addresses (`203.0.113.7`), not as `::ffff:203.0.113.7`.
+
 ## Connection Timeouts
 
 `ServerConfig` has one timeout per phase of a connection. A value of `0`
