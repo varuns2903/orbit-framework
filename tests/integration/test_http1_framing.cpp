@@ -127,6 +127,18 @@ TEST_F(Http1FramingTest, PipelinedRequestsAreNotMergedIntoTheBody) {
     EXPECT_EQ(count(res, "HTTP/1.1 200"), 2u) << res;
 }
 
+TEST_F(Http1FramingTest, PipelinedResponsesAreNeverStranded) {
+    // The second response is queued from a worker thread while the first is
+    // still being written. A lost wakeup used to leave it unsent, so repeat
+    // enough times to hit the window.
+    for (int i = 0; i < 50; ++i) {
+        std::string res = raw_exchange(
+            "GET /hello HTTP/1.1\r\n\r\n"
+            "GET /hello HTTP/1.1\r\nConnection: close\r\n\r\n");
+        ASSERT_EQ(count(res, "HTTP/1.1 200"), 2u) << "iteration " << i << "\n" << res;
+    }
+}
+
 TEST_F(Http1FramingTest, ContentLengthTextInsideAnotherHeaderIsIgnored) {
     std::string res = raw_exchange(
         "GET /hello HTTP/1.1\r\nX-Note: content-length: 50\r\nConnection: close\r\n\r\n");
