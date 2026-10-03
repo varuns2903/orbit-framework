@@ -7,6 +7,7 @@
 #include <orbit/network/TlsContext.hpp>
 #include <orbit/http/ResponseWriter.hpp>
 #include <vector>
+#include <chrono>
 #include <string_view>
 #include <memory>
 #include <mutex>
@@ -31,7 +32,18 @@ enum class RequestState {
     COMPLETE,
     HEADERS_COMPLETE,
     ERROR_PAYLOAD_TOO_LARGE,
-    ERROR_HEADERS_TOO_LARGE
+    ERROR_HEADERS_TOO_LARGE,
+    ERROR_BAD_REQUEST
+};
+
+/**
+ * @brief Timeouts applied to a connection, in the phases described on ServerConfig.
+ */
+struct ConnectionTimeouts {
+    std::chrono::milliseconds header{10000};
+    std::chrono::milliseconds keep_alive{10000};
+    std::chrono::milliseconds idle{30000};
+    std::chrono::milliseconds websocket_idle{0};
 };
 
 /**
@@ -61,6 +73,11 @@ public:
      * @brief Starts processing the connection.
      */
     void start();
+
+    /**
+     * @brief Sets the timeouts used for this connection. Call before start().
+     */
+    void set_timeouts(const ConnectionTimeouts& timeouts) { timeouts_ = timeouts; }
 
     /**
      * @brief Writes raw data to the connection.
@@ -101,7 +118,8 @@ public:
 private:
     void process_request();
     void send_data(std::string_view data);
-    void reset_timer();
+    void arm_timer(std::chrono::milliseconds timeout);
+    void arm_timer_for_current_phase();
     void send_error(http::HttpStatus status, const std::string& message);
 
     void trigger_read();
@@ -137,9 +155,12 @@ private:
     size_t content_length_remaining_{0};
 
     RequestState check_request_state();
+    std::string request_body_storage_; // Owns a decoded chunked request body
     bool should_close_{false};
     ConnectionState state_{ConnectionState::HTTP};
     uint64_t current_timer_id_{0};
+    std::mutex timer_mutex_;
+    ConnectionTimeouts timeouts_;
     
     int file_fd_{-1};
     off_t file_size_{0};

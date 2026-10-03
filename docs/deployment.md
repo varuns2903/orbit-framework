@@ -7,7 +7,7 @@ Deploying Orbit applications to production is straightforward thanks to its mini
 Orbit provides a multi-stage `Dockerfile` in the root repository. 
 
 The build works in two stages:
-1. **Builder Stage**: Installs the compiler, CMake, and development headers (`libpq-dev`, `libhiredis-dev`, etc.). It also fetches and compiles `quictls`, `ngtcp2`, and `nghttp3` for HTTP/3 support.
+1. **Builder Stage**: Installs the compiler, CMake, and development headers (`libpq-dev`, `libmariadb-dev`, etc.). It also fetches and compiles `quictls`, `ngtcp2`, and `nghttp3` for HTTP/3 support.
 2. **Runtime Stage**: Copies *only* the compiled binaries and the required runtime shared libraries (`.so` files) into a clean, lightweight Ubuntu image.
 
 ### Building the Image
@@ -70,6 +70,30 @@ services:
 Simply run:
 ```bash
 docker-compose up -d --build
+```
+
+## Connection Timeouts
+
+`ServerConfig` has one timeout per phase of a connection. A value of `0`
+disables that timeout.
+
+| Field | Default | Applies to |
+|---|---|---|
+| `header_timeout` | 10 s | From the first byte of a request until its headers are complete. Later bytes do **not** extend it, so a client cannot hold a connection by trickling header bytes. |
+| `keep_alive_timeout` | 10 s | Idle time between requests on a persistent connection. |
+| `idle_timeout` | 30 s | Longest pause while receiving a request body or writing a response. |
+| `websocket_idle_timeout` | 0 (off) | Idle time on WebSocket and raw-stream connections. |
+
+No timeout runs while a handler is executing, so slow handlers and
+Server-Sent Events streams are not cut off. WebSocket connections stay open while
+quiet; to drop dead peers, set `websocket_idle_timeout` and have clients send
+pings.
+
+```cpp
+config::ServerConfig cfg;
+cfg.header_timeout = std::chrono::seconds(5);
+cfg.keep_alive_timeout = std::chrono::seconds(60);
+cfg.websocket_idle_timeout = std::chrono::seconds(120);
 ```
 
 ## 3. Reverse Proxies (NGINX / HAProxy)

@@ -82,7 +82,6 @@ redistribute them. Each remains under its own license.
 | [libpq](https://www.postgresql.org/) | PostgreSQL License | PostgreSQL client — `ORBIT_ENABLE_POSTGRES` |
 | [MariaDB Connector/C](https://mariadb.com/kb/en/mariadb-connector-c/) | LGPL-2.1 | MySQL/MariaDB client — `ORBIT_ENABLE_MARIADB` |
 | [mongo-c-driver](https://github.com/mongodb/mongo-c-driver) | Apache-2.0 | MongoDB client — `ORBIT_ENABLE_MONGODB` |
-| [hiredis](https://github.com/redis/hiredis) | BSD-3-Clause | Redis client — `ORBIT_ENABLE_REDIS` |
 | [gRPC](https://grpc.io/) | Apache-2.0 | gRPC server wrapper — `ORBIT_ENABLE_GRPC` (off by default) |
 
 ### A note on copyleft
