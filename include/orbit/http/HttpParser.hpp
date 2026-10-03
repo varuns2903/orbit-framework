@@ -20,6 +20,19 @@ namespace http {
 bool connection_option_present(std::string_view field_value, std::string_view option);
 
 /**
+ * @brief Decodes %XX escapes (RFC 3986 section 2.1).
+ *
+ * @param in The encoded text.
+ * @param out Receives the decoded text.
+ * @param plus_as_space Decode '+' as a space (query strings / form data).
+ * @param for_path Reject escapes that would change how a path is split or
+ *        read: %2F ('/'), %5C ('\\') and %00. A request that hides a path
+ *        separator in an escape is refused rather than guessed at.
+ * @return False on a malformed escape or a rejected character.
+ */
+bool percent_decode(std::string_view in, std::string& out, bool plus_as_space, bool for_path);
+
+/**
  * @brief How the length of a request body is determined (RFC 9112 section 6).
  */
 struct MessageFraming {
