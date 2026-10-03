@@ -111,6 +111,13 @@ UndefinedBehaviorSanitizer. Because Orbit does raw socket and buffer handling,
 please run the suite under sanitizers before submitting changes to the event
 loop, parsers, or QUIC code.
 
+For threading changes, build a separate tree with ThreadSanitizer
+(`-DORBIT_ENABLE_TSAN=ON -DCMAKE_BUILD_TYPE=Debug`; it replaces ASan/UBSan).
+
+CI (`.github/workflows/sanitizers.yml`) runs the suite under ASan/UBSan
+(blocking) and TSan (report only for now), and runs clang-tidy (`.clang-tidy`)
+on the source files a pull request changes, as a report.
+
 ### Memory leaks
 
 CI additionally runs Valgrind on Linux:
