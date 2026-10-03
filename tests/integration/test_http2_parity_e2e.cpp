@@ -190,3 +190,16 @@ TEST_F(Http2ParityTest, ReadBodyStreamDeliversTheBody) {
     ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
     EXPECT_EQ(r.body, "got 3000");
 }
+
+TEST_F(Http2ParityTest, PathAndQueryArePercentDecoded) {
+    auto r = h2("/who%61mi?q=hello%20world%26more");
+    ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
+    EXPECT_EQ(r.status, 200);
+    EXPECT_EQ(r.body.rfind("uri=/whoami q=hello world&more", 0), 0u) << r.body;
+}
+
+TEST_F(Http2ParityTest, EncodedSlashInPathIsRejected) {
+    auto r = h2("/a%2F..%2Fwhoami");
+    ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
+    EXPECT_EQ(r.status, 400);
+}
