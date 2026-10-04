@@ -31,6 +31,9 @@ struct IocpContext {
     
     // For WSARecv/WSASend
     WSABUF wsa_buf;
+
+    // Set when the operation failed to start; posted to the port by hand.
+    bool failed{false};
     
     IocpContext() {
         memset(&overlapped, 0, sizeof(OVERLAPPED));
@@ -60,6 +63,7 @@ public:
 
 private:
     void register_socket(socket_t fd);
+    void fail_later(IocpContext* ctx);
     void start_read(socket_t fd, void* buffer, size_t size, DWORD recv_flags, std::function<void(ssize_t)> callback);
 
     HANDLE iocp_handle_;

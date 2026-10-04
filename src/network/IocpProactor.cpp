@@ -1,6 +1,7 @@
 #include <orbit/network/IocpProactor.hpp>
 #include <orbit/utils/Logger.hpp>
 #ifdef _WIN32
+#include <algorithm>
 #include <mswsock.h>
 #include <io.h>
 #include <stdexcept>
@@ -55,6 +56,19 @@ void IocpProactor::register_socket(socket_t fd) {
     load_extension_functions(fd);
 }
 
+// An operation that failed to start is reported like any other failed
+// completion, from run_once(): callers never see their callback run inside
+// the call that started the operation.
+void IocpProactor::fail_later(IocpContext* ctx) {
+    ctx->failed = true;
+    if (!PostQueuedCompletionStatus(iocp_handle_, 0, 0, &ctx->overlapped)) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto& vec = pending_contexts_[ctx->fd];
+        vec.erase(std::remove(vec.begin(), vec.end(), ctx), vec.end());
+        delete ctx;
+    }
+}
+
 void IocpProactor::run_once(int timeout_ms) {
     DWORD bytes_transferred;
     ULONG_PTR completion_key;
@@ -87,7 +101,7 @@ void IocpProactor::run_once(int timeout_ms) {
         }
     }
 
-    if (result == FALSE) {
+    if (result == FALSE || ctx->failed) {
         // IO failed
         if (ctx->io_callback) ctx->io_callback(-1);
         if (ctx->accept_callback) ctx->accept_callback(INVALID_SOCKET_FD, sockaddr_in{});
@@ -141,15 +155,7 @@ void IocpProactor::start_read(socket_t fd, void* buffer, size_t size, DWORD recv
 
     if (WSARecv(fd, &ctx->wsa_buf, 1, NULL, &flags, &ctx->overlapped, NULL) == SOCKET_ERROR) {
         if (WSAGetLastError() != WSA_IO_PENDING) {
-            // Take the callback before freeing the context, and call it unlocked:
-            // it may start another operation on this proactor.
-            auto failed = std::move(ctx->io_callback);
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                pending_contexts_[fd].pop_back();
-            }
-            delete ctx;
-            if (failed) failed(-1);
+            fail_later(ctx);
         }
     }
 }
@@ -170,15 +176,7 @@ void IocpProactor::async_write(socket_t fd, const void* buffer, size_t size, std
 
     if (WSASend(fd, &ctx->wsa_buf, 1, NULL, 0, &ctx->overlapped, NULL) == SOCKET_ERROR) {
         if (WSAGetLastError() != WSA_IO_PENDING) {
-            // Take the callback before freeing the context, and call it unlocked:
-            // it may start another operation on this proactor.
-            auto failed = std::move(ctx->io_callback);
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                pending_contexts_[fd].pop_back();
-            }
-            delete ctx;
-            if (failed) failed(-1);
+            fail_later(ctx);
         }
     }
 }
@@ -220,15 +218,7 @@ void IocpProactor::async_sendfile(socket_t out_fd, int in_fd, off_t offset, size
 
     if (pTransmitFile && pTransmitFile(out_fd, file_handle, static_cast<DWORD>(count), 0, &ctx->overlapped, NULL, 0) == FALSE) {
         if (WSAGetLastError() != WSA_IO_PENDING) {
-            // Take the callback before freeing the context, and call it unlocked:
-            // it may start another operation on this proactor.
-            auto failed = std::move(ctx->io_callback);
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                pending_contexts_[out_fd].pop_back();
-            }
-            delete ctx;
-            if (failed) failed(-1);
+            fail_later(ctx);
         }
     }
 }
@@ -292,13 +282,7 @@ void IocpProactor::async_connect(socket_t fd, const sockaddr_in& addr, std::func
     if (pConnectEx) {
         BOOL result = pConnectEx(fd, (const sockaddr*)&addr, sizeof(addr), NULL, 0, NULL, &ctx->overlapped);
         if (result == FALSE && WSAGetLastError() != WSA_IO_PENDING) {
-            auto failed = std::move(ctx->connect_callback);
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                pending_contexts_[fd].pop_back();
-            }
-            delete ctx;
-            if (failed) failed(-1);
+            fail_later(ctx);
         }
     }
 }
