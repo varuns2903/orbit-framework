@@ -92,6 +92,63 @@ cfg.max_connections = 10000;
 On a dual-stack listener, IPv4 clients appear in `req.client_ip` as plain
 addresses (`203.0.113.7`), not as `::ffff:203.0.113.7`.
 
+## Request Limits
+
+| Field | Default | Applies to |
+|---|---|---|
+| `max_body_size` | 10 MiB | Request body (413 when exceeded) |
+| `max_header_bytes` | 8192 | Request line plus all headers (431) |
+| `max_request_line` | 4096 | Method, target and version (431) |
+| `max_headers` | 100 | Header fields per request (431) |
+| `websocket_max_message_size` | 16 MiB | One WebSocket message after decompression (closes with 1009) |
+
+### WebSocket keep-alive
+
+`websocket_ping_interval` makes the server ping every WebSocket connection.
+Live clients answer with a pong, which counts as traffic; combined with
+`websocket_idle_timeout` (set it to two or three ping intervals), dead peers
+are dropped and healthy ones are kept. Only traffic *from* the client resets
+the idle timer.
+
+```cpp
+cfg.websocket_ping_interval = std::chrono::seconds(30);
+cfg.websocket_idle_timeout = std::chrono::seconds(90);
+```
+
+## Graceful Shutdown and Health Checks
+
+On `SIGTERM` or `SIGINT` (or `app.shutdown()`), the server drains instead of
+dropping connections:
+
+1. It closes the listening socket; new connections are refused, so load
+   balancers move on at once.
+2. Idle keep-alive connections are closed.
+3. Requests in progress finish; their responses carry `Connection: close`.
+   HTTP/2 clients get `GOAWAY`; WebSocket clients get close code `1001`
+   (going away).
+4. Whatever is still busy after `shutdown_timeout` (default 30 s) is closed,
+   and `listen()` returns.
+
+A second signal stops immediately. `app.stop()` also stops immediately.
+
+```cpp
+config::ServerConfig cfg;
+cfg.shutdown_timeout = std::chrono::seconds(20); // keep below Kubernetes' terminationGracePeriodSeconds
+server::App app(cfg);
+app.enable_health_checks(); // GET /healthz (liveness), GET /readyz (readiness)
+```
+
+`/healthz` answers `200` while the process runs. `/readyz` answers `200` while
+serving and `503` once draining has begun. In Kubernetes:
+
+```yaml
+livenessProbe:
+  httpGet: { path: /healthz, port: 8080 }
+readinessProbe:
+  httpGet: { path: /readyz, port: 8080 }
+terminationGracePeriodSeconds: 30
+```
+
 ## Connection Timeouts
 
 `ServerConfig` has one timeout per phase of a connection. A value of `0`

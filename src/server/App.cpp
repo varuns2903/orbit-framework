@@ -278,8 +278,14 @@ void App::listen() {
                 return;
             }
 #endif
-            LOG_INFO("Interrupt signal (" << signum << ") received. Stopping server gracefully...");
-            stop();
+            if (draining_) {
+                LOG_WARN("Signal " << signum << " received again; stopping immediately.");
+                stop();
+                return;
+            }
+            LOG_INFO("Signal " << signum << " received. Shutting down gracefully (up to "
+                     << config_.shutdown_timeout.count() << " s; send it again to stop at once)...");
+            shutdown();
         });
 
         // stop() may already have been called, e.g. by a test tearing down
@@ -289,6 +295,40 @@ void App::listen() {
     
     LOG_INFO("App started listening on port " << listener_->port());
     event_loop_->run();
+}
+
+void App::shutdown() {
+    shutdown(config_.shutdown_timeout);
+}
+
+void App::shutdown(std::chrono::seconds timeout) {
+    std::lock_guard<std::mutex> lock(loop_mutex_);
+    draining_ = true;
+    if (event_loop_) {
+        event_loop_->request_shutdown(std::chrono::steady_clock::now() + timeout);
+    } else {
+        // Not started yet: nothing to drain.
+        stop_requested_ = true;
+    }
+}
+
+App& App::enable_health_checks(const std::string& liveness, const std::string& readiness) {
+    this->get(liveness, [](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
+        http::HttpResponse response;
+        response.set_body("ok", "text/plain");
+        res->send(std::move(response));
+    });
+    this->get(readiness, [this](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
+        http::HttpResponse response;
+        if (draining_) {
+            response.status(http::HttpStatus::ServiceUnavailable);
+            response.set_body("draining", "text/plain");
+        } else {
+            response.set_body("ready", "text/plain");
+        }
+        res->send(std::move(response));
+    });
+    return *this;
 }
 
 void App::stop() {
@@ -339,10 +379,9 @@ void App::hot_reload() {
         execv("/proc/self/exe", args.data());
         _exit(127);
     } else if (pid > 0) {
-        // Parent: Stop accepting new connections and drain
-        if (event_loop_) {
-            event_loop_->stop_accepting();
-        }
+        // Parent: the new process takes new connections (SO_REUSEPORT);
+        // this one drains, bounded by shutdown_timeout.
+        shutdown();
     } else {
         LOG_ERROR("Failed to fork for hot reload: " << strerror(errno));
     }

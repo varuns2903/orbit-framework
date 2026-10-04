@@ -50,6 +50,9 @@ namespace network {
     void cleanup_platform_networking();
     void close_socket(socket_t fd);
     void set_non_blocking(socket_t fd);
+    /// Shuts down both directions: the peer sees end-of-stream at once and
+    /// pending receives complete, even before the descriptor is closed.
+    void shutdown_socket(socket_t fd);
 
     /// Formats an IPv4 or IPv6 address; IPv4-mapped IPv6 addresses
     /// (::ffff:1.2.3.4, seen on dual-stack listeners) come back as plain

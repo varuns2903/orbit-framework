@@ -131,7 +131,11 @@ public:
     /**
      * @brief Closes the WebSocket connection gracefully.
      */
-    void close();
+    void close(uint16_t status_code = 1000);
+
+    /// Sends a ping; the peer's pong is ordinary traffic, so it keeps an
+    /// idle timeout from closing a healthy connection.
+    void ping();
 
     /**
      * @brief Internal: the underlying transport has gone away (peer disconnect,

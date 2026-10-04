@@ -44,6 +44,15 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
     timeouts.idle = config.idle_timeout;
     timeouts.websocket_idle = config.websocket_idle_timeout;
     connection_manager_.set_timeouts(timeouts);
+
+    ConnectionLimits limits;
+    limits.max_header_bytes = config.max_header_bytes;
+    limits.max_request_line = config.max_request_line;
+    limits.max_headers = config.max_headers;
+    limits.websocket_max_message_size = config.websocket_max_message_size;
+    connection_manager_.set_limits(limits);
+    websocket_ping_interval_ = config.websocket_ping_interval;
+    last_websocket_ping_ = std::chrono::steady_clock::now();
     
     do_accept();
 
@@ -74,6 +83,16 @@ void EventLoop::run() {
             timer_manager_.handle_expired_timers([this](int fd) {
                 connection_manager_.remove_connection(fd);
             });
+
+            if (shutdown_requested_) drain_step();
+
+            if (websocket_ping_interval_.count() > 0) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_websocket_ping_ >= websocket_ping_interval_) {
+                    last_websocket_ping_ = now;
+                    connection_manager_.ping_websockets();
+                }
+            }
             
             // If we are gracefully shutting down and have no active connections, exit
             if (!is_accepting_ && connection_manager_.get_connection_count() == 0) {
@@ -92,10 +111,35 @@ void EventLoop::stop() {
     is_running_ = false;
 }
 
+void EventLoop::request_shutdown(std::chrono::steady_clock::time_point deadline) {
+    shutdown_deadline_ = deadline.time_since_epoch().count();
+    shutdown_requested_ = true;
+}
+
+void EventLoop::drain_step() {
+    if (!draining_) {
+        draining_ = true;
+        if (is_accepting_) stop_accepting();
+    }
+    // Repeated each iteration: connections finishing a response become idle.
+    connection_manager_.notify_shutdown();
+
+    auto deadline = std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(shutdown_deadline_.load()));
+    size_t remaining = connection_manager_.get_connection_count();
+    if (remaining > 0 && std::chrono::steady_clock::now() >= deadline) {
+        LOG_WARN("Shutdown deadline reached; closing " << remaining << " connection(s) that were still busy");
+        is_running_ = false;
+    }
+}
+
 void EventLoop::stop_accepting() {
     is_accepting_ = false;
     // Remove listener from proactor
     proactor_->remove(listener_.fd());
+    // Refuse new connections outright: left open, they would queue in the
+    // backlog and hang until the process exits. (On hot reload the new
+    // process already listens on the same port via SO_REUSEPORT.)
+    listener_.close();
     LOG_INFO("Event loop stopped accepting new connections. Waiting for active connections to drain...");
 }
 
