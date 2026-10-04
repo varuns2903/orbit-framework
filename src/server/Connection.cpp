@@ -351,6 +351,7 @@ void Connection::process_request() {
     if (parsed_req) {
         http::HttpRequest& req = *parsed_req;
         req.client_ip = client_ip_;
+        req.peer_ip = client_ip_;
         is_head_request_ = (req.method == http::HttpMethod::HEAD);
         
         // WebSocket Upgrade Interception
