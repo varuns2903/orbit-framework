@@ -177,6 +177,12 @@ void WebSocketConnection::send(const std::string& message) {
     send_frame(kText, message);
 }
 
+void WebSocketConnection::ping() {
+    std::lock_guard<std::mutex> lock(send_mutex_);
+    if (is_closed_) return;
+    write_frame_locked(0x80 | kPing, "");
+}
+
 void WebSocketConnection::send_binary(const std::string& data) {
     send_frame(kBinary, data);
 }

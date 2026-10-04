@@ -22,6 +22,7 @@ void ConnectionManager::add_connection(network::Socket socket, const std::string
     utils::PrometheusRegistry::get_instance().inc_gauge("orbit_active_connections", "type=\"tcp\"");
     
     connection->set_timeouts(timeouts_);
+    connection->set_limits(limits_);
 
     // With Proactor, we kick off the first read immediately!
     connection->start();
@@ -52,6 +53,16 @@ void ConnectionManager::remove_connection(int fd) {
         proactor_.remove(fd);
         // The shared_ptr will be destroyed here, triggering Connection::~Connection
     }
+}
+
+void ConnectionManager::ping_websockets() {
+    std::vector<std::shared_ptr<Connection>> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        snapshot.reserve(connections_.size());
+        for (auto& [fd, conn] : connections_) snapshot.push_back(conn);
+    }
+    for (auto& conn : snapshot) conn->ping_if_websocket();
 }
 
 void ConnectionManager::notify_shutdown() {

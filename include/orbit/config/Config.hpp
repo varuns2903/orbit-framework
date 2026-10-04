@@ -39,6 +39,16 @@ struct ServerConfig {
     std::chrono::seconds keep_alive_timeout{10};     // Idle time allowed between requests on a persistent connection
     std::chrono::seconds idle_timeout{30};           // Longest pause while receiving a body or writing a response
     std::chrono::seconds websocket_idle_timeout{0};  // Idle time on WebSocket/raw streams; 0 = never (use pings to detect dead peers)
+    // Server-sent WebSocket pings; 0 = none. With websocket_idle_timeout set
+    // longer than this, live peers (which answer with a pong) stay connected
+    // and dead ones are closed.
+    std::chrono::seconds websocket_ping_interval{0};
+
+    // Request limits (HTTP/1.1). Oversized headers get 431, bodies 413.
+    size_t max_header_bytes{8192};                   // Request line plus all headers
+    size_t max_request_line{4096};                   // Method, target and version
+    size_t max_headers{100};                         // Header fields per request
+    size_t websocket_max_message_size{16 * 1024 * 1024}; // Per message, after decompression; larger closes with 1009
     // On SIGTERM/SIGINT (or App::shutdown()), how long in-flight requests may
     // finish before remaining connections are closed. A second signal stops at once.
     std::chrono::seconds shutdown_timeout{30};

@@ -106,6 +106,9 @@ private:
     std::atomic<bool> shutdown_requested_{false};
     std::atomic<std::chrono::steady_clock::rep> shutdown_deadline_{0};
     bool draining_ = false; // loop thread only
+
+    std::chrono::seconds websocket_ping_interval_{0};
+    std::chrono::steady_clock::time_point last_websocket_ping_{};
     void drain_step();
 
     size_t max_connections_ = 0;

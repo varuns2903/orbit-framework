@@ -425,6 +425,7 @@ void Connection::process_request() {
             std::string handshake_str = res.serialize();
             
             auto ws_conn = std::make_unique<http::websocket::WebSocketConnection>(*this, use_deflate);
+            ws_conn->set_max_message_size(limits_.websocket_max_message_size);
             auto handler = router_.get_ws_route(req.uri);
             
             // Queue the handshake immediately
@@ -863,7 +864,7 @@ void Connection::trigger_write() {
     }
 
     // Everything queued has been written; go back to waiting on the peer.
-    arm_timer_for_current_phase();
+    if (!is_message_stream()) arm_timer_for_current_phase();
 }
 
 bool Connection::has_pending_output(bool& close_requested, bool& resume) {
@@ -895,8 +896,10 @@ void Connection::on_write_complete(ssize_t bytes_written) {
         return;
     }
     
-    // A write made progress; the peer is still reading.
-    arm_timer(timeouts_.idle);
+    // A write made progress; the peer is still reading. Not for WebSocket
+    // or raw streams: there, only traffic from the peer proves it is alive
+    // (our own pings must not keep a dead peer's connection open).
+    if (!is_message_stream()) arm_timer(timeouts_.idle);
     
     if (ssl_) {
         size_t n = std::min(static_cast<size_t>(bytes_written), tls_inflight_.size());
@@ -949,6 +952,10 @@ void Connection::write_raw(const std::vector<char>& data) {
     trigger_write();
 }
 
+void Connection::ping_if_websocket() {
+    if (state_ == ConnectionState::WEBSOCKET && ws_connection_) ws_connection_->ping();
+}
+
 void Connection::on_server_shutdown() {
     const bool first = !shutdown_notified_;
     shutdown_notified_ = true;
@@ -985,13 +992,20 @@ void Connection::mark_for_close() {
     send_data({}, true);
 }
 
+bool Connection::is_message_stream() const {
+    ConnectionState s = state_.load();
+    return s == ConnectionState::WEBSOCKET || s == ConnectionState::RAW_STREAM;
+}
+
 void Connection::upgrade_to_websocket(std::unique_ptr<http::websocket::WebSocketConnection> ws_conn) {
     state_ = ConnectionState::WEBSOCKET;
     ws_connection_ = std::move(ws_conn);
+    arm_timer(timeouts_.websocket_idle); // from now on only the peer's frames extend it
 }
 
 void Connection::upgrade_to_raw_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_close) {
     state_ = ConnectionState::RAW_STREAM;
+    arm_timer(timeouts_.websocket_idle);
     raw_stream_on_data_ = std::move(on_data);
     raw_stream_on_close_ = std::move(on_close);
     
@@ -1087,21 +1101,28 @@ RequestState Connection::check_request_state() {
     std::string_view buf_view(read_buffer_.data(), read_buffer_.size());
     size_t headers_end = buf_view.find("\r\n\r\n");
     
+    size_t first_line_end = buf_view.find("\r\n");
+    // A request line longer than allowed is refused as soon as it is seen,
+    // without waiting for the headers (431, as for oversized headers).
+    if ((first_line_end == std::string_view::npos && buf_view.size() > limits_.max_request_line) ||
+        (first_line_end != std::string_view::npos && first_line_end > limits_.max_request_line)) {
+        return RequestState::ERROR_HEADERS_TOO_LARGE;
+    }
+
     if (headers_end == std::string_view::npos) {
         // If we haven't found headers end, check if headers are too large
-        if (read_buffer_.size() > 8192) {
+        if (read_buffer_.size() > limits_.max_header_bytes) {
             return RequestState::ERROR_HEADERS_TOO_LARGE;
         }
         return RequestState::INCOMPLETE;
     }
-    
-    // Check if URI is too long (first line)
-    size_t first_line_end = buf_view.find("\r\n");
-    if (first_line_end != std::string_view::npos && first_line_end > 4096) {
+    if (headers_end > limits_.max_header_bytes) {
         return RequestState::ERROR_HEADERS_TOO_LARGE;
     }
-    if (headers_end > 8192) {
-        return RequestState::ERROR_HEADERS_TOO_LARGE;
+    // Many tiny fields are cheap to send and costly to process.
+    size_t header_fields = 0;
+    for (size_t pos = first_line_end; pos < headers_end; pos = buf_view.find("\r\n", pos + 2)) {
+        if (++header_fields > limits_.max_headers) return RequestState::ERROR_HEADERS_TOO_LARGE;
     }
 
     // Framing is decided once, strictly, from the parsed header lines. Both

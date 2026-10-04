@@ -31,6 +31,10 @@ public:
      * @brief Sets the timeouts applied to connections accepted from now on.
      */
     void set_timeouts(const ConnectionTimeouts& timeouts) { timeouts_ = timeouts; }
+    void set_limits(const ConnectionLimits& limits) { limits_ = limits; }
+
+    /// Event-loop thread: pings every WebSocket connection.
+    void ping_websockets();
 
     /**
      * @brief Adds a new connection to the manager.
@@ -61,6 +65,7 @@ private:
     concurrency::ThreadPool& thread_pool_;
     TimerManager& timer_manager_;
     ConnectionTimeouts timeouts_;
+    ConnectionLimits limits_;
     
     std::unordered_map<int, std::shared_ptr<Connection>> connections_;
     mutable std::mutex map_mutex_;
