@@ -1,0 +1,81 @@
+name: HTTP/2 Conformance (h2spec)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  h2spec:
+    name: h2spec
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      H2SPEC_VERSION: v2.6.0
+      H2SPEC_SHA256: 157ee0de702e01ad40e752dbf074b366027e550c8e7504f9450da2809e279318
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v7
+
+    - name: Cache vcpkg dependencies
+      uses: actions/cache@v6
+      with:
+        path: |
+          build/vcpkg_installed
+          vcpkg/downloads
+        key: ${{ runner.os }}-vcpkg-manifest-v1-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-manifest-v1-
+
+    - name: Setup vcpkg (pinned to builtin-baseline)
+      run: |
+        mkdir -p vcpkg
+        cd vcpkg
+        if [ ! -d ".git" ]; then
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+        fi
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
+        ./bootstrap-vcpkg.sh -disableMetrics
+
+    - name: Build a server
+      run: |
+        cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake \
+          -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_GRPC=OFF -DORBIT_BUILD_TESTS=OFF -DORBIT_BUILD_EXAMPLES=ON
+        cmake --build build --parallel 4 --target websocket_echo_server
+
+    - name: Install h2spec
+      run: |
+        curl -fsSL -o h2spec.tgz "https://github.com/summerwind/h2spec/releases/download/${H2SPEC_VERSION}/h2spec_linux_amd64.tar.gz"
+        echo "${H2SPEC_SHA256}  h2spec.tgz" | sha256sum -c -
+        tar xzf h2spec.tgz h2spec
+
+    - name: Run h2spec (HTTP/2 over TLS)
+      run: |
+        # Orbit speaks HTTP/2 over TLS (ALPN "h2"), so h2spec connects with TLS.
+        openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+          -keyout key.pem -out cert.pem -days 1 -subj /CN=localhost
+        ./build/websocket_echo_server --port 9443 --ssl-cert cert.pem --ssl-key key.pem \
+          --http-version 2 --log-level ERROR &
+        for i in $(seq 1 50); do nc -z 127.0.0.1 9443 && break; sleep 0.2; done
+        ./h2spec -h 127.0.0.1 -p 9443 -t -k -o 3 -j h2spec-report.xml || true
+
+    - name: Check results
+      run: python3 .github/h2spec/check_results.py h2spec-report.xml
+
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: h2spec-report
+        path: h2spec-report.xml
