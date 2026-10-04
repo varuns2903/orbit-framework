@@ -71,7 +71,11 @@ TEST(SignalShutdownTest, SignalWhileThreadHoldsLoggerDoesNotDeadlock) {
     // Interrupt the thread that is (almost always) inside the logger's lock.
     pthread_kill(logger.native_handle(), SIGINT);
 
-    bool stopped = running.wait_for_exit(std::chrono::seconds(3));
+    // Generous: the loop logs its shutdown through the same mutex the
+    // logging thread hammers, and under Valgrind (one thread at a time) that
+    // took 3.3 s. A real deadlock never finishes, so a long limit still
+    // catches it.
+    bool stopped = running.wait_for_exit(std::chrono::seconds(10));
     long before = lines.load();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     bool logger_alive = lines.load() > before;

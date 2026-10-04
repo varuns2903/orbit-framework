@@ -86,7 +86,7 @@ void Router::add_route_with_meta(http::HttpMethod method, const std::string& pat
     std::string full_path = prefix_ + path;
     
     // Register to OpenAPI registry
-    openapi::OpenApiRegistry::instance().register_route(method, full_path, meta);
+    openapi_->register_route(method, full_path, meta);
 
     // Combine group-level middlewares with route-specific middlewares
     std::vector<Middleware> combined_mws = local_middlewares_;

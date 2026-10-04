@@ -114,7 +114,7 @@ int main(int argc, char* argv[]) {
             }
         });
 
-        openapi::OpenApiRegistry::instance().register_schema("Book", "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}}}");
+        app.openapi().register_schema("Book", "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}}}");
         
         app.route("/api/books/:id", http::HttpMethod::GET)
             .summary("Get a book by ID")
@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
                 writer->send(std::move(res));
             });
 
-        openapi::OpenApiRegistry::instance().register_schema("CreateUserRequest", "{\"type\":\"object\",\"properties\":{\"username\":{\"type\":\"string\"},\"age\":{\"type\":\"integer\"}}}");
+        app.openapi().register_schema("CreateUserRequest", "{\"type\":\"object\",\"properties\":{\"username\":{\"type\":\"string\"},\"age\":{\"type\":\"integer\"}}}");
         
         app.route("/api/users", http::HttpMethod::POST)
             .summary("Create a new user")

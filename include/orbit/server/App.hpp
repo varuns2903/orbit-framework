@@ -13,6 +13,7 @@
 namespace server { class QuicConnectionManager; }
 #endif
 #include <memory>
+#include <mutex>
 
 namespace server {
 
@@ -210,13 +211,24 @@ public:
      * @throws std::runtime_error If the server is not started.
      */
     concurrency::ThreadPool& get_thread_pool() {
+        std::lock_guard<std::mutex> lock(loop_mutex_);
         if (!event_loop_) throw std::runtime_error("Server not started");
         return event_loop_->get_thread_pool();
     }
 
+    /**
+     * @brief This app's OpenAPI registry: its routes, plus schemas added with
+     *        openapi().register_schema(). Each App has its own, so two Apps
+     *        in one process publish separate specs.
+     */
+    openapi::OpenApiRegistry& openapi() { return router_.openapi(); }
+
     // Metrics
     /**
      * @brief Enables Prometheus metrics endpoint.
+     *
+     * Metrics are process-wide, as in other Prometheus clients: with several
+     * Apps in one process, each endpoint reports the same totals.
      * @param path The URL path for metrics (default is "/metrics").
      * @return Reference to the App instance for chaining.
      */
@@ -275,6 +287,11 @@ private:
 #endif
     std::unique_ptr<network::TlsContext> tls_context_;
     std::unique_ptr<EventLoop> event_loop_;
+    // listen() creates event_loop_ on the server thread while stop() may run
+    // on any thread (a test, a signal, an admin endpoint).
+    std::mutex loop_mutex_;
+    bool stop_requested_ = false; // guarded by loop_mutex_; a stop before the loop exists still applies
+    unsigned seen_signal_seq_ = 0; // loop thread only
 };
 
 } // namespace server
