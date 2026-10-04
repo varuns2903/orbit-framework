@@ -110,3 +110,8 @@ for every available method) and test:
 curl http://localhost:8080
 curl http://localhost:8080/api/status
 ```
+
+## Upgrading
+
+Moving to a newer Orbit release? The [Migration Guide](migration.md) lists the
+changes each release needs in your code and build files.
