@@ -567,6 +567,7 @@ void Connection::send_headers(http::HttpResponse& response) {
         }
     }
 
+    if (manager_.shutting_down()) should_close_ = true;
     if (should_close_) {
         response.headers["Connection"] = "close";
     } else {
@@ -599,6 +600,7 @@ void Connection::send(http::HttpResponse&& response) {
         }
     }
 
+    if (manager_.shutting_down()) should_close_ = true;
     if (should_close_) {
         response.headers["Connection"] = "close";
     } else {

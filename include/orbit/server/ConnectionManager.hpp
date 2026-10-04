@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <memory>
 #include <mutex>
+#include <atomic>
 
 namespace server {
 
@@ -59,7 +60,14 @@ public:
     /// Connection::on_server_shutdown). Called repeatedly while draining.
     void notify_shutdown();
 
+    /// Any thread: set as soon as shutdown is requested, before the event
+    /// loop gets to notify_shutdown(), so responses sent in between already
+    /// carry "Connection: close".
+    void mark_shutting_down() { shutting_down_ = true; }
+    bool shutting_down() const { return shutting_down_.load(); }
+
 private:
+    std::atomic<bool> shutting_down_{false};
     network::Proactor& proactor_;
     const routing::Router& router_;
     concurrency::ThreadPool& thread_pool_;

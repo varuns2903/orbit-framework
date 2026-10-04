@@ -113,6 +113,7 @@ void EventLoop::stop() {
 
 void EventLoop::request_shutdown(std::chrono::steady_clock::time_point deadline) {
     shutdown_deadline_ = deadline.time_since_epoch().count();
+    connection_manager_.mark_shutting_down();
     shutdown_requested_ = true;
 }
 
