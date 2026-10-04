@@ -65,8 +65,10 @@ would let any website act as the signed-in user.
 ## JWT Authentication
 
 `middleware::jwt_auth()` verifies an `Authorization: Bearer <token>` header and
-stores the token's claims in `req.user`. Only HS256 tokens are accepted: the
-algorithm comes from the server configuration, never from the token header.
+stores the token's claims in `req.user`. HS256, RS256 and ES256 are supported.
+Each configured key has exactly one algorithm, and a token must use the
+algorithm of the key it is checked against, so it cannot pick a weaker one
+(e.g. `none`, or HS256 with the public key as the secret).
 
 ```cpp
 #include <orbit/middleware/JwtAuth.hpp>
@@ -81,8 +83,29 @@ app.use(middleware::jwt_auth(jwt));
 ```
 
 `exp` and `nbf` are enforced whenever they are present. Failures return
-`401` with `WWW-Authenticate: Bearer`. An empty secret throws
+`401` with `WWW-Authenticate: Bearer`. Configuring no key throws
 `std::invalid_argument`; secrets shorter than 32 bytes log a warning.
+
+**Public keys (RS256 / ES256).** Tokens from an identity provider (Auth0,
+Keycloak, Cognito, Azure AD, ...) are signed with a private key; verify them
+with the public key, or let Orbit fetch the provider's key set:
+
+```cpp
+middleware::JwtOptions jwt;
+// One key: an RSA key (>= 2048 bits) verifies RS256, an EC P-256 key ES256.
+jwt.public_key_pem = read_file("issuer-public.pem");
+// Or the provider's JSON Web Key Set; the token's "kid" picks the key.
+jwt.jwks_url = "https://auth.example.com/.well-known/jwks.json";
+jwt.jwks_refresh = std::chrono::hours(1);       // refetch at least this often
+jwt.issuer = "https://auth.example.com/";
+jwt.audience = "orders-api";
+app.use(middleware::jwt_auth(jwt));
+```
+
+The key set is fetched on first use and cached. A token whose `kid` is unknown
+triggers a refetch (so key rotation works without a restart), but never more
+often than `jwks_min_refetch` (default 30 s), so forged `kid`s cannot flood the
+provider. If a fetch fails, the previous keys stay in use.
 
 ## Route-Specific Middleware
 
