@@ -154,14 +154,22 @@ void Http2Session::process_data(const uint8_t* data, size_t len) {
     std::lock_guard<std::mutex> lock(session_mutex_);
     ssize_t rv = nghttp2_session_mem_recv(session_, data, len);
     if (rv < 0) {
-        if (auto conn = connection_.lock()) conn->mark_for_close();
-        return;
+        // A fatal error nghttp2 did not already answer: tell the peer why
+        // (GOAWAY) before closing; send_pending() then closes.
+        nghttp2_session_terminate_session(session_, NGHTTP2_PROTOCOL_ERROR);
     }
     send_pending();
 }
 
 void Http2Session::send_pending() {
     nghttp2_session_send(session_);
+    // When nghttp2 wants neither to read nor to write, the session is over
+    // (a GOAWAY was sent or received and every stream has finished). Close
+    // once what was queued, including our GOAWAY, has been written; leaving
+    // the connection open made peers wait for a close that never came.
+    if (!nghttp2_session_want_read(session_) && !nghttp2_session_want_write(session_)) {
+        if (auto conn = connection_.lock()) conn->mark_for_close();
+    }
 }
 
 int Http2Session::on_begin_headers(nghttp2_session* session, const nghttp2_frame* frame, void* user_data) {
@@ -206,9 +214,10 @@ int Http2Session::on_frame_recv(nghttp2_session* session, const nghttp2_frame* f
     auto it = self->streams_.find(frame->hd.stream_id);
     if (it == self->streams_.end()) return 0;
     
+    // END_STREAM can arrive on the request HEADERS, the last DATA frame, or
+    // a trailing HEADERS frame (trailers, e.g. after a gRPC-style body).
     bool ends_request = (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) &&
-        ((frame->hd.type == NGHTTP2_HEADERS && frame->headers.cat == NGHTTP2_HCAT_REQUEST) ||
-         frame->hd.type == NGHTTP2_DATA);
+        (frame->hd.type == NGHTTP2_HEADERS || frame->hd.type == NGHTTP2_DATA);
     if (ends_request) {
         if (it->second->body_too_large) {
             self->submit_status_locked(frame->hd.stream_id, http::HttpStatus::PayloadTooLarge);

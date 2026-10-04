@@ -137,6 +137,11 @@ loop, parsers, or QUIC code.
 For threading changes, build a separate tree with ThreadSanitizer
 (`-DORBIT_ENABLE_TSAN=ON -DCMAKE_BUILD_TYPE=Debug`; it replaces ASan/UBSan).
 
+Protocol conformance runs in CI as well: the Autobahn TestSuite for WebSockets
+(`autobahn.yml`) and h2spec for HTTP/2 (`h2spec.yml`; the few failures that are
+nghttp2 behaviour under RFC 9113 are listed with reasons in
+`.github/h2spec/check_results.py`, and any other failure fails the build).
+
 CI (`.github/workflows/sanitizers.yml`) runs the suite under ASan/UBSan
 and TSan (both blocking), and runs clang-tidy (`.clang-tidy`)
 on the source files a pull request changes, as a report.
