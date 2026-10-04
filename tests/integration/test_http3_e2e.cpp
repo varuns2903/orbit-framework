@@ -9,6 +9,7 @@
 #include <openssl/x509.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -147,6 +148,10 @@ class Http3Test : public ::testing::Test {
 protected:
     static server::App* app;
     static std::thread server_thread;
+    // Set when the server could not be started. Reported by each test:
+    // gtest turns a SetUpTestSuite failure into skipped tests, which ctest
+    // then counts as skipped rather than failed.
+    static std::string setup_error;
 
     static void SetUpTestSuite() {
         if (!curl_has_http3()) return;
@@ -154,7 +159,10 @@ protected:
         g_cert = (dir / "orbit_h3_cert.pem").string();
         g_key = (dir / "orbit_h3_key.pem").string();
         g_file = (dir / "orbit_h3_file.bin").string();
-        ASSERT_TRUE(make_self_signed(g_cert, g_key));
+        if (!make_self_signed(g_cert, g_key)) {
+            setup_error = "could not create a test certificate";
+            return;
+        }
         {
             std::ofstream f(g_file, std::ios::binary);
             std::string data = pattern(3 * 1024 * 1024 + 123);
@@ -208,6 +216,11 @@ protected:
             res.send_file(g_file, "application/octet-stream");
             w->send(std::move(res));
         });
+        app->get("/blob", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
+            http::HttpResponse res;
+            res.set_body(pattern(256 * 1024));
+            w->send(std::move(res));
+        });
         app->get("/empty", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
             http::HttpResponse res;
             res.status(http::HttpStatus::NoContent);
@@ -230,11 +243,18 @@ protected:
             if (probe.code == CURLE_OK && probe.status == 200) return;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-        FAIL() << "server never answered over HTTP/3: " << describe(probe);
+        setup_error = "server never answered over HTTP/3: " + describe(probe);
     }
 
     void SetUp() override {
-        if (!curl_has_http3()) GTEST_SKIP() << "libcurl was built without HTTP/3 support";
+        if (curl_has_http3()) {
+            if (!setup_error.empty()) FAIL() << setup_error;
+            return;
+        }
+        // CI sets this so a libcurl without HTTP/3 fails loudly instead of
+        // skipping the whole suite unnoticed.
+        if (std::getenv("ORBIT_REQUIRE_HTTP3_TESTS")) FAIL() << "libcurl was built without HTTP/3 support";
+        GTEST_SKIP() << "libcurl was built without HTTP/3 support";
     }
 
     static void TearDownTestSuite() {
@@ -252,6 +272,7 @@ protected:
 
 server::App* Http3Test::app = nullptr;
 std::thread Http3Test::server_thread;
+std::string Http3Test::setup_error;
 
 TEST_F(Http3Test, RoutesQueryCookiesAndHooks) {
     Request req;
@@ -347,6 +368,7 @@ TEST_F(Http3Test, ManySequentialRequests) {
 TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
     // Handlers finish on different worker threads while the event loop
     // keeps reading: responses are submitted concurrently on one connection.
+    // Kept small enough for the valgrind run in CI.
     constexpr int kStreams = 16;
     CURLM* multi = curl_multi_init();
     curl_multi_setopt(multi, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
@@ -355,7 +377,7 @@ TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
     std::vector<std::string> bodies(kStreams);
     std::vector<std::string> urls;
     for (int i = 0; i < kStreams; ++i) {
-        urls.push_back("https://127.0.0.1:" + std::to_string(kPort) + (i % 2 ? "/file" : "/users/" + std::to_string(i)));
+        urls.push_back("https://127.0.0.1:" + std::to_string(kPort) + (i % 2 ? "/blob" : "/users/" + std::to_string(i)));
     }
     for (int i = 0; i < kStreams; ++i) {
         CURL* c = curl_easy_init();
@@ -384,7 +406,7 @@ TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
         connects += n;
         EXPECT_EQ(status, 200) << "stream " << i;
         if (i % 2) {
-            EXPECT_EQ(bodies[i].size(), 3u * 1024 * 1024 + 123) << "stream " << i;
+            EXPECT_EQ(bodies[i].size(), 256u * 1024) << "stream " << i;
             EXPECT_TRUE(bodies[i] == pattern(bodies[i].size())) << "stream " << i;
         } else {
             EXPECT_EQ(bodies[i], "user " + std::to_string(i));

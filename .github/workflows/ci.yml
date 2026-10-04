@@ -91,6 +91,9 @@ jobs:
 
     - name: Run Tests
       working-directory: build
+      env:
+        # vcpkg's http3-tests feature provides libcurl with HTTP/3.
+        ORBIT_REQUIRE_HTTP3_TESTS: "1"
       # A hung test fails within minutes instead of holding the runner for
       # GitHub's 6-hour job limit.
       run: ctest -C Release --output-on-failure --timeout 300

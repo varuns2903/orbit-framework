@@ -23,11 +23,34 @@ namespace {
 
 constexpr size_t kFileChunk = 64 * 1024;
 
-/// Owns the strings an nghttp3_nv list points into.
-struct Http3HeaderBlock {
-    std::vector<std::string> storage;
-    std::vector<nghttp3_nv> nvs;
-};
+} // namespace
+
+namespace quic::detail {
+
+void SentChunks::push(std::string chunk) {
+    if (!chunk.empty()) chunks_.push_back(std::move(chunk));
+}
+
+size_t SentChunks::hand_out(nghttp3_vec* vec, size_t n) {
+    size_t count = 0;
+    while (count < n && handed_out_ < chunks_.size()) {
+        std::string& chunk = chunks_[handed_out_];
+        vec[count].base = reinterpret_cast<uint8_t*>(chunk.data());
+        vec[count].len = chunk.size();
+        ++handed_out_;
+        ++count;
+    }
+    return count;
+}
+
+void SentChunks::ack(uint64_t bytes) {
+    front_acked_ += bytes;
+    while (handed_out_ > 0 && front_acked_ >= chunks_.front().size()) {
+        front_acked_ -= chunks_.front().size();
+        chunks_.pop_front();
+        --handed_out_;
+    }
+}
 
 Http3HeaderBlock build_response_headers(const http::HttpResponse& response) {
     Http3HeaderBlock block;
@@ -55,7 +78,7 @@ Http3HeaderBlock build_response_headers(const http::HttpResponse& response) {
     return block;
 }
 
-} // namespace
+} // namespace quic::detail
 
 Http3Stream::~Http3Stream() {
     if (file_fd != -1) utils::file::close(file_fd);
@@ -115,13 +138,7 @@ std::shared_ptr<Http3Stream> QuicHttp3Session::get_or_create_stream(int64_t stre
 int QuicHttp3Session::on_acked_stream_data(nghttp3_conn *, int64_t, uint64_t datalen, void *, void *stream_user_data) {
     auto* s = static_cast<Http3Stream*>(stream_user_data);
     if (!s) return 0;
-    // ACKs cover the body bytes in the order read_data handed them out.
-    s->front_acked += datalen;
-    while (s->handed_out > 0 && s->front_acked >= s->chunks.front().size()) {
-        s->front_acked -= s->chunks.front().size();
-        s->chunks.pop_front();
-        --s->handed_out;
-    }
+    s->chunks.ack(datalen);
     return 0;
 }
 
@@ -254,26 +271,19 @@ nghttp3_ssize QuicHttp3Session::read_data(nghttp3_conn *, int64_t, nghttp3_vec *
         return 0;
     }
     // File bodies are read a piece at a time; ACKed pieces are freed.
-    if (s->file_fd != -1 && s->handed_out == s->chunks.size() && s->file_offset < s->file_end) {
+    if (s->file_fd != -1 && !s->chunks.has_unsent() && s->file_offset < s->file_end) {
         size_t want = static_cast<size_t>((std::min<int64_t>)(static_cast<int64_t>(kFileChunk), s->file_end - s->file_offset));
         std::string piece(want, '\0');
         long long n = utils::file::pread(s->file_fd, piece.data(), want, s->file_offset);
         if (n <= 0) return NGHTTP3_ERR_CALLBACK_FAILURE; // the file shrank or failed: reset the stream
         piece.resize(static_cast<size_t>(n));
         s->file_offset += n;
-        s->chunks.push_back(std::move(piece));
+        s->chunks.push(std::move(piece));
     }
 
-    size_t n = 0;
-    while (n < veccnt && s->handed_out < s->chunks.size()) {
-        std::string& chunk = s->chunks[s->handed_out];
-        vec[n].base = reinterpret_cast<uint8_t*>(chunk.data());
-        vec[n].len = chunk.size();
-        ++s->handed_out;
-        ++n;
-    }
+    size_t n = s->chunks.hand_out(vec, veccnt);
 
-    bool more = s->handed_out < s->chunks.size() ||
+    bool more = s->chunks.has_unsent() ||
                 (s->file_fd != -1 && s->file_offset < s->file_end) ||
                 (s->streaming && !s->ended);
     if (!more) {
@@ -296,14 +306,14 @@ void QuicHttp3Session::submit_response(int64_t stream_id, http::HttpResponse& re
     if (it == streams_.end()) return; // the stream was reset or closed meanwhile
     Http3Stream& s = *it->second;
 
-    Http3HeaderBlock headers = build_response_headers(response);
+    quic::detail::Http3HeaderBlock headers = quic::detail::build_response_headers(response);
     nghttp3_data_reader reader{read_data};
     if (has_body) {
         s.streaming = streaming;
         // A streamed response's headers object stays the caller's: copy.
         if (!response.body.empty()) {
-            if (streaming) s.chunks.push_back(response.body);
-            else s.chunks.push_back(std::move(response.body));
+            if (streaming) s.chunks.push(response.body);
+            else s.chunks.push(std::move(response.body));
         }
         if (response.file_fd != -1) {
             // Take ownership: the response would otherwise close it while
@@ -324,7 +334,7 @@ void QuicHttp3Session::submit_response(int64_t stream_id, http::HttpResponse& re
 void QuicHttp3Session::submit_data(int64_t stream_id, std::string_view chunk) {
     auto it = streams_.find(stream_id);
     if (it == streams_.end() || !it->second->streaming || it->second->ended || chunk.empty()) return;
-    it->second->chunks.emplace_back(chunk);
+    it->second->chunks.push(std::string(chunk));
     nghttp3_conn_resume_stream(httpconn_, stream_id);
 }
 

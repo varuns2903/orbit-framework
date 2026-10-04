@@ -34,6 +34,23 @@ bool quic_random_bytes(uint8_t* dest, size_t len);
 
 } // namespace detail
 
+namespace quic::detail {
+
+/// What happens to a connection after an ngtcp2 error.
+enum class ErrorAction {
+    Drain, ///< The peer closed: send nothing more, keep state for 3 PTOs.
+    Drop,  ///< Forget the connection without sending anything.
+    Close  ///< Send CONNECTION_CLOSE, then keep state for 3 PTOs.
+};
+
+/// For a failed ngtcp2_conn_read_pkt (RFC 9000 section 10.2).
+ErrorAction on_read_error(int ngtcp2_error);
+
+/// For a failed ngtcp2_conn_handle_expiry: an idle timeout ends the
+/// connection silently (RFC 9000 section 10.1); other errors close it.
+ErrorAction on_expiry_error(int ngtcp2_error);
+
+} // namespace quic::detail
 
 class QuicConnectionManager;
 class QuicHttp3Session;
@@ -123,6 +140,7 @@ private:
 
     void start_closing(int liberr);
     void enter_draining();
+    void apply_error_action(quic::detail::ErrorAction action, int liberr);
 
     ngtcp2_tstamp get_timestamp() const;
     bool init_ssl(SSL_CTX* ssl_ctx);

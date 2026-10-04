@@ -11,6 +11,15 @@
 
 namespace server {
 
+namespace quic::detail {
+
+bool acceptable_first_packet(const uint8_t* data, size_t datalen) {
+    ngtcp2_pkt_hd hd;
+    return ngtcp2_accept(&hd, data, datalen) == 0;
+}
+
+} // namespace quic::detail
+
 QuicConnectionManager::QuicConnectionManager(network::UdpSocket& socket, SSL_CTX* ssl_ctx)
     : socket_(socket), ssl_ctx_(ssl_ctx) {
     if (NGTCP2_CRYPTO_CONFIGURE_SERVER_CONTEXT(ssl_ctx_) != 0) {
@@ -47,8 +56,8 @@ void QuicConnectionManager::on_packet_received(const uint8_t* data, size_t datal
         conn->process_packet(data, datalen, sender_addr);
         sync_connection(conn);
     } else {
-        if (ver_cid.version == 0) {
-            LOG_DEBUG("QCM: Dropping version negotiation packet");
+        if (!quic::detail::acceptable_first_packet(data, datalen)) {
+            LOG_DEBUG("QCM: Dropping packet for unknown connection that cannot start one");
             return;
         }
         

@@ -14,6 +14,47 @@ namespace server {
 
 class QuicConnection;
 
+namespace quic::detail {
+
+/**
+ * @brief Response body bytes handed to nghttp3, kept until the peer ACKs them.
+ *
+ * nghttp3 references the bytes it is given until acked_stream_data reports
+ * them acknowledged, which happens in the order they were handed out. A
+ * deque never moves its elements, so handed-out chunks stay put while more
+ * are appended.
+ */
+class SentChunks {
+public:
+    /// Appends a chunk to send. Empty chunks are ignored.
+    void push(std::string chunk);
+    /// Points up to @p n vecs at chunks not handed out yet; returns how many.
+    size_t hand_out(nghttp3_vec* vec, size_t n);
+    /// Frees chunks whose bytes are all acknowledged.
+    void ack(uint64_t bytes);
+    /// True if some chunk has not been handed out yet.
+    bool has_unsent() const { return handed_out_ < chunks_.size(); }
+    /// Chunks still held (not yet handed out, or not yet acknowledged).
+    size_t held() const { return chunks_.size(); }
+
+private:
+    std::deque<std::string> chunks_;
+    size_t handed_out_ = 0;    // chunks at the front given to nghttp3
+    uint64_t front_acked_ = 0; // acknowledged bytes of chunks_.front()
+};
+
+/// Owns the strings an nghttp3_nv list points into.
+struct Http3HeaderBlock {
+    std::vector<std::string> storage;
+    std::vector<nghttp3_nv> nvs;
+};
+
+/// Encodes a response's header fields: `:status` first, names lowercased,
+/// connection-specific fields dropped (RFC 9114 section 4.2).
+Http3HeaderBlock build_response_headers(const http::HttpResponse& response);
+
+} // namespace quic::detail
+
 /// One request/response exchange on an HTTP/3 stream.
 struct Http3Stream {
     int64_t stream_id;
@@ -25,12 +66,7 @@ struct Http3Stream {
     bool dispatched = false;
     bool body_too_large = false;
 
-    // Response body. nghttp3 references these bytes until the peer ACKs
-    // them, so chunks are dropped only from acked_stream_data. A deque
-    // never moves its elements, so handed-out chunks stay put.
-    std::deque<std::string> chunks;
-    size_t handed_out = 0;  // chunks at the front given to nghttp3
-    uint64_t front_acked = 0; // ACKed bytes of chunks.front()
+    quic::detail::SentChunks chunks; // response body
     bool streaming = false; // body produced by write_chunk() until end()
     bool ended = false;
     int file_fd = -1;       // file body: bytes [file_offset, file_end)

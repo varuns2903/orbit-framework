@@ -50,6 +50,17 @@
         }
       ]
     },
+    "http3-tests": {
+      "description": "libcurl with HTTP/3, for the HTTP/3 end-to-end tests",
+      "dependencies": [
+        {
+          "name": "curl",
+          "features": [
+            "http3"
+          ]
+        }
+      ]
+    },
     "grpc": {
       "description": "gRPC support",
       "dependencies": [

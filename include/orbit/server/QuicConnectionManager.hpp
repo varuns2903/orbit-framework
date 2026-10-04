@@ -26,6 +26,16 @@ struct Http3Context {
 
 class QuicConnection; // Forward declaration
 
+namespace quic::detail {
+
+/// True if a packet whose connection ID is unknown may open a connection:
+/// a client Initial of at least 1200 bytes with a Destination Connection
+/// ID of at least 8 bytes (RFC 9000 sections 7.2 and 14.1). Anything else
+/// is dropped, so it cannot make the server allocate connection state.
+bool acceptable_first_packet(const uint8_t* data, size_t datalen);
+
+} // namespace quic::detail
+
 /// Hashes connection IDs with a random per-process key. Clients choose the
 /// IDs of their Initial packets, so an unkeyed hash would let them pile
 /// entries into one bucket.

@@ -4,12 +4,26 @@
 #include <cstring>
 #include <orbit/network/PlatformSocket.hpp>
 
+#ifdef _WIN32
+#include <mstcpip.h>
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
+#endif
+
 namespace network {
 
 UdpSocket::UdpSocket() : Socket(::socket(AF_INET, SOCK_DGRAM, 0)) {
     if (!is_valid()) {
         throw std::runtime_error(std::string("Failed to create UDP socket: ") + std::to_string(network::get_last_socket_error()));
     }
+#ifdef _WIN32
+    // Otherwise an ICMP "port unreachable" for one peer makes a later
+    // recvfrom() fail with WSAECONNRESET, as if the socket itself had failed.
+    BOOL report_resets = FALSE;
+    DWORD returned = 0;
+    WSAIoctl(fd(), SIO_UDP_CONNRESET, &report_resets, sizeof(report_resets), nullptr, 0, &returned, nullptr, nullptr);
+#endif
 }
 
 void UdpSocket::bind(int port) {
