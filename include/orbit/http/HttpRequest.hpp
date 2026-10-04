@@ -3,12 +3,17 @@
 #undef DELETE
 #endif
 #include <deque>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <orbit/http/json.hpp>
 #include <orbit/http/MultipartForm.hpp>
 #include <orbit/utils/CaseInsensitive.hpp>
+
+namespace middleware {
+class Session;
+}
 
 namespace http {
 
@@ -31,7 +36,8 @@ struct HttpRequest {
     std::unordered_map<std::string, std::string> params;
     std::unordered_map<std::string, std::string> cookies;
     std::string client_ip;
-    std::string session_id; // Set by SessionManager middleware
+    std::string session_id; // Set by the session middleware
+    std::shared_ptr<middleware::Session> session; ///< Set by the session middleware
     nlohmann::json user; // Populated by JwtAuth middleware
 
     mutable nlohmann::json json_body; // Cached parsed JSON

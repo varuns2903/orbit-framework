@@ -23,8 +23,9 @@ app.use(middleware::cors());
 
 ## Sessions
 
-`middleware::session()` gives every client a session identifier stored in
-Redis and exposes it as `req.session_id`:
+`middleware::session()` gives every client a session and exposes it as
+`req.session` (and its identifier as `req.session_id`). Data is stored on the
+server; the client only holds an opaque `HttpOnly` cookie.
 
 ```cpp
 #include <orbit/middleware/SessionManager.hpp>
@@ -33,13 +34,38 @@ middleware::SessionOptions opts;
 opts.secure = true;          // send the cookie only over HTTPS
 opts.same_site = "Lax";
 opts.ttl_seconds = 3600;     // idle lifetime, refreshed on every request
+
+// In-process store (single server):
+app.use(middleware::session(std::make_shared<middleware::MemorySessionStore>(), opts));
+// Shared across instances (needs ORBIT_ENABLE_REDIS):
 app.use(middleware::session("127.0.0.1", 6379, opts));
+
+app.post("/login", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> res) {
+    // ... check credentials ...
+    req.session->regenerate();              // new id after login (prevents session fixation)
+    req.session->set("user_id", "42");
+    res->send(http::HttpResponse().send("welcome"));
+});
+
+app.get("/me", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> res) {
+    auto user = req.session->get("user_id"); // std::optional<std::string>
+    res->send(http::HttpResponse().send(user.value_or("anonymous")));
+});
+
+app.post("/logout", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> res) {
+    req.session->destroy();                 // deletes the data and expires the cookie
+    res->send(http::HttpResponse().send("bye"));
+});
 ```
 
-Identifiers are 256-bit values from the system CSPRNG (`utils::secure_random_hex`).
-A `session_id` cookie is accepted only if Redis holds that identifier, so
-clients cannot pick their own session (session fixation). Requires
-`ORBIT_ENABLE_REDIS=ON`.
+- Changes are saved when the response is sent; unchanged sessions only have
+  their lifetime refreshed.
+- Identifiers are 256-bit values from the system CSPRNG. A cookie is accepted
+  only if the store holds that session, so clients cannot choose their own id.
+- `save_uninitialized = false` creates no session (and sends no cookie) until
+  something is written, so anonymous traffic and bots do not fill the store.
+- Implement `middleware::SessionStore` (`load`, `save`, `touch`, `destroy`) to
+  keep sessions elsewhere, e.g. in a database.
 
 ## CORS
 

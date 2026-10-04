@@ -83,6 +83,12 @@ public:
      */
     bool expire(const std::string& key, int seconds);
 
+    /**
+     * @brief Deletes a key.
+     * @return true if the key existed.
+     */
+    bool del(const std::string& key);
+
 private:
     // Callers must hold mutex_.
     bool connect_locked();
