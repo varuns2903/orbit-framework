@@ -228,4 +228,9 @@ bool RedisClient::expire(const std::string& key, int seconds) {
     return res == "1";
 }
 
+bool RedisClient::del(const std::string& key) {
+    std::string res = send_command({"DEL", key});
+    return res == "1";
+}
+
 } // namespace database
