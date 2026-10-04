@@ -95,6 +95,46 @@ HeaderBlock build_response_headers(const http::HttpResponse& response) {
     return block;
 }
 
+bool apply_request_target(std::string_view target, http::HttpRequest& req) {
+    req.target = std::string(target);
+    size_t q = target.find('?');
+    if (!http::percent_decode(target.substr(0, q), req.uri, false, true)) return false;
+    if (q == std::string_view::npos) return true;
+    std::string_view query = target.substr(q + 1);
+    size_t pos = 0;
+    while (pos <= query.size()) {
+        size_t amp = query.find('&', pos);
+        std::string_view kv = query.substr(pos, amp == std::string_view::npos ? std::string_view::npos : amp - pos);
+        if (!kv.empty()) {
+            size_t eq = kv.find('=');
+            std::string key, value;
+            if (!http::percent_decode(kv.substr(0, eq), key, true, false) ||
+                !http::percent_decode(eq == std::string_view::npos ? std::string_view{} : kv.substr(eq + 1), value, true, false)) {
+                return false;
+            }
+            req.query[key] = value;
+        }
+        if (amp == std::string_view::npos) break;
+        pos = amp + 1;
+    }
+    return true;
+}
+
+void parse_cookies(std::string_view cookies, http::HttpRequest& req) {
+    size_t pos = 0;
+    while (pos < cookies.size()) {
+        while (pos < cookies.size() && cookies[pos] == ' ') ++pos;
+        size_t semi = cookies.find(';', pos);
+        std::string_view pair = cookies.substr(pos, semi == std::string_view::npos ? std::string_view::npos : semi - pos);
+        size_t eq = pair.find('=');
+        if (eq != std::string_view::npos) {
+            req.cookies[std::string(pair.substr(0, eq))] = std::string(pair.substr(eq + 1));
+        }
+        if (semi == std::string_view::npos) break;
+        pos = semi + 1;
+    }
+}
+
 } // namespace detail
 
 // ---------------- Http2Session ----------------
@@ -294,44 +334,12 @@ void Http2Session::dispatch_request(std::shared_ptr<StreamContext> stream_ctx) {
     }
     if (!stream_ctx->backing_cookie.empty()) {
         req.headers["cookie"] = stream_ctx->backing_cookie;
-        std::string_view cookies = stream_ctx->backing_cookie;
-        size_t pos = 0;
-        while (pos < cookies.size()) {
-            while (pos < cookies.size() && cookies[pos] == ' ') ++pos;
-            size_t semi = cookies.find(';', pos);
-            std::string_view pair = cookies.substr(pos, semi == std::string_view::npos ? std::string_view::npos : semi - pos);
-            size_t eq = pair.find('=');
-            if (eq != std::string_view::npos) {
-                req.cookies[std::string(pair.substr(0, eq))] = std::string(pair.substr(eq + 1));
-            }
-            if (semi == std::string_view::npos) break;
-            pos = semi + 1;
-        }
+        detail::parse_cookies(stream_ctx->backing_cookie, req);
     }
 
     // :path carries the query string. Route on the decoded path and expose a
     // decoded query, exactly as the HTTP/1.1 parser does.
-    std::string_view target = stream_ctx->backing_uri;
-    size_t q = target.find('?');
-    bool target_ok = http::percent_decode(target.substr(0, q), req.uri, false, true);
-    if (target_ok && q != std::string_view::npos) {
-        std::string_view query = target.substr(q + 1);
-        size_t pos = 0;
-        while (target_ok && pos <= query.size()) {
-            size_t amp = query.find('&', pos);
-            std::string_view kv = query.substr(pos, amp == std::string_view::npos ? std::string_view::npos : amp - pos);
-            if (!kv.empty()) {
-                size_t eq = kv.find('=');
-                std::string key, value;
-                target_ok = http::percent_decode(kv.substr(0, eq), key, true, false) &&
-                            http::percent_decode(eq == std::string_view::npos ? std::string_view{} : kv.substr(eq + 1), value, true, false);
-                if (target_ok) req.query[key] = value;
-            }
-            if (amp == std::string_view::npos) break;
-            pos = amp + 1;
-        }
-    }
-    if (!target_ok) {
+    if (!detail::apply_request_target(stream_ctx->backing_uri, req)) {
         // Malformed escape, or an encoded '/', '\\' or NUL in the path: 400,
         // as for HTTP/1.1. Called from nghttp2 callbacks, so the lock is held.
         submit_status_locked(stream_ctx->stream_id, http::HttpStatus::BadRequest);

@@ -9,7 +9,20 @@
 #include <orbit/network/PlatformSocket.hpp>
 #include <orbit/network/UdpSocket.hpp>
 
+namespace routing { class Router; }
+namespace concurrency { class ThreadPool; }
+namespace network { class Proactor; }
+
 namespace server {
+
+/// What HTTP/3 requests are dispatched with; set by the event loop before
+/// it runs.
+struct Http3Context {
+    const routing::Router* router = nullptr;
+    concurrency::ThreadPool* thread_pool = nullptr;
+    network::Proactor* proactor = nullptr;
+    size_t max_body_size = 0;
+};
 
 class QuicConnection; // Forward declaration
 
@@ -65,9 +78,13 @@ public:
 
     size_t connection_count() const { return unique_connections(); }
 
+    void set_http_context(const Http3Context& ctx) { http_context_ = ctx; }
+    const Http3Context& http_context() const { return http_context_; }
+
 private:
     network::UdpSocket& socket_;
     SSL_CTX* ssl_ctx_{nullptr};
+    Http3Context http_context_;
     std::unordered_map<ngtcp2_cid, std::shared_ptr<QuicConnection>, QuicConnectionIdHash, QuicConnectionIdEqual> connections_;
 
     // Routes newly issued IDs to their connection, drops retired ones, and

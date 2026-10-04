@@ -231,6 +231,12 @@ std::vector<ngtcp2_cid> QuicConnection::take_retired_cids() {
     return std::exchange(retired_cids_, {});
 }
 
+std::string QuicConnection::remote_ip() const {
+    char buf[INET_ADDRSTRLEN] = {};
+    ::inet_ntop(AF_INET, &remote_addr_.sin_addr, buf, sizeof(buf));
+    return buf;
+}
+
 void QuicConnection::extend_stream_credit(int64_t stream_id, uint64_t consumed) {
     if (consumed == 0) return;
     ngtcp2_conn_extend_max_stream_offset(conn_, stream_id, consumed);
@@ -310,6 +316,7 @@ void QuicConnection::send_pending_data() {
         }
         
         if (ndatalen < 0) {
+            LOG_WARN("QUIC: closing connection: " << ngtcp2_strerror(static_cast<int>(ndatalen)));
             start_closing(static_cast<int>(ndatalen)); // a fatal ngtcp2 error
             break;
         }
