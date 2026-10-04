@@ -443,11 +443,18 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     # Fuzz Testing
     option(ENABLE_FUZZING "Build fuzz testing executables" OFF)
     if(ENABLE_FUZZING AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        add_executable(fuzz_http_parser tests/fuzz/fuzz_http_parser.cpp)
-        target_link_libraries(fuzz_http_parser PRIVATE server_core)
-        # Enable libFuzzer and AddressSanitizer
-        target_compile_options(fuzz_http_parser PRIVATE -fsanitize=fuzzer,address -g -O1)
-        target_link_options(fuzz_http_parser PRIVATE -fsanitize=fuzzer,address)
+        # libFuzzer is coverage-guided: the code under test (in server_core)
+        # must carry the coverage instrumentation, not just the harness, or
+        # the fuzzer cannot tell which inputs reach new code.
+        target_compile_options(server_core PRIVATE -fsanitize=fuzzer-no-link,address -g -O1)
+
+        foreach(fuzz_target IN ITEMS fuzz_http_parser fuzz_websocket fuzz_multipart fuzz_http2)
+            add_executable(${fuzz_target} tests/fuzz/${fuzz_target}.cpp)
+            target_link_libraries(${fuzz_target} PRIVATE server_core)
+            # Enable libFuzzer and AddressSanitizer
+            target_compile_options(${fuzz_target} PRIVATE -fsanitize=fuzzer,address -g -O1)
+            target_link_options(${fuzz_target} PRIVATE -fsanitize=fuzzer,address)
+        endforeach()
     endif()
 endif()
 
