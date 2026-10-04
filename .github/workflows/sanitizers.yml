@@ -21,11 +21,10 @@ jobs:
           - name: ASan + UBSan
             flags: -DENABLE_SANITIZERS=ON -DORBIT_ENABLE_TSAN=OFF
             blocking: true
-          # Reports data races. Not blocking yet: known races are being
-          # triaged; the log is uploaded either way.
+          # Reports data races; the suite is race-free, so new races fail CI.
           - name: TSan
             flags: -DENABLE_SANITIZERS=OFF -DORBIT_ENABLE_TSAN=ON
-            blocking: false
+            blocking: true
     continue-on-error: ${{ !matrix.blocking }}
 
     env:

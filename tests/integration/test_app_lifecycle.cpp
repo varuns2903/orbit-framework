@@ -4,7 +4,8 @@
 
 #include <chrono>
 #include <csignal>
-#include <future>
+#include <atomic>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -27,10 +28,33 @@ void wait_until_listening(uint16_t port) {
     }
 }
 
-// Runs app.listen() on a thread; returns a future that is ready when it returns.
-std::future<void> run(server::App& app) {
-    return std::async(std::launch::async, [&app] { app.listen(); });
-}
+// app.listen() on its own thread. (Not std::async: on MSVC <future> pulls in
+// the PPL, whose `concurrency` namespace clashes with Orbit's.)
+class Running {
+public:
+    explicit Running(server::App& app) : done_(std::make_shared<std::atomic<bool>>(false)) {
+        auto done = done_;
+        thread_ = std::thread([&app, done] {
+            app.listen();
+            *done = true;
+        });
+    }
+    ~Running() {
+        if (thread_.joinable()) thread_.join();
+    }
+    // True if listen() returned within `limit`.
+    bool returned_within(std::chrono::milliseconds limit) const {
+        auto deadline = std::chrono::steady_clock::now() + limit;
+        while (!*done_ && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return *done_;
+    }
+
+private:
+    std::shared_ptr<std::atomic<bool>> done_;
+    std::thread thread_;
+};
 
 // A lambda, not a function: route handlers are deduced from operator().
 const auto noop = [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
@@ -79,9 +103,9 @@ TEST(AppLifecycleTest, StopBeforeTheLoopExistsStillStopsIt) {
     cfg.port = 8118;
     server::App app(cfg);
     app.stop(); // before listen(): must not be lost
-    auto done = run(app);
-    EXPECT_EQ(done.wait_for(std::chrono::seconds(5)), std::future_status::ready)
-        << "listen() kept running after an earlier stop()";
+    Running running(app);
+    EXPECT_TRUE(running.returned_within(std::chrono::seconds(5))) << "listen() kept running after an earlier stop()";
+    app.stop(); // let the destructor's join finish even if the check failed
 }
 
 TEST(AppLifecycleTest, StopRightAfterStartingIsSafe) {
@@ -91,9 +115,9 @@ TEST(AppLifecycleTest, StopRightAfterStartingIsSafe) {
         config::ServerConfig cfg;
         cfg.port = 8119;
         server::App app(cfg);
-        auto done = run(app);
+        Running running(app);
         app.stop();
-        ASSERT_EQ(done.wait_for(std::chrono::seconds(5)), std::future_status::ready) << "iteration " << i;
+        ASSERT_TRUE(running.returned_within(std::chrono::seconds(5))) << "iteration " << i;
     }
 }
 
@@ -105,16 +129,16 @@ TEST(AppLifecycleTest, SignalStopsEveryApp) {
     cfg_b.port = 8121;
     server::App a(cfg_a);
     server::App b(cfg_b);
-    auto done_a = run(a);
-    auto done_b = run(b);
+    Running running_a(a);
+    Running running_b(b);
     wait_until_listening(8120);
     wait_until_listening(8121);
 
     // Both Apps installed the handler; one SIGTERM must reach both.
     std::raise(SIGTERM);
 
-    EXPECT_EQ(done_a.wait_for(std::chrono::seconds(5)), std::future_status::ready);
-    EXPECT_EQ(done_b.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+    EXPECT_TRUE(running_a.returned_within(std::chrono::seconds(5)));
+    EXPECT_TRUE(running_b.returned_within(std::chrono::seconds(5)));
     // Clean up whichever did not stop, so a failure does not hang the binary.
     a.stop();
     b.stop();

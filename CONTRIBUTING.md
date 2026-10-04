@@ -138,7 +138,7 @@ For threading changes, build a separate tree with ThreadSanitizer
 (`-DORBIT_ENABLE_TSAN=ON -DCMAKE_BUILD_TYPE=Debug`; it replaces ASan/UBSan).
 
 CI (`.github/workflows/sanitizers.yml`) runs the suite under ASan/UBSan
-(blocking) and TSan (report only for now), and runs clang-tidy (`.clang-tidy`)
+and TSan (both blocking), and runs clang-tidy (`.clang-tidy`)
 on the source files a pull request changes, as a report.
 
 ### Memory leaks
