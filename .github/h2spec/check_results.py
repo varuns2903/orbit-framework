@@ -22,6 +22,11 @@ KNOWN = {
     # is already on the wire, and h2spec expects the GOAWAY first.
     ("http2/5.1.1", "Sends stream identifier that is numerically smaller than previous"):
         "GOAWAY follows an already-sent response",
+    # Timing-dependent: h2spec sends the second HEADERS in a separate write.
+    # When the response to stream 1 is already sent, the stream is closed and
+    # the frame is discarded as above; otherwise nghttp2 sends RST_STREAM.
+    ("http2/5.1", "half closed (remote): Sends a HEADERS frame"):
+        "races the response; closed streams discard frames (RFC 9113)",
     # RFC 9113 deprecated the RFC 7540 priority scheme.
     ("http2/5.3.1", "Sends PRIORITY frame that depend on itself"):
         "RFC 9113 deprecated RFC 7540 priorities",
