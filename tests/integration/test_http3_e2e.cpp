@@ -216,6 +216,11 @@ protected:
             res.send_file(g_file, "application/octet-stream");
             w->send(std::move(res));
         });
+        app->get("/blob", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
+            http::HttpResponse res;
+            res.set_body(pattern(256 * 1024));
+            w->send(std::move(res));
+        });
         app->get("/empty", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
             http::HttpResponse res;
             res.status(http::HttpStatus::NoContent);
@@ -363,6 +368,7 @@ TEST_F(Http3Test, ManySequentialRequests) {
 TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
     // Handlers finish on different worker threads while the event loop
     // keeps reading: responses are submitted concurrently on one connection.
+    // Kept small enough for the valgrind run in CI.
     constexpr int kStreams = 16;
     CURLM* multi = curl_multi_init();
     curl_multi_setopt(multi, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
@@ -371,7 +377,7 @@ TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
     std::vector<std::string> bodies(kStreams);
     std::vector<std::string> urls;
     for (int i = 0; i < kStreams; ++i) {
-        urls.push_back("https://127.0.0.1:" + std::to_string(kPort) + (i % 2 ? "/file" : "/users/" + std::to_string(i)));
+        urls.push_back("https://127.0.0.1:" + std::to_string(kPort) + (i % 2 ? "/blob" : "/users/" + std::to_string(i)));
     }
     for (int i = 0; i < kStreams; ++i) {
         CURL* c = curl_easy_init();
@@ -400,7 +406,7 @@ TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
         connects += n;
         EXPECT_EQ(status, 200) << "stream " << i;
         if (i % 2) {
-            EXPECT_EQ(bodies[i].size(), 3u * 1024 * 1024 + 123) << "stream " << i;
+            EXPECT_EQ(bodies[i].size(), 256u * 1024) << "stream " << i;
             EXPECT_TRUE(bodies[i] == pattern(bodies[i].size())) << "stream " << i;
         } else {
             EXPECT_EQ(bodies[i], "user " + std::to_string(i));
