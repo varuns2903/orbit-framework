@@ -17,7 +17,9 @@ struct Http3Stream {
     http::HttpRequest request;
     std::string body_buffer;
     bool headers_complete{false};
-    std::string response_body; // To store response payload
+    std::string response_body; // must outlive the stream: ngtcp2 may retransmit from it
+    bool response_given = false;
+    bool dispatched = false;
     
     Http3Stream(int64_t id) : stream_id(id) {}
 };
@@ -54,7 +56,9 @@ public:
      * @param fin Whether this is the final data for the stream.
      * @return 0 on success, or a negative error code.
      */
-    int process_stream_data(int64_t stream_id, const uint8_t* data, size_t datalen, bool fin);
+    /// Returns the bytes nghttp3 consumed (owed back as flow-control
+    /// credit), or a negative nghttp3 error.
+    nghttp3_ssize process_stream_data(int64_t stream_id, const uint8_t* data, size_t datalen, bool fin);
     
     /**
      * @brief Serializes HTTP/3 frames and feeds them to ngtcp2.
@@ -75,6 +79,7 @@ private:
     static int on_begin_headers(nghttp3_conn *conn, int64_t stream_id, void *conn_user_data, void *stream_user_data);
     static int on_recv_header(nghttp3_conn *conn, int64_t stream_id, int32_t token, nghttp3_rcbuf *name, nghttp3_rcbuf *value, uint8_t flags, void *conn_user_data, void *stream_user_data);
     static int on_end_headers(nghttp3_conn *conn, int64_t stream_id, int fin, void *conn_user_data, void *stream_user_data);
+    static int on_end_stream(nghttp3_conn *conn, int64_t stream_id, void *conn_user_data, void *stream_user_data);
     
     std::shared_ptr<Http3Stream> get_or_create_stream(int64_t stream_id);
     void handle_request(std::shared_ptr<Http3Stream> stream);

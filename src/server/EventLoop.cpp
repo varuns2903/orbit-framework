@@ -74,11 +74,21 @@ void EventLoop::run() {
             if (timeout_ms < 0 || timeout_ms > 200) timeout_ms = 200;
             // While accepting is paused, check back soon for a free slot.
             if (accept_paused_ && timeout_ms > 20) timeout_ms = 20;
+#ifdef ORBIT_ENABLE_HTTP3
+            // QUIC loss detection and ACK timers are often a few ms away.
+            if (quic_manager_) {
+                int quic_ms = quic_manager_->next_timeout_ms();
+                if (quic_ms >= 0 && quic_ms < timeout_ms) timeout_ms = quic_ms;
+            }
+#endif
             proactor_->run_once(timeout_ms);
 
             resume_accepting_if_ready();
 
             if (tick_hook_) tick_hook_();
+#ifdef ORBIT_ENABLE_HTTP3
+            if (quic_manager_) quic_manager_->handle_timers();
+#endif
 
             timer_manager_.handle_expired_timers([this](int fd) {
                 connection_manager_.remove_connection(fd);

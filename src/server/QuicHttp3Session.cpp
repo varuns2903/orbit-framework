@@ -31,6 +31,7 @@ bool QuicHttp3Session::init() {
     callbacks.begin_headers = on_begin_headers;
     callbacks.recv_header = on_recv_header;
     callbacks.end_headers = on_end_headers;
+    callbacks.end_stream = on_end_stream;
 
     nghttp3_settings settings;
     nghttp3_settings_default(&settings);
@@ -48,15 +49,14 @@ bool QuicHttp3Session::init() {
     return true;
 }
 
-int QuicHttp3Session::process_stream_data(int64_t stream_id, const uint8_t* data, size_t datalen, bool fin) {
+nghttp3_ssize QuicHttp3Session::process_stream_data(int64_t stream_id, const uint8_t* data, size_t datalen, bool fin) {
     if (!httpconn_) return 0;
     
-    int rv = nghttp3_conn_read_stream(httpconn_, stream_id, data, datalen, fin);
-    if (rv < 0) {
-        LOG_ERROR("nghttp3_conn_read_stream failed: rv=" << rv << " msg=" << nghttp3_strerror(rv));
-        return rv;
+    nghttp3_ssize consumed = nghttp3_conn_read_stream(httpconn_, stream_id, data, datalen, fin);
+    if (consumed < 0) {
+        LOG_ERROR("nghttp3_conn_read_stream failed: rv=" << consumed << " msg=" << nghttp3_strerror(static_cast<int>(consumed)));
     }
-    return 0;
+    return consumed;
 }
 
 int QuicHttp3Session::write_streams() {
@@ -92,10 +92,23 @@ int QuicHttp3Session::on_recv_data(nghttp3_conn * /*conn*/, int64_t stream_id, c
     auto session = static_cast<QuicHttp3Session*>(conn_user_data);
     auto stream = session->get_or_create_stream(stream_id);
     stream->body_buffer.append(reinterpret_cast<const char*>(data), datalen);
+    // read_stream's return value excludes DATA payload delivered here; the
+    // application returns that credit once it has taken the bytes.
+    session->quic_conn_.extend_stream_credit(stream_id, datalen);
     return 0;
 }
 
-int QuicHttp3Session::on_deferred_consume(nghttp3_conn *conn, int64_t stream_id, size_t consumed, void *conn_user_data, void *stream_user_data) {
+int QuicHttp3Session::on_end_stream(nghttp3_conn *, int64_t stream_id, void *conn_user_data, void *) {
+    // The request (with its body) is complete.
+    auto session = static_cast<QuicHttp3Session*>(conn_user_data);
+    auto stream = session->get_or_create_stream(stream_id);
+    if (stream->headers_complete && !stream->dispatched) session->handle_request(stream);
+    return 0;
+}
+
+int QuicHttp3Session::on_deferred_consume(nghttp3_conn *, int64_t stream_id, size_t consumed, void *conn_user_data, void *) {
+    // Data nghttp3 held back earlier has now been processed: return its credit.
+    static_cast<QuicHttp3Session*>(conn_user_data)->quic_conn_.extend_stream_credit(stream_id, consumed);
     return 0;
 }
 
@@ -145,13 +158,14 @@ int QuicHttp3Session::on_end_headers(nghttp3_conn *conn, int64_t stream_id, int 
     auto stream = session->get_or_create_stream(stream_id);
     stream->headers_complete = true;
     
-    if (fin) {
+    if (fin && !stream->dispatched) {
         session->handle_request(stream);
     }
     return 0;
 }
 
 void QuicHttp3Session::handle_request(std::shared_ptr<Http3Stream> stream) {
+    stream->dispatched = true;
     stream->request.body = stream->body_buffer;
     LOG_DEBUG("HTTP/3 Request received on stream " << stream->stream_id << " URI: " << stream->request.uri);
     
@@ -173,16 +187,15 @@ void QuicHttp3Session::handle_request(std::shared_ptr<Http3Stream> stream) {
         (void)veccnt;
         (void)conn_user_data;
         auto s = static_cast<Http3Stream*>(stream_user_data);
-        if (s->response_body.empty()) {
-            *pflags |= NGHTTP3_DATA_FLAG_EOF;
+        *pflags |= NGHTTP3_DATA_FLAG_EOF;
+        if (s->response_given || s->response_body.empty()) {
             return 0;
         }
+        // The buffer stays untouched until the stream closes: nghttp3 and
+        // ngtcp2 reference it until the peer acknowledges the data.
         vec[0].base = (uint8_t*)s->response_body.data();
         vec[0].len = s->response_body.size();
-        *pflags |= NGHTTP3_DATA_FLAG_EOF;
-        
-        // Clear body so we don't send it again
-        s->response_body.clear();
+        s->response_given = true;
         return 1;
     };
     

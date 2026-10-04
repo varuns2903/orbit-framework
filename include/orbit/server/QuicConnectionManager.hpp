@@ -13,14 +13,11 @@ namespace server {
 
 class QuicConnection; // Forward declaration
 
+/// Hashes connection IDs with a random per-process key. Clients choose the
+/// IDs of their Initial packets, so an unkeyed hash would let them pile
+/// entries into one bucket.
 struct QuicConnectionIdHash {
-    std::size_t operator()(const ngtcp2_cid& cid) const {
-        std::size_t hash = 0;
-        for (size_t i = 0; i < cid.datalen; ++i) {
-            hash ^= (static_cast<std::size_t>(cid.data[i]) << (i % 8));
-        }
-        return hash;
-    }
+    std::size_t operator()(const ngtcp2_cid& cid) const;
 };
 
 struct QuicConnectionIdEqual {
@@ -60,13 +57,23 @@ public:
      */
     void send_packet(const uint8_t* data, size_t datalen, const sockaddr* remote_addr, socklen_t remote_addrlen);
 
-private:    // Periodically handle QUIC timers for all connections
+    /// Event-loop thread: runs due timers and forgets finished connections.
     void handle_timers();
+
+    /// Milliseconds until a connection's next timer, or -1 if none.
+    int next_timeout_ms() const;
+
+    size_t connection_count() const { return unique_connections(); }
 
 private:
     network::UdpSocket& socket_;
     SSL_CTX* ssl_ctx_{nullptr};
     std::unordered_map<ngtcp2_cid, std::shared_ptr<QuicConnection>, QuicConnectionIdHash, QuicConnectionIdEqual> connections_;
+
+    // Routes newly issued IDs to their connection, drops retired ones, and
+    // removes the connection entirely once it has closed.
+    void sync_connection(const std::shared_ptr<QuicConnection>& conn);
+    size_t unique_connections() const;
 };
 
 } // namespace server
