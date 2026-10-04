@@ -30,7 +30,8 @@ struct HttpRequest {
     std::string_view body;
     std::unordered_map<std::string, std::string> params;
     std::unordered_map<std::string, std::string> cookies;
-    std::string client_ip;
+    std::string client_ip; ///< Client address; may be replaced by middleware::trusted_proxies()
+    std::string peer_ip;   ///< Address of the socket peer (the client, or the last proxy)
     std::string session_id; // Set by SessionManager middleware
     nlohmann::json user; // Populated by JwtAuth middleware
 

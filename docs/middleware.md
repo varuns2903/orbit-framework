@@ -142,6 +142,40 @@ app.use(middleware::static_files("public", opts));
   requests get the whole file.
 - `middleware::mime_type_for_extension(".woff2")` exposes the built-in type table.
 
+### Security Headers
+Adds common hardening headers to every response. They are defaults: a handler
+that sets the same header keeps its own value.
+```cpp
+#include <orbit/middleware/SecurityHeaders.hpp>
+app.use(middleware::security_headers());
+// Strict-Transport-Security: max-age=31536000; includeSubDomains
+// X-Content-Type-Options: nosniff
+// X-Frame-Options: DENY
+// Referrer-Policy: strict-origin-when-cross-origin
+// Cross-Origin-Opener-Policy: same-origin
+
+middleware::SecurityHeadersOptions opts;
+opts.content_security_policy = "default-src 'self'; frame-ancestors 'none'";
+opts.frame_options = "";   // empty string: leave the header out
+app.use(middleware::security_headers(opts));
+```
+
+### Trusted Proxies (real client IP)
+Behind a load balancer or reverse proxy, the socket peer is the proxy. List your
+proxies and `req.client_ip` becomes the real client, taken from
+`X-Forwarded-For` (or RFC 7239 `Forwarded`). Requests that do **not** come from
+a listed proxy keep their socket address, so clients cannot spoof their IP. The
+socket address is always available as `req.peer_ip`.
+```cpp
+#include <orbit/middleware/TrustedProxies.hpp>
+middleware::TrustedProxyOptions proxies;
+proxies.proxies = {"10.0.0.0/8", "127.0.0.1", "::1"};
+app.use(middleware::trusted_proxies(proxies));   // register before rate limiting
+app.use(middleware::rate_limit(100, std::chrono::seconds(10)));
+```
+The header is read right to left, skipping listed proxies, so an address a
+client prepends to `X-Forwarded-For` is never used.
+
 ### Rate Limiting
 Global in-memory or Redis-backed distributed rate limiting. Rejected requests get
 `429 Too Many Requests` with a `Retry-After` header (seconds).

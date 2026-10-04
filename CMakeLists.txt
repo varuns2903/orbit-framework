@@ -180,6 +180,8 @@ set(SERVER_SOURCES
     src/middleware/Metrics.cpp
     src/middleware/Csrf.cpp
     src/middleware/OAuth2.cpp
+    src/middleware/SecurityHeaders.cpp
+    src/middleware/TrustedProxies.cpp
     src/openapi/OpenApi.cpp
 )
 

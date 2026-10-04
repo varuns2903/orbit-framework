@@ -330,6 +330,7 @@ void Http2Session::dispatch_request(std::shared_ptr<StreamContext> stream_ctx) {
     }
     
     req.client_ip = client_ip_;
+    req.peer_ip = client_ip_;
     auto writer = std::make_shared<Http2ResponseWriter>(weak_from_this(), stream_ctx->stream_id,
                                                         req.method == http::HttpMethod::HEAD);
     writer->body_owner_ = stream_ctx;
