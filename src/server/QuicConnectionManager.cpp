@@ -1,4 +1,8 @@
 #include <orbit/server/QuicConnectionManager.hpp>
+#include <functional>
+#include <string>
+#include <unordered_set>
+#include <vector>
 #include <orbit/utils/Logger.hpp>
 #include <orbit/server/QuicConnection.hpp>
 #include <orbit/utils/PrometheusRegistry.hpp>
@@ -39,7 +43,9 @@ void QuicConnectionManager::on_packet_received(const uint8_t* data, size_t datal
     auto it = connections_.find(dcid_struct);
     if (it != connections_.end()) {
         LOG_DEBUG("QCM: Found existing connection for DCID (len=" << dcid_struct.datalen << ")");
-        it->second->process_packet(data, datalen, sender_addr);
+        auto conn = it->second; // keep it alive while it may be removed
+        conn->process_packet(data, datalen, sender_addr);
+        sync_connection(conn);
     } else {
         if (ver_cid.version == 0) {
             LOG_DEBUG("QCM: Dropping version negotiation packet");
@@ -64,14 +70,69 @@ void QuicConnectionManager::on_packet_received(const uint8_t* data, size_t datal
         connections_[scid_struct] = conn; // Also map by our SCID for return packets
         utils::PrometheusRegistry::get_instance().inc_gauge("orbit_active_connections", "type=\"quic\"");
         conn->process_packet(data, datalen, sender_addr);
+        sync_connection(conn);
     }
 }
 
-void QuicConnectionManager::handle_timers() {
-    // Iterate over connections and handle expiry
-    for (auto& [cid, conn] : connections_) {
-        conn->handle_expiry();
+std::size_t QuicConnectionIdHash::operator()(const ngtcp2_cid& cid) const {
+    static const std::string key = [] {
+        std::string k(16, '\0');
+        detail::quic_random_bytes(reinterpret_cast<uint8_t*>(&k[0]), k.size());
+        return k;
+    }();
+    std::string material = key;
+    material.append(reinterpret_cast<const char*>(cid.data), cid.datalen);
+    return std::hash<std::string>{}(material);
+}
+
+void QuicConnectionManager::sync_connection(const std::shared_ptr<QuicConnection>& conn) {
+    for (const auto& cid : conn->take_issued_cids()) connections_[cid] = conn;
+    for (const auto& cid : conn->take_retired_cids()) {
+        auto it = connections_.find(cid);
+        if (it != connections_.end() && it->second == conn) connections_.erase(it);
     }
+    if (conn->is_closed()) {
+        for (auto it = connections_.begin(); it != connections_.end();) {
+            if (it->second == conn) {
+                it = connections_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        LOG_DEBUG("QUIC: connection closed and removed");
+        utils::PrometheusRegistry::get_instance().dec_gauge("orbit_active_connections", "type=\"quic\"");
+    }
+}
+
+size_t QuicConnectionManager::unique_connections() const {
+    std::unordered_set<QuicConnection*> seen;
+    for (const auto& [cid, conn] : connections_) seen.insert(conn.get());
+    return seen.size();
+}
+
+void QuicConnectionManager::handle_timers() {
+    // Each connection appears once per connection ID; visit it once.
+    std::vector<std::shared_ptr<QuicConnection>> unique;
+    std::unordered_set<QuicConnection*> seen;
+    for (auto& [cid, conn] : connections_) {
+        if (seen.insert(conn.get()).second) unique.push_back(conn);
+    }
+    for (auto& conn : unique) {
+        conn->handle_expiry();
+        sync_connection(conn);
+    }
+}
+
+int QuicConnectionManager::next_timeout_ms() const {
+    int64_t best = -1;
+    std::unordered_set<QuicConnection*> seen;
+    for (const auto& [cid, conn] : connections_) {
+        if (!seen.insert(conn.get()).second) continue;
+        int64_t ns = conn->ns_until_expiry();
+        if (ns >= 0 && (best < 0 || ns < best)) best = ns;
+    }
+    if (best < 0) return -1;
+    return static_cast<int>((best + 999999) / 1000000); // round up to whole ms
 }
 
 void QuicConnectionManager::send_packet(const uint8_t* data, size_t datalen, const sockaddr* remote_addr, socklen_t remote_addrlen) {

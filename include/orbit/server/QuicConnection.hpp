@@ -15,6 +15,7 @@
 #include <openssl/ssl.h>
 #include <vector>
 #include <memory>
+#include <mutex>
 #include <chrono>
 #include <orbit/network/PlatformSocket.hpp>
 
@@ -39,7 +40,7 @@ class QuicHttp3Session;
 /**
  * @brief Represents a single QUIC connection.
  */
-class QuicConnection {
+class QuicConnection : public std::enable_shared_from_this<QuicConnection> {
 public:
     /**
      * @brief Constructs a QuicConnection.
@@ -62,9 +63,29 @@ public:
     void process_packet(const uint8_t* data, size_t datalen, const sockaddr_in& remote_addr);
     
     /**
-     * @brief Handles connection expiry.
+     * @brief Runs QUIC timers that are due (loss detection, delayed ACKs,
+     *        idle timeout, the closing period). Event-loop thread.
      */
     void handle_expiry();
+
+    /// Nanoseconds until the next timer is due (0 if overdue), or -1 if none.
+    int64_t ns_until_expiry() const;
+
+    /// True once the connection has ended and can be forgotten.
+    bool is_closed() const { return closed_; }
+
+    /// Connection IDs this connection issued or retired since the last call;
+    /// the manager routes packets for them to this connection.
+    std::vector<ngtcp2_cid> take_issued_cids();
+    std::vector<ngtcp2_cid> take_retired_cids();
+
+    /// Guards ngtcp2/nghttp3 state: packets are processed on the event loop,
+    /// responses are submitted from worker threads.
+    std::recursive_mutex& mutex() { return mutex_; }
+
+    /// Returns flow-control credit for `consumed` bytes the application has
+    /// taken off `stream_id`. Caller holds mutex().
+    void extend_stream_credit(int64_t stream_id, uint64_t consumed);
     
     /**
      * @brief Sends any pending data for the connection.
@@ -84,6 +105,18 @@ private:
     
     std::unique_ptr<QuicHttp3Session> h3_session_;
 
+    mutable std::recursive_mutex mutex_;
+    bool closed_ = false;
+    // Closing or draining: no more packets are sent (except one
+    // CONNECTION_CLOSE), and the state is dropped at close_deadline_.
+    bool closing_ = false;
+    std::chrono::steady_clock::time_point close_deadline_{};
+    std::vector<ngtcp2_cid> issued_cids_;
+    std::vector<ngtcp2_cid> retired_cids_;
+
+    void start_closing(int liberr);
+    void enter_draining();
+
     ngtcp2_tstamp get_timestamp() const;
     bool init_ssl(SSL_CTX* ssl_ctx);
 
@@ -93,6 +126,13 @@ private:
     static int get_path_challenge_data_cb(ngtcp2_conn *conn, uint8_t *data, void *user_data);
     static int on_recv_stream_data(ngtcp2_conn *conn, uint32_t flags, int64_t stream_id, uint64_t offset, const uint8_t *data, size_t datalen, void *user_data, void *stream_user_data);
     static int on_get_new_connection_id(ngtcp2_conn *conn, ngtcp2_cid *cid, uint8_t *token, size_t cidlen, void *user_data);
+    static int on_remove_connection_id(ngtcp2_conn *conn, const ngtcp2_cid *cid, void *user_data);
+    static int on_acked_stream_data_offset(ngtcp2_conn *conn, int64_t stream_id, uint64_t offset, uint64_t datalen, void *user_data, void *stream_user_data);
+    static int on_stream_close(ngtcp2_conn *conn, uint32_t flags, int64_t stream_id, uint64_t app_error_code, void *user_data, void *stream_user_data);
+    static int on_stream_reset(ngtcp2_conn *conn, int64_t stream_id, uint64_t final_size, uint64_t app_error_code, void *user_data, void *stream_user_data);
+    static int on_stream_stop_sending(ngtcp2_conn *conn, int64_t stream_id, uint64_t app_error_code, void *user_data, void *stream_user_data);
+    static int on_extend_max_stream_data(ngtcp2_conn *conn, int64_t stream_id, uint64_t max_data, void *user_data, void *stream_user_data);
+    static int on_extend_max_remote_streams_bidi(ngtcp2_conn *conn, uint64_t max_streams, void *user_data);
 };
 
 } // namespace server
