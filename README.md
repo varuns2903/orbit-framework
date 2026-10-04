@@ -544,9 +544,9 @@ cmake -B build \
 | [🔌 WebSockets](docs/websockets.md) | RFC 6455 WebSockets and EventRouter |
 | [⚡ HTTP/3 & QUIC](docs/http3.md) | Enabling and using HTTP/3 |
 | [📋 Changelog](CHANGELOG.md) | Release history and breaking changes |
-| [🏷️ Release Process](docs/release-process.md) | Versioning policy, release contents, verifying signatures |
 | [📊 Test Coverage](docs/coverage.md) | Measured coverage, per-file gaps, and how to reproduce |
 | [⚡ Benchmarks](docs/benchmarks.md) | Throughput figures, methodology, and their limits |
+| [🏷️ Release Process](docs/release-process.md) | Versioning policy, release contents, verifying signatures |
 
 ---
 
