@@ -65,6 +65,20 @@ bool parse_method(std::string_view value, http::HttpMethod& out);
  */
 bool is_connection_specific_header(std::string_view name);
 
+/**
+ * @brief Fills req.uri (the decoded path), req.target and req.query from a
+ *        request target such as an HTTP/2 or HTTP/3 `:path`, decoding it as
+ *        the HTTP/1.1 parser does.
+ * @return False if the target is malformed (bad escape, or an encoded '/',
+ *         '\\' or NUL in the path); the request must be answered with 400.
+ */
+bool apply_request_target(std::string_view target, http::HttpRequest& req);
+
+/**
+ * @brief Adds the name=value pairs of a Cookie header value to req.cookies.
+ */
+void parse_cookies(std::string_view cookies, http::HttpRequest& req);
+
 } // namespace detail
 
 /**

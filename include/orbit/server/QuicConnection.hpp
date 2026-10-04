@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <chrono>
+#include <string>
 #include <orbit/network/PlatformSocket.hpp>
 
 namespace server {
@@ -91,6 +92,12 @@ public:
      * @brief Sends any pending data for the connection.
      */
     void send_pending_data();
+
+    QuicConnectionManager& manager() { return manager_; }
+    /// The HTTP/3 session, once the handshake has completed. Caller holds mutex().
+    QuicHttp3Session* http3_session() { return h3_session_.get(); }
+    /// The peer's IP address as text.
+    std::string remote_ip() const;
 
 private:
     QuicConnectionManager& manager_;

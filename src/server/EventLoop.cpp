@@ -58,6 +58,7 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
 
 #ifdef ORBIT_ENABLE_HTTP3
     if (quic_socket_ && quic_manager_) {
+        quic_manager_->set_http_context({&router, &thread_pool_, proactor_.get(), config.max_body_size});
         do_read_quic();
     }
 #endif

@@ -1,31 +1,52 @@
 #pragma once
 
 #include <nghttp3/nghttp3.h>
+#include <deque>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
+#include <orbit/http/ResponseWriter.hpp>
 
 namespace server {
 
 class QuicConnection;
 
+/// One request/response exchange on an HTTP/3 stream.
 struct Http3Stream {
     int64_t stream_id;
     http::HttpRequest request;
-    std::string body_buffer;
-    bool headers_complete{false};
-    std::string response_body; // must outlive the stream: ngtcp2 may retransmit from it
-    bool response_given = false;
+    std::string path;   // :path as received (decoded at dispatch)
+    std::string body;
+    std::string cookie; // all cookie fields joined (they may arrive split)
+    bool headers_complete = false;
     bool dispatched = false;
-    
-    Http3Stream(int64_t id) : stream_id(id) {}
+    bool body_too_large = false;
+
+    // Response body. nghttp3 references these bytes until the peer ACKs
+    // them, so chunks are dropped only from acked_stream_data. A deque
+    // never moves its elements, so handed-out chunks stay put.
+    std::deque<std::string> chunks;
+    size_t handed_out = 0;  // chunks at the front given to nghttp3
+    uint64_t front_acked = 0; // ACKed bytes of chunks.front()
+    bool streaming = false; // body produced by write_chunk() until end()
+    bool ended = false;
+    int file_fd = -1;       // file body: bytes [file_offset, file_end)
+    int64_t file_offset = 0;
+    int64_t file_end = 0;
+
+    explicit Http3Stream(int64_t id) : stream_id(id) {}
+    ~Http3Stream();
 };
 
 /**
  * @brief Manages an HTTP/3 session over a QUIC connection.
+ *
+ * Callbacks run on the event loop with the connection's mutex held; the
+ * submit_* functions are called by Http3ResponseWriter from worker threads,
+ * which take the same mutex first.
  */
 class QuicHttp3Session {
 public:
@@ -41,30 +62,23 @@ public:
      * @return true on success, false otherwise.
      */
     bool init();
-    
+
     /**
      * @brief Gets the underlying nghttp3 connection.
      * @return Pointer to nghttp3_conn.
      */
     nghttp3_conn* get_conn() const { return httpconn_; }
-    
-    /**
-     * @brief Processes received QUIC stream data for HTTP/3.
-     * @param stream_id The QUIC stream ID.
-     * @param data The stream data.
-     * @param datalen The length of the data.
-     * @param fin Whether this is the final data for the stream.
-     * @return 0 on success, or a negative error code.
-     */
-    /// Returns the bytes nghttp3 consumed (owed back as flow-control
-    /// credit), or a negative nghttp3 error.
+
+    /// Feeds received stream data to nghttp3. Returns the bytes nghttp3
+    /// consumed (owed back as flow-control credit), or a negative nghttp3 error.
     nghttp3_ssize process_stream_data(int64_t stream_id, const uint8_t* data, size_t datalen, bool fin);
-    
-    /**
-     * @brief Serializes HTTP/3 frames and feeds them to ngtcp2.
-     * @return 0 on success, or a negative error code.
-     */
-    int write_streams();
+
+    /// Submits a response. Takes ownership of response.file_fd when a file
+    /// body is sent. With @p streaming, the body follows via submit_data()
+    /// and end_stream(). Caller holds the connection mutex.
+    void submit_response(int64_t stream_id, http::HttpResponse& response, bool has_body, bool streaming = false);
+    void submit_data(int64_t stream_id, std::string_view chunk);
+    void end_stream(int64_t stream_id);
 
 private:
     QuicConnection& quic_conn_;
@@ -80,9 +94,56 @@ private:
     static int on_recv_header(nghttp3_conn *conn, int64_t stream_id, int32_t token, nghttp3_rcbuf *name, nghttp3_rcbuf *value, uint8_t flags, void *conn_user_data, void *stream_user_data);
     static int on_end_headers(nghttp3_conn *conn, int64_t stream_id, int fin, void *conn_user_data, void *stream_user_data);
     static int on_end_stream(nghttp3_conn *conn, int64_t stream_id, void *conn_user_data, void *stream_user_data);
-    
+    static nghttp3_ssize read_data(nghttp3_conn *conn, int64_t stream_id, nghttp3_vec *vec, size_t veccnt, uint32_t *pflags, void *conn_user_data, void *stream_user_data);
+
     std::shared_ptr<Http3Stream> get_or_create_stream(int64_t stream_id);
     void handle_request(std::shared_ptr<Http3Stream> stream);
+    void submit_status(int64_t stream_id, http::HttpStatus status);
+};
+
+/**
+ * @brief ResponseWriter for HTTP/3 streams.
+ *
+ * Handlers run on the thread pool and may finish after the client has gone,
+ * so the writer refers to its connection only weakly.
+ */
+class Http3ResponseWriter : public http::ResponseWriter {
+public:
+    Http3ResponseWriter(std::weak_ptr<QuicConnection> conn, int64_t stream_id, network::Proactor& proactor,
+                        concurrency::ThreadPool& thread_pool, bool suppress_body = false);
+
+    void add_interceptor(Interceptor interceptor) override;
+    void set_header(const std::string& key, const std::string& value) override;
+    network::Proactor& proactor() override { return proactor_; }
+    concurrency::ThreadPool& thread_pool() override { return thread_pool_; }
+
+    void send(http::HttpResponse&& response) override;
+    void send_headers(http::HttpResponse& response) override;
+    void write_chunk(std::string_view chunk) override;
+    void end() override;
+    void send_sse_event(std::string_view data, std::string_view event = "", std::string_view id = "") override;
+    void upgrade_to_raw_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_close) override;
+    void read_body_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_end) override;
+
+private:
+    std::weak_ptr<QuicConnection> conn_;
+    int64_t stream_id_;
+    network::Proactor& proactor_;
+    concurrency::ThreadPool& thread_pool_;
+    std::unordered_map<std::string, std::string> default_headers_;
+    std::vector<Interceptor> interceptors_;
+    bool headers_sent_{false};
+    bool suppress_body_{false}; // HEAD request: headers only
+
+    // The request body, kept alive by owner, for read_body_stream().
+    std::shared_ptr<void> body_owner_;
+    std::string_view body_;
+
+    void apply_response_hooks(http::HttpResponse& response);
+    /// Runs @p fn on the session with the connection locked, then flushes.
+    template <typename Fn> void with_session(Fn&& fn);
+
+    friend class QuicHttp3Session;
 };
 
 } // namespace server
