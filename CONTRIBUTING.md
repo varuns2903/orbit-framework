@@ -151,15 +151,28 @@ valgrind --leak-check=full --error-exitcode=1 ./build/http_server_tests
 
 ### Fuzzing
 
-`tests/fuzz/` holds libFuzzer targets for the HTTP parser. If you change a
-parser, extend the corresponding fuzz target:
+`tests/fuzz/` holds libFuzzer targets for every hand-written parser:
+
+| Target | Covers |
+|---|---|
+| `fuzz_http_parser` | HTTP/1.1 request parsing |
+| `fuzz_websocket` | WebSocket frames, fragmentation, UTF-8, close handling, permessage-deflate |
+| `fuzz_multipart` | `multipart/form-data`, in-memory and streaming |
+| `fuzz_http2` | HTTP/2 frames and HPACK headers through `Http2Session` |
+
+CI runs each for 30 s on every push and 5 minutes nightly. If you change a
+parser, extend the corresponding target:
 
 ```bash
-cmake -B build_fuzz -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+cmake -B build_fuzz -DCMAKE_BUILD_TYPE=Debug -DENABLE_FUZZING=ON \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
-cmake --build build_fuzz --target fuzz_http_parser
-./build_fuzz/fuzz_http_parser -max_total_time=60
+cmake --build build_fuzz --target fuzz_websocket
+./build_fuzz/fuzz_websocket -max_total_time=60
 ```
+
+`ENABLE_FUZZING` also instruments `server_core` for coverage; without that,
+libFuzzer cannot see which inputs reach new code in the library.
 
 ### Writing tests
 
