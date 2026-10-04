@@ -210,9 +210,9 @@ TEST(LoggerFormatTest, FieldsAreEscapedAndQuoted) {
     utils::Logger::set_sink([&lines](const std::string& l) { lines.push_back(l); });
 
     utils::Logger::set_format(utils::LogFormat::Json);
-    utils::Logger::log_fields(utils::LogLevel::ERROR, "dir/file.cpp", 7, "say \"hi\"\n", {{"k", "a\tb"}});
+    utils::Logger::log_fields(utils::log_levels::kError, "dir/file.cpp", 7, "say \"hi\"\n", {{"k", "a\tb"}});
     utils::Logger::set_format(utils::LogFormat::Text);
-    utils::Logger::log_fields(utils::LogLevel::ERROR, "dir/file.cpp", 7, "plain", {{"user", "two words"}, {"n", "3"}});
+    utils::Logger::log_fields(utils::log_levels::kError, "dir/file.cpp", 7, "plain", {{"user", "two words"}, {"n", "3"}});
 
     utils::Logger::set_sink(nullptr);
     ASSERT_EQ(lines.size(), 2u);
