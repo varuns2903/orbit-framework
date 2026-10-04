@@ -43,6 +43,11 @@ void ConnectionManager::remove_connection(int fd) {
         // Stop new I/O first, then cancel what is pending; in the other order
         // a worker thread could register fresh I/O in between.
         conn->on_removed();
+        // Tell the peer now. The descriptor is only closed when the last
+        // reference to the connection goes; on IOCP a pending receive holds
+        // one until its cancellation is reaped, which could leave the client
+        // waiting. Everything queued has been written by the time we close.
+        network::shutdown_socket(fd);
         // Cancel all pending asynchronous operations in the Proactor
         proactor_.remove(fd);
         // The shared_ptr will be destroyed here, triggering Connection::~Connection

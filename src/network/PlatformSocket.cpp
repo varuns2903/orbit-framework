@@ -31,6 +31,15 @@ void close_socket(socket_t fd) {
 #endif
 }
 
+void shutdown_socket(socket_t fd) {
+    if (fd == INVALID_SOCKET_FD) return;
+#ifdef _WIN32
+    ::shutdown(fd, SD_BOTH);
+#else
+    ::shutdown(fd, SHUT_RDWR);
+#endif
+}
+
 void set_non_blocking(socket_t fd) {
     if (fd == INVALID_SOCKET_FD) return;
 #ifdef _WIN32
