@@ -1,7 +1,14 @@
+#include <vector>
 #include <orbit/utils/PrometheusRegistry.hpp>
 #include <sstream>
 
 namespace utils {
+
+namespace {
+// Default buckets, suited to request latencies in seconds (the Prometheus
+// client libraries' defaults).
+const std::vector<double> kHistogramBounds = {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10};
+} // namespace
 
 void PrometheusRegistry::inc_counter(const std::string& name, const std::string& labels, double value) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -35,8 +42,16 @@ void PrometheusRegistry::dec_gauge(const std::string& name, const std::string& l
 void PrometheusRegistry::observe_histogram(const std::string& name, const std::string& labels, double value) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto& m = histograms_[name][labels];
+    if (m.buckets.empty()) m.buckets.assign(kHistogramBounds.size(), 0);
     m.count++;
     m.sum += value;
+    // Per-bucket counts; exposition makes them cumulative.
+    for (size_t i = 0; i < kHistogramBounds.size(); ++i) {
+        if (value <= kHistogramBounds[i]) {
+            m.buckets[i]++;
+            break;
+        }
+    }
     if (type_text_.find(name) == type_text_.end()) {
         type_text_[name] = "histogram";
     }
@@ -63,6 +78,14 @@ std::string PrometheusRegistry::expose() const {
         }
         for (const auto& [labels, metric] : map.at(name)) {
             std::string l_comma = labels.empty() ? "" : labels + ",";
+
+            // Cumulative buckets (le = "less than or equal"), as Prometheus expects.
+            uint64_t cumulative = 0;
+            for (size_t i = 0; i < kHistogramBounds.size(); ++i) {
+                cumulative += i < metric.buckets.size() ? metric.buckets[i] : 0;
+                oss << name << "_bucket{" << l_comma << "le=\"" << kHistogramBounds[i] << "\"} " << cumulative << "\n";
+            }
+            oss << name << "_bucket{" << l_comma << "le=\"+Inf\"} " << metric.count << "\n";
             
             // Expose _sum and _count
             oss << name << "_sum";

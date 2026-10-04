@@ -39,6 +39,9 @@ struct HttpRequest {
     std::string peer_ip;   ///< Address of the socket peer (the client, or the last proxy)
     std::string session_id; // Set by the session middleware
     std::shared_ptr<middleware::Session> session; ///< Set by the session middleware
+    std::string request_id; ///< Set by middleware::request_id()
+    std::string trace_id;   ///< W3C trace id (32 hex), set by middleware::tracing()
+    std::string span_id;    ///< This request's span id (16 hex), set by middleware::tracing()
     nlohmann::json user; // Populated by JwtAuth middleware
 
     mutable nlohmann::json json_body; // Cached parsed JSON

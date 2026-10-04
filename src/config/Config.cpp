@@ -20,6 +20,7 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                       << "      --max-connections <num>   Connections served at once, 0 = unlimited (default: 0)\n"
                       << "  -t, --threads <num>           Number of worker threads (default: hardware concurrency)\n"
                       << "  -l, --log-level <level>       Log level (DEBUG, INFO, WARN, ERROR) (default: INFO)\n"
+                      << "      --log-format <format>     text or json (default: text)\n"
                       << "  -s, --static-dir <dir>        Directory for static files\n"
                       << "  -m, --max-body-size <bytes>   Max request body size\n"
                       << "  -c, --ssl-cert <file>         SSL certificate file (enables HTTPS)\n"
@@ -38,6 +39,8 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             cfg.max_connections = static_cast<size_t>(std::stoull(argv[++i]));
         } else if ((arg == "-t" || arg == "--threads") && i + 1 < argc) {
             cfg.worker_threads = static_cast<size_t>(std::stoull(argv[++i]));
+        } else if (arg == "--log-format" && i + 1 < argc) {
+            cfg.log_format = argv[++i];
         } else if ((arg == "-l" || arg == "--log-level") && i + 1 < argc) {
             cfg.log_level = argv[++i];
         } else if ((arg == "-s" || arg == "--static-dir") && i + 1 < argc) {
