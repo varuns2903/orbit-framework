@@ -10,6 +10,7 @@
     <img src="https://img.shields.io/badge/Protocols-HTTP%2F1.1%20%7C%20HTTP%2F2%20%7C%20HTTP%2F3-purple.svg?style=for-the-badge" />
     <a href="https://github.com/varuns2903/orbit-framework/releases"><img src="https://img.shields.io/github/v/release/varuns2903/orbit-framework?style=for-the-badge&logo=github&label=Release" /></a>
     <img src="https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-brightgreen.svg?style=for-the-badge" />
+    <a href="https://codecov.io/gh/varuns2903/orbit-framework"><img src="https://img.shields.io/codecov/c/github/varuns2903/orbit-framework?style=for-the-badge&logo=codecov&label=Coverage" /></a>
   </p>
 </div>
 
