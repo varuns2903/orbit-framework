@@ -6,6 +6,9 @@
 #include <iostream>
 #include <sstream>
 #include <mutex>
+#include <functional>
+#include <utility>
+#include <vector>
 
 namespace utils {
 
@@ -16,15 +19,35 @@ enum class LogLevel {
     ERROR = 3
 };
 
+/// Text: human-readable lines (colored on a terminal). Json: one JSON object
+/// per line, for log collectors (Loki, ELK, CloudWatch, ...).
+enum class LogFormat { Text, Json };
+
+using LogFields = std::vector<std::pair<std::string, std::string>>;
+
 class Logger {
 public:
     static void init(const std::string& level_str);
     static void log(LogLevel level, const char* file, int line, const std::string& msg);
-    
+    /// A message with structured fields: JSON keys in Json format,
+    /// key=value pairs in Text format.
+    static void log_fields(LogLevel level, const char* file, int line, const std::string& msg,
+                           const LogFields& fields);
+
+    static void set_format(LogFormat format);
+    /// Parses "text" or "json" (case-insensitive); anything else keeps the current format.
+    static void set_format(const std::string& format);
+    static LogFormat format();
+
+    /// Where finished lines go (without the trailing newline). nullptr
+    /// (the default) writes to stdout.
+    using Sink = std::function<void(const std::string& line)>;
+    static void set_sink(Sink sink);
+
     static LogLevel current_level;
 private:
     static std::mutex log_mutex;
-    static std::string level_to_string(LogLevel level);
+    static std::string level_to_string(LogLevel level, bool color);
 };
 
 } // namespace utils

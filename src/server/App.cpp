@@ -36,6 +36,7 @@ void signal_handler(int signum) {
 App::App(const config::ServerConfig& config) : config_(config) {
     network::initialize_platform_networking();
     utils::Logger::init(config.log_level);
+    utils::Logger::set_format(config.log_format);
     if (!config_.ssl_cert.empty() && !config_.ssl_key.empty()) {
         tls_context_ = std::make_unique<network::TlsContext>(config_.ssl_cert, config_.ssl_key, config_.http_version);
     }

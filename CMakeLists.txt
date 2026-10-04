@@ -178,6 +178,7 @@ set(SERVER_SOURCES
     src/middleware/SessionManager.cpp
     src/middleware/Validation.cpp
     src/middleware/Metrics.cpp
+    src/middleware/Observability.cpp
     src/middleware/Csrf.cpp
     src/middleware/OAuth2.cpp
     src/middleware/SecurityHeaders.cpp

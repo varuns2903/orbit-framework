@@ -561,6 +561,14 @@ void Connection::add_interceptor(std::function<void(http::HttpResponse&)> interc
 }
 
 void Connection::send_headers(http::HttpResponse& response) {
+    // Interceptors see streamed responses too, as on HTTP/2 (access logs,
+    // metrics and session cookies would otherwise miss them).
+    {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        for (auto& interceptor : interceptors_) {
+            interceptor(response);
+        }
+    }
     for (const auto& [k, v] : default_headers_snapshot()) {
         if (response.headers.find(k) == response.headers.end()) {
             response.headers[k] = v;
