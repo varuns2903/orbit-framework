@@ -44,6 +44,15 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
     timeouts.idle = config.idle_timeout;
     timeouts.websocket_idle = config.websocket_idle_timeout;
     connection_manager_.set_timeouts(timeouts);
+
+    ConnectionLimits limits;
+    limits.max_header_bytes = config.max_header_bytes;
+    limits.max_request_line = config.max_request_line;
+    limits.max_headers = config.max_headers;
+    limits.websocket_max_message_size = config.websocket_max_message_size;
+    connection_manager_.set_limits(limits);
+    websocket_ping_interval_ = config.websocket_ping_interval;
+    last_websocket_ping_ = std::chrono::steady_clock::now();
     
     do_accept();
 
@@ -76,6 +85,14 @@ void EventLoop::run() {
             });
 
             if (shutdown_requested_) drain_step();
+
+            if (websocket_ping_interval_.count() > 0) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_websocket_ping_ >= websocket_ping_interval_) {
+                    last_websocket_ping_ = now;
+                    connection_manager_.ping_websockets();
+                }
+            }
             
             // If we are gracefully shutting down and have no active connections, exit
             if (!is_accepting_ && connection_manager_.get_connection_count() == 0) {

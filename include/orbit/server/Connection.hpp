@@ -39,6 +39,16 @@ enum class RequestState {
 /**
  * @brief Timeouts applied to a connection, in the phases described on ServerConfig.
  */
+/**
+ * @brief Request size limits for one connection (see ServerConfig).
+ */
+struct ConnectionLimits {
+    size_t max_header_bytes = 8192;   ///< Request line plus headers
+    size_t max_request_line = 4096;
+    size_t max_headers = 100;         ///< Header fields per request
+    size_t websocket_max_message_size = 16 * 1024 * 1024;
+};
+
 struct ConnectionTimeouts {
     std::chrono::milliseconds header{10000};
     std::chrono::milliseconds keep_alive{10000};
@@ -82,6 +92,10 @@ public:
      * @brief Sets the timeouts used for this connection. Call before start().
      */
     void set_timeouts(const ConnectionTimeouts& timeouts) { timeouts_ = timeouts; }
+    void set_limits(const ConnectionLimits& limits) { limits_ = limits; }
+
+    /// Event-loop thread: sends a WebSocket ping if this is a WebSocket.
+    void ping_if_websocket();
 
     /**
      * @brief Writes raw data to the connection.
@@ -130,6 +144,8 @@ private:
     void send_data(std::string_view data, bool close_after = false);
     void arm_timer(std::chrono::milliseconds timeout);
     void arm_timer_for_current_phase();
+    // WebSocket or raw stream: long-lived, timed out by peer inactivity only.
+    bool is_message_stream() const;
     void send_error(http::HttpStatus status, const std::string& message);
 
     void trigger_read();
@@ -198,6 +214,7 @@ private:
     uint64_t current_timer_id_{0};
     std::mutex timer_mutex_;
     ConnectionTimeouts timeouts_;
+    ConnectionLimits limits_;
     
     int file_fd_{-1};
     off_t file_size_{0};
