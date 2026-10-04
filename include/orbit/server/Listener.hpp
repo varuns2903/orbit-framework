@@ -50,6 +50,12 @@ public:
      */
     uint16_t port() const;
 
+    /**
+     * @brief Closes the listening socket, so new connections are refused
+     *        instead of queueing in the backlog (used when draining).
+     */
+    void close();
+
 private:
     std::string host_;
     uint16_t port_;

@@ -51,6 +51,10 @@ public:
      */
     size_t get_connection_count() const;
 
+    /// Event-loop thread: asks every connection to finish up (see
+    /// Connection::on_server_shutdown). Called repeatedly while draining.
+    void notify_shutdown();
+
 private:
     network::Proactor& proactor_;
     const routing::Router& router_;

@@ -181,12 +181,15 @@ void WebSocketConnection::send_binary(const std::string& data) {
     send_frame(kBinary, data);
 }
 
-void WebSocketConnection::close() {
+void WebSocketConnection::close(uint16_t status_code) {
     {
         std::lock_guard<std::mutex> lock(send_mutex_);
         if (is_closed_.exchange(true)) return;
-        // Status 1000: normal closure.
-        write_frame_locked(0x80 | kClose, std::string("\x03\xe8", 2));
+        // 1000: normal closure; 1001: going away (server shutting down).
+        std::string code;
+        code.push_back(static_cast<char>((status_code >> 8) & 0xFF));
+        code.push_back(static_cast<char>(status_code & 0xFF));
+        write_frame_locked(0x80 | kClose, code);
         transport_.close();
     }
     if (close_handler_) {

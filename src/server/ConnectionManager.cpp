@@ -1,3 +1,4 @@
+#include <vector>
 #include <orbit/server/ConnectionManager.hpp>
 #include <orbit/utils/PrometheusRegistry.hpp>
 #include <iostream>
@@ -46,6 +47,17 @@ void ConnectionManager::remove_connection(int fd) {
         proactor_.remove(fd);
         // The shared_ptr will be destroyed here, triggering Connection::~Connection
     }
+}
+
+void ConnectionManager::notify_shutdown() {
+    std::vector<std::shared_ptr<Connection>> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        snapshot.reserve(connections_.size());
+        for (auto& [fd, conn] : connections_) snapshot.push_back(conn);
+    }
+    // Outside the lock: closing a connection removes it from the map.
+    for (auto& conn : snapshot) conn->on_server_shutdown();
 }
 
 size_t ConnectionManager::get_connection_count() const {
