@@ -1,4 +1,32 @@
 cmake_minimum_required(VERSION 3.20)
+
+# vcpkg manifest features follow the ORBIT_ENABLE_* options, so a backend that
+# is turned off is not downloaded and built. This has to happen before
+# project(), where the vcpkg toolchain installs dependencies. An explicit
+# -DVCPKG_MANIFEST_FEATURES=... from the user is left alone.
+if(NOT DEFINED VCPKG_MANIFEST_FEATURES OR "${VCPKG_MANIFEST_FEATURES}" STREQUAL "${ORBIT_VCPKG_FEATURES_AUTO}")
+    set(_orbit_features "")
+    foreach(_orbit_entry IN ITEMS "POSTGRES;postgres;ON" "MARIADB;mariadb;ON" "MONGODB;mongodb;ON"
+                                  "HTTP3;http3;ON" "GRPC;grpc;OFF")
+        list(GET _orbit_entry 0 _orbit_option)
+        list(GET _orbit_entry 1 _orbit_feature)
+        list(GET _orbit_entry 2 _orbit_default)
+        if(DEFINED ORBIT_ENABLE_${_orbit_option})
+            set(_orbit_enabled "${ORBIT_ENABLE_${_orbit_option}}")
+        else()
+            set(_orbit_enabled "${_orbit_default}")
+        endif()
+        if(_orbit_enabled)
+            list(APPEND _orbit_features "${_orbit_feature}")
+        endif()
+    endforeach()
+    # Cache entries, not plain variables: the toolchain declares these as
+    # cache variables, which (before policy CMP0126) would hide plain ones.
+    set(VCPKG_MANIFEST_FEATURES "${_orbit_features}" CACHE STRING "vcpkg manifest features" FORCE)
+    set(ORBIT_VCPKG_FEATURES_AUTO "${_orbit_features}" CACHE INTERNAL "")
+    set(VCPKG_MANIFEST_NO_DEFAULT_FEATURES ON CACHE BOOL "" FORCE)
+endif()
+
 project(OrbitFramework VERSION 1.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)

@@ -112,6 +112,10 @@ use `--parallel 1` or the `debug-nosan` preset.
 | `ORBIT_ENABLE_COVERAGE` | `OFF` | gcov/lcov instrumentation |
 
 Turning off subsystems you are not touching makes builds substantially faster.
+With the vcpkg toolchain, the backend options also select vcpkg manifest
+features (`postgres`, `mariadb`, `mongodb`, `http3`, `grpc`), so a disabled
+backend's libraries are not downloaded or built either. Passing
+`-DVCPKG_MANIFEST_FEATURES=...` yourself overrides that mapping.
 
 ## Running the tests
 

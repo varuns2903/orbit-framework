@@ -6,19 +6,13 @@
   "dependencies": [
     "openssl",
     "zlib",
-    "libpq",
     {
       "name": "curl",
-      "features": ["http2"]
+      "features": [
+        "http2"
+      ]
     },
-    "libmariadb",
-    "mongo-c-driver",
     "nghttp2",
-    "nghttp3",
-    {
-      "name": "ngtcp2",
-      "features": ["openssl"]
-    },
     "pkgconf",
     {
       "name": "liburing",
@@ -26,9 +20,47 @@
     }
   ],
   "features": {
+    "postgres": {
+      "description": "PostgreSQL client (ORBIT_ENABLE_POSTGRES)",
+      "dependencies": [
+        "libpq"
+      ]
+    },
+    "mariadb": {
+      "description": "MySQL/MariaDB client (ORBIT_ENABLE_MARIADB)",
+      "dependencies": [
+        "libmariadb"
+      ]
+    },
+    "mongodb": {
+      "description": "MongoDB client (ORBIT_ENABLE_MONGODB)",
+      "dependencies": [
+        "mongo-c-driver"
+      ]
+    },
+    "http3": {
+      "description": "HTTP/3 and QUIC (ORBIT_ENABLE_HTTP3)",
+      "dependencies": [
+        "nghttp3",
+        {
+          "name": "ngtcp2",
+          "features": [
+            "openssl"
+          ]
+        }
+      ]
+    },
     "grpc": {
       "description": "gRPC support",
-      "dependencies": ["grpc"]
+      "dependencies": [
+        "grpc"
+      ]
     }
-  }
+  },
+  "default-features": [
+    "postgres",
+    "mariadb",
+    "mongodb",
+    "http3"
+  ]
 }
