@@ -1,3 +1,4 @@
+#include <vector>
 #include <orbit/server/ConnectionManager.hpp>
 #include <orbit/utils/PrometheusRegistry.hpp>
 #include <iostream>
@@ -42,10 +43,26 @@ void ConnectionManager::remove_connection(int fd) {
         // Stop new I/O first, then cancel what is pending; in the other order
         // a worker thread could register fresh I/O in between.
         conn->on_removed();
+        // Tell the peer now. The descriptor is only closed when the last
+        // reference to the connection goes; on IOCP a pending receive holds
+        // one until its cancellation is reaped, which could leave the client
+        // waiting. Everything queued has been written by the time we close.
+        network::shutdown_socket(fd);
         // Cancel all pending asynchronous operations in the Proactor
         proactor_.remove(fd);
         // The shared_ptr will be destroyed here, triggering Connection::~Connection
     }
+}
+
+void ConnectionManager::notify_shutdown() {
+    std::vector<std::shared_ptr<Connection>> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        snapshot.reserve(connections_.size());
+        for (auto& [fd, conn] : connections_) snapshot.push_back(conn);
+    }
+    // Outside the lock: closing a connection removes it from the map.
+    for (auto& conn : snapshot) conn->on_server_shutdown();
 }
 
 size_t ConnectionManager::get_connection_count() const {

@@ -12,6 +12,7 @@
 #else
 namespace server { class QuicConnectionManager; }
 #endif
+#include <atomic>
 #include <memory>
 #include <mutex>
 
@@ -267,9 +268,31 @@ public:
     
     // Stop the server gracefully
     /**
-     * @brief Gracefully stops the server.
+     * @brief Stops the server immediately: open connections are dropped.
+     *        Safe to call from any thread, even before listen().
      */
     void stop();
+
+    /**
+     * @brief Stops the server gracefully (what SIGTERM/SIGINT do): stop
+     *        accepting, mark the app not ready, let in-flight requests finish,
+     *        close idle connections, and force-close the rest after `timeout`
+     *        (default: ServerConfig::shutdown_timeout). listen() returns when
+     *        done. Safe to call from any thread.
+     */
+    void shutdown();
+    void shutdown(std::chrono::seconds timeout);
+
+    /**
+     * @brief Adds health endpoints for orchestrators such as Kubernetes:
+     *        `liveness` answers 200 while the process runs; `readiness`
+     *        answers 200 while serving and 503 once shutdown has begun, so
+     *        load balancers stop sending new traffic.
+     */
+    App& enable_health_checks(const std::string& liveness = "/healthz", const std::string& readiness = "/readyz");
+
+    /// True once shutdown() (or SIGTERM/SIGINT) has started draining.
+    bool is_draining() const { return draining_.load(); }
     
     // Hot reload the server
     /**
@@ -292,6 +315,7 @@ private:
     std::mutex loop_mutex_;
     bool stop_requested_ = false; // guarded by loop_mutex_; a stop before the loop exists still applies
     unsigned seen_signal_seq_ = 0; // loop thread only
+    std::atomic<bool> draining_{false};
 };
 
 } // namespace server

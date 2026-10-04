@@ -56,6 +56,15 @@ public:
     void stop_accepting();
 
     /**
+     * @brief Graceful shutdown; safe to call from any thread. Stops accepting,
+     *        closes idle connections, lets in-flight requests finish (their
+     *        responses carry Connection: close; HTTP/2 gets GOAWAY, WebSocket
+     *        close 1001), and force-closes whatever is left at `deadline`.
+     *        run() returns once no connection remains.
+     */
+    void request_shutdown(std::chrono::steady_clock::time_point deadline);
+
+    /**
      * @brief Registers a function the loop calls on every iteration, on the
      *        loop thread. The loop wakes at least every 200 ms, so the hook
      *        also runs when no I/O happens.
@@ -92,6 +101,12 @@ private:
     std::atomic<bool> is_running_{true};
     std::function<void()> tick_hook_;
     std::atomic<bool> is_accepting_{true};
+
+    // Graceful shutdown: requested from any thread, carried out by run().
+    std::atomic<bool> shutdown_requested_{false};
+    std::atomic<std::chrono::steady_clock::rep> shutdown_deadline_{0};
+    bool draining_ = false; // loop thread only
+    void drain_step();
 
     size_t max_connections_ = 0;
     bool nonblocking_accepts_ = true; // accepted sockets must match the proactor's own accept

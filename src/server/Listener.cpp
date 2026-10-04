@@ -126,6 +126,10 @@ int Listener::fd() const {
     return static_cast<int>(socket_.fd());
 }
 
+void Listener::close() {
+    socket_.close();
+}
+
 uint16_t Listener::port() const {
     sockaddr_storage addr{};
     network::socklen_t len = sizeof(addr);

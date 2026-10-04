@@ -86,6 +86,11 @@ public:
 
     void process_data(const uint8_t* data, size_t len);
     void send_pending();
+
+    /// Sends GOAWAY: the client opens no new streams; open ones may finish.
+    void begin_shutdown();
+    /// True if no stream is open.
+    bool idle();
     
     /**
      * @brief Thread-safe API to submit an HTTP/2 response.

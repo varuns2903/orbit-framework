@@ -949,6 +949,37 @@ void Connection::write_raw(const std::vector<char>& data) {
     trigger_write();
 }
 
+void Connection::on_server_shutdown() {
+    const bool first = !shutdown_notified_;
+    shutdown_notified_ = true;
+    switch (state_.load()) {
+        case ConnectionState::WEBSOCKET:
+            if (first && ws_connection_) ws_connection_->close(1001); // going away
+            return;
+        case ConnectionState::HTTP2:
+            if (h2_session_) {
+                if (first) h2_session_->begin_shutdown();
+                if (h2_session_->idle()) mark_for_close();
+            }
+            return;
+        case ConnectionState::RAW_STREAM:
+        case ConnectionState::HTTP_STREAMING_BODY:
+            // Long-lived by nature; closed at the shutdown deadline.
+            should_close_ = true;
+            return;
+        default:
+            break;
+    }
+    // HTTP/1.x: the response in progress (if any) is the last one.
+    should_close_ = true;
+    bool idle;
+    {
+        std::lock_guard<std::mutex> lock(read_mutex_);
+        idle = !is_processing_request_ && read_buffer_.empty();
+    }
+    if (idle) mark_for_close();
+}
+
 void Connection::mark_for_close() {
     should_close_ = true;
     send_data({}, true);

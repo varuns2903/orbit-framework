@@ -131,7 +131,7 @@ public:
     /**
      * @brief Closes the WebSocket connection gracefully.
      */
-    void close();
+    void close(uint16_t status_code = 1000);
 
     /**
      * @brief Internal: the underlying transport has gone away (peer disconnect,

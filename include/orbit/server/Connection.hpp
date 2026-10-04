@@ -93,6 +93,11 @@ public:
      * @brief Marks the connection to be closed after writing completes.
      */
     void mark_for_close();
+
+    /// Event-loop thread, repeatedly while the server drains: closes the
+    /// connection if it is idle, otherwise makes its current work the last
+    /// (Connection: close, HTTP/2 GOAWAY, WebSocket close 1001).
+    void on_server_shutdown();
     
     /**
      * @brief Upgrades the connection to a WebSocket.
@@ -221,6 +226,7 @@ private:
     void continue_after_response();
     
     std::atomic<bool> is_processing_request_{false};
+    bool shutdown_notified_ = false; // event-loop thread only
     
     std::unique_ptr<http::websocket::WebSocketConnection> ws_connection_;
     std::shared_ptr<http::h2::Http2Session> h2_session_;

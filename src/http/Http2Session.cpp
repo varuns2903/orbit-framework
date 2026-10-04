@@ -138,6 +138,18 @@ Http2Session::~Http2Session() {
     }
 }
 
+void Http2Session::begin_shutdown() {
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    nghttp2_submit_goaway(session_, NGHTTP2_FLAG_NONE, nghttp2_session_get_last_proc_stream_id(session_),
+                          NGHTTP2_NO_ERROR, nullptr, 0);
+    send_pending();
+}
+
+bool Http2Session::idle() {
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    return streams_.empty();
+}
+
 void Http2Session::process_data(const uint8_t* data, size_t len) {
     std::lock_guard<std::mutex> lock(session_mutex_);
     ssize_t rv = nghttp2_session_mem_recv(session_, data, len);

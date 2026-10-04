@@ -39,6 +39,9 @@ struct ServerConfig {
     std::chrono::seconds keep_alive_timeout{10};     // Idle time allowed between requests on a persistent connection
     std::chrono::seconds idle_timeout{30};           // Longest pause while receiving a body or writing a response
     std::chrono::seconds websocket_idle_timeout{0};  // Idle time on WebSocket/raw streams; 0 = never (use pings to detect dead peers)
+    // On SIGTERM/SIGINT (or App::shutdown()), how long in-flight requests may
+    // finish before remaining connections are closed. A second signal stops at once.
+    std::chrono::seconds shutdown_timeout{30};
     
     static ServerConfig parse(int argc, char* argv[]);
 };

@@ -92,6 +92,40 @@ cfg.max_connections = 10000;
 On a dual-stack listener, IPv4 clients appear in `req.client_ip` as plain
 addresses (`203.0.113.7`), not as `::ffff:203.0.113.7`.
 
+## Graceful Shutdown and Health Checks
+
+On `SIGTERM` or `SIGINT` (or `app.shutdown()`), the server drains instead of
+dropping connections:
+
+1. It closes the listening socket; new connections are refused, so load
+   balancers move on at once.
+2. Idle keep-alive connections are closed.
+3. Requests in progress finish; their responses carry `Connection: close`.
+   HTTP/2 clients get `GOAWAY`; WebSocket clients get close code `1001`
+   (going away).
+4. Whatever is still busy after `shutdown_timeout` (default 30 s) is closed,
+   and `listen()` returns.
+
+A second signal stops immediately. `app.stop()` also stops immediately.
+
+```cpp
+config::ServerConfig cfg;
+cfg.shutdown_timeout = std::chrono::seconds(20); // keep below Kubernetes' terminationGracePeriodSeconds
+server::App app(cfg);
+app.enable_health_checks(); // GET /healthz (liveness), GET /readyz (readiness)
+```
+
+`/healthz` answers `200` while the process runs. `/readyz` answers `200` while
+serving and `503` once draining has begun. In Kubernetes:
+
+```yaml
+livenessProbe:
+  httpGet: { path: /healthz, port: 8080 }
+readinessProbe:
+  httpGet: { path: /readyz, port: 8080 }
+terminationGracePeriodSeconds: 30
+```
+
 ## Connection Timeouts
 
 `ServerConfig` has one timeout per phase of a connection. A value of `0`

@@ -74,6 +74,8 @@ void EventLoop::run() {
             timer_manager_.handle_expired_timers([this](int fd) {
                 connection_manager_.remove_connection(fd);
             });
+
+            if (shutdown_requested_) drain_step();
             
             // If we are gracefully shutting down and have no active connections, exit
             if (!is_accepting_ && connection_manager_.get_connection_count() == 0) {
@@ -92,10 +94,35 @@ void EventLoop::stop() {
     is_running_ = false;
 }
 
+void EventLoop::request_shutdown(std::chrono::steady_clock::time_point deadline) {
+    shutdown_deadline_ = deadline.time_since_epoch().count();
+    shutdown_requested_ = true;
+}
+
+void EventLoop::drain_step() {
+    if (!draining_) {
+        draining_ = true;
+        if (is_accepting_) stop_accepting();
+    }
+    // Repeated each iteration: connections finishing a response become idle.
+    connection_manager_.notify_shutdown();
+
+    auto deadline = std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(shutdown_deadline_.load()));
+    size_t remaining = connection_manager_.get_connection_count();
+    if (remaining > 0 && std::chrono::steady_clock::now() >= deadline) {
+        LOG_WARN("Shutdown deadline reached; closing " << remaining << " connection(s) that were still busy");
+        is_running_ = false;
+    }
+}
+
 void EventLoop::stop_accepting() {
     is_accepting_ = false;
     // Remove listener from proactor
     proactor_->remove(listener_.fd());
+    // Refuse new connections outright: left open, they would queue in the
+    // backlog and hang until the process exits. (On hot reload the new
+    // process already listens on the same port via SO_REUSEPORT.)
+    listener_.close();
     LOG_INFO("Event loop stopped accepting new connections. Waiting for active connections to drain...");
 }
 
