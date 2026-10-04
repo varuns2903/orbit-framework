@@ -13,6 +13,22 @@
 
 namespace server {
 
+namespace quic::detail {
+
+ErrorAction on_read_error(int ngtcp2_error) {
+    if (ngtcp2_error == NGTCP2_ERR_DRAINING) return ErrorAction::Drain;
+    if (ngtcp2_error == NGTCP2_ERR_DROP_CONN) return ErrorAction::Drop;
+    return ErrorAction::Close;
+}
+
+ErrorAction on_expiry_error(int ngtcp2_error) {
+    if (ngtcp2_error == NGTCP2_ERR_IDLE_CLOSE) return ErrorAction::Drop;
+    return ErrorAction::Close;
+}
+
+} // namespace quic::detail
+
+
 static void my_ngtcp2_log_printf(void* user_data, const char* fmt, ...) {
     (void)user_data;
     va_list ap;
@@ -150,13 +166,7 @@ void QuicConnection::process_packet(const uint8_t* data, size_t datalen, const s
     int rv = ngtcp2_conn_read_pkt(conn_, &path, &pi, data, datalen, get_timestamp()); 
     if (rv != 0) {
         LOG_DEBUG("ngtcp2_conn_read_pkt failed: " << ngtcp2_strerror(rv));
-        if (rv == NGTCP2_ERR_DRAINING) {
-            enter_draining(); // the peer closed the connection
-        } else if (rv == NGTCP2_ERR_DROP_CONN) {
-            closed_ = true;   // ngtcp2 says: forget it without a word
-        } else {
-            start_closing(rv);
-        }
+        apply_error_action(quic::detail::on_read_error(rv), rv);
         return;
     }
     send_pending_data();
@@ -172,12 +182,8 @@ void QuicConnection::handle_expiry() {
     }
     if (ngtcp2_conn_get_expiry(conn_) > get_timestamp()) return; // nothing due yet
     int rv = ngtcp2_conn_handle_expiry(conn_, get_timestamp());
-    if (rv == NGTCP2_ERR_IDLE_CLOSE) {
-        closed_ = true; // idle timeout: close silently (RFC 9000 section 10.1)
-        return;
-    }
     if (rv != 0) {
-        start_closing(rv);
+        apply_error_action(quic::detail::on_expiry_error(rv), rv);
         return;
     }
     send_pending_data();
@@ -213,6 +219,14 @@ void QuicConnection::start_closing(int liberr) {
         manager_.send_packet(buf, static_cast<size_t>(n), ps.path.remote.addr, ps.path.remote.addrlen);
     }
     close_deadline_ = std::chrono::steady_clock::now() + std::chrono::nanoseconds(3 * ngtcp2_conn_get_pto(conn_));
+}
+
+void QuicConnection::apply_error_action(quic::detail::ErrorAction action, int liberr) {
+    switch (action) {
+        case quic::detail::ErrorAction::Drain: enter_draining(); break;
+        case quic::detail::ErrorAction::Drop: closed_ = true; break;
+        case quic::detail::ErrorAction::Close: start_closing(liberr); break;
+    }
 }
 
 void QuicConnection::enter_draining() {

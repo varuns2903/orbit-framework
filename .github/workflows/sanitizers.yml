@@ -75,6 +75,8 @@ jobs:
 
     - name: Run tests
       working-directory: build
+      env:
+        ORBIT_REQUIRE_HTTP3_TESTS: "1"
       run: ctest --output-on-failure --timeout 300 2>&1 | tee ../sanitizer.log
 
     - name: Upload log

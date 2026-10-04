@@ -9,6 +9,7 @@
 #include <openssl/x509.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -234,7 +235,11 @@ protected:
     }
 
     void SetUp() override {
-        if (!curl_has_http3()) GTEST_SKIP() << "libcurl was built without HTTP/3 support";
+        if (curl_has_http3()) return;
+        // CI sets this so a libcurl without HTTP/3 fails loudly instead of
+        // skipping the whole suite unnoticed.
+        if (std::getenv("ORBIT_REQUIRE_HTTP3_TESTS")) FAIL() << "libcurl was built without HTTP/3 support";
+        GTEST_SKIP() << "libcurl was built without HTTP/3 support";
     }
 
     static void TearDownTestSuite() {

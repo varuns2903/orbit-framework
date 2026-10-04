@@ -20,6 +20,11 @@ if(NOT DEFINED VCPKG_MANIFEST_FEATURES OR "${VCPKG_MANIFEST_FEATURES}" STREQUAL 
             list(APPEND _orbit_features "${_orbit_feature}")
         endif()
     endforeach()
+    # The HTTP/3 end-to-end tests need a libcurl that speaks HTTP/3; the
+    # library itself does not.
+    if((NOT DEFINED ORBIT_BUILD_TESTS OR ORBIT_BUILD_TESTS) AND "http3" IN_LIST _orbit_features)
+        list(APPEND _orbit_features "http3-tests")
+    endif()
     # Cache entries, not plain variables: the toolchain declares these as
     # cache variables, which (before policy CMP0126) would hide plain ones.
     set(VCPKG_MANIFEST_FEATURES "${_orbit_features}" CACHE STRING "vcpkg manifest features" FORCE)
