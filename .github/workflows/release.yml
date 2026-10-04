@@ -1,0 +1,126 @@
+name: Release Artifacts
+
+# Runs when a version tag is pushed (or manually for an existing tag). Builds
+# the release's source archives, an SPDX SBOM and SHA-256 checksums, signs
+# every file with Sigstore (keyless, tied to this workflow), and attaches them
+# to a DRAFT GitHub release. A maintainer reviews and publishes the draft.
+# See docs/release-process.md.
+
+on:
+  push:
+    tags: [ "v*" ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build artifacts for, e.g. v1.6.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write   # create the draft release and upload assets
+      id-token: write   # Sigstore keyless signing
+
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    steps:
+    - name: Checkout the tag
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ env.TAG }}
+        fetch-depth: 0
+
+    - name: Check the tag matches the project version
+      run: |
+        VERSION=$(sed -n 's/^project(OrbitFramework VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+        if [ "v$VERSION" != "$TAG" ]; then
+          echo "::error::Tag $TAG does not match CMakeLists.txt version $VERSION"
+          exit 1
+        fi
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+    - name: Source archives
+      run: |
+        mkdir -p dist
+        git archive --format=tar.gz --prefix="orbit-framework-$VERSION/" -o "dist/orbit-framework-$VERSION.tar.gz" "$TAG"
+        git archive --format=zip --prefix="orbit-framework-$VERSION/" -o "dist/orbit-framework-$VERSION.zip" "$TAG"
+
+    - name: Cache vcpkg dependencies
+      uses: actions/cache@v6
+      with:
+        path: |
+          build/vcpkg_installed
+          vcpkg/downloads
+        key: ${{ runner.os }}-vcpkg-manifest-v1-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-manifest-v1-
+
+    - name: Setup vcpkg (pinned to builtin-baseline)
+      run: |
+        mkdir -p vcpkg
+        cd vcpkg
+        if [ ! -d ".git" ]; then
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+        fi
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
+        ./bootstrap-vcpkg.sh -disableMetrics
+
+    - name: Resolve dependencies (vcpkg install via CMake configure)
+      run: |
+        cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+          -DCMAKE_BUILD_TYPE=Release -DORBIT_BUILD_TESTS=OFF -DORBIT_BUILD_EXAMPLES=OFF
+
+    - name: SBOM
+      run: |
+        python3 .github/release/merge_sbom.py build/vcpkg_installed/x64-linux "$VERSION" \
+          "dist/orbit-framework-$VERSION.spdx.json"
+
+    - name: Checksums
+      working-directory: dist
+      run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+    - name: Install cosign
+      uses: sigstore/cosign-installer@v3
+
+    - name: Sign every artifact (keyless)
+      working-directory: dist
+      run: |
+        for f in *; do
+          cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
+        done
+
+    - name: Release notes from CHANGELOG.md
+      run: |
+        # The section for this version, up to the next "## [" heading.
+        awk -v ver="[$TAG]" 'index($0, "## " ver) == 1 {on=1; next} on && /^## \[/ {exit} on' \
+          CHANGELOG.md > release-notes.md
+        if [ ! -s release-notes.md ]; then
+          echo "::error::CHANGELOG.md has no section for $TAG"
+          exit 1
+        fi
+        cat >> release-notes.md <<'NOTES'
+
+        ---
+        **Verifying this release.** Every file has a `.sigstore.json` bundle.
+        See [docs/release-process.md](https://github.com/varuns2903/orbit-framework/blob/main/docs/release-process.md#verifying-a-release).
+        NOTES
+
+    - name: Attach to a draft release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        if ! gh release view "$TAG" > /dev/null 2>&1; then
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file release-notes.md
+        fi
+        gh release upload "$TAG" dist/* --clobber
