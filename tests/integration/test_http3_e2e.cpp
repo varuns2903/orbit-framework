@@ -148,6 +148,10 @@ class Http3Test : public ::testing::Test {
 protected:
     static server::App* app;
     static std::thread server_thread;
+    // Set when the server could not be started. Reported by each test:
+    // gtest turns a SetUpTestSuite failure into skipped tests, which ctest
+    // then counts as skipped rather than failed.
+    static std::string setup_error;
 
     static void SetUpTestSuite() {
         if (!curl_has_http3()) return;
@@ -155,7 +159,10 @@ protected:
         g_cert = (dir / "orbit_h3_cert.pem").string();
         g_key = (dir / "orbit_h3_key.pem").string();
         g_file = (dir / "orbit_h3_file.bin").string();
-        ASSERT_TRUE(make_self_signed(g_cert, g_key));
+        if (!make_self_signed(g_cert, g_key)) {
+            setup_error = "could not create a test certificate";
+            return;
+        }
         {
             std::ofstream f(g_file, std::ios::binary);
             std::string data = pattern(3 * 1024 * 1024 + 123);
@@ -231,11 +238,14 @@ protected:
             if (probe.code == CURLE_OK && probe.status == 200) return;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-        FAIL() << "server never answered over HTTP/3: " << describe(probe);
+        setup_error = "server never answered over HTTP/3: " + describe(probe);
     }
 
     void SetUp() override {
-        if (curl_has_http3()) return;
+        if (curl_has_http3()) {
+            if (!setup_error.empty()) FAIL() << setup_error;
+            return;
+        }
         // CI sets this so a libcurl without HTTP/3 fails loudly instead of
         // skipping the whole suite unnoticed.
         if (std::getenv("ORBIT_REQUIRE_HTTP3_TESTS")) FAIL() << "libcurl was built without HTTP/3 support";
@@ -257,6 +267,7 @@ protected:
 
 server::App* Http3Test::app = nullptr;
 std::thread Http3Test::server_thread;
+std::string Http3Test::setup_error;
 
 TEST_F(Http3Test, RoutesQueryCookiesAndHooks) {
     Request req;

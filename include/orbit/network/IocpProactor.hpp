@@ -60,6 +60,7 @@ public:
 
 private:
     void register_socket(socket_t fd);
+    void start_read(socket_t fd, void* buffer, size_t size, DWORD recv_flags, std::function<void(ssize_t)> callback);
 
     HANDLE iocp_handle_;
     std::mutex mutex_;
