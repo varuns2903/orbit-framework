@@ -16,17 +16,21 @@
 
 namespace server {
 
-static App* g_app = nullptr;
-
-// The only thing the signal handler does is store the signal number. A
-// lock-free atomic store is async-signal-safe; logging, locking, allocating
-// or forking from a handler can deadlock (e.g. if the signal interrupts a
+// The only thing the signal handler does is record the signal. Lock-free
+// atomic operations are async-signal-safe; logging, locking, allocating or
+// forking from a handler can deadlock (e.g. if the signal interrupts a
 // thread that holds the logger's mutex).
-static std::atomic<int> g_pending_signal{0};
-static_assert(std::atomic<int>::is_always_lock_free, "signal flag must be lock-free");
+//
+// Every running App watches the sequence number, so a signal reaches all of
+// them; consuming a single flag let only one App see it.
+static std::atomic<int> g_last_signal{0};
+static std::atomic<unsigned> g_signal_seq{0};
+static_assert(std::atomic<int>::is_always_lock_free, "signal state must be lock-free");
+static_assert(std::atomic<unsigned>::is_always_lock_free, "signal state must be lock-free");
 
 void signal_handler(int signum) {
-    g_pending_signal.store(signum, std::memory_order_relaxed);
+    g_last_signal.store(signum, std::memory_order_relaxed);
+    g_signal_seq.fetch_add(1, std::memory_order_release);
 }
 
 App::App(const config::ServerConfig& config) : config_(config) {
@@ -166,8 +170,9 @@ std::string js_string(const std::string& in) {
 
 App& App::enable_openapi(const std::string& title, const std::string& version, const std::string& docs_path,
                          const std::string& json_path, const std::string& assets_url) {
-    this->get(json_path, [title, version](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
-        std::string json = openapi::OpenApiRegistry::instance().generate_swagger_json(title, version);
+    openapi::OpenApiRegistry* registry = &openapi();
+    this->get(json_path, [title, version, registry](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
+        std::string json = registry->generate_swagger_json(title, version);
         http::HttpResponse response;
         response.status(http::HttpStatus::OK);
         response.set_body(json, "application/json");
@@ -213,8 +218,9 @@ App& App::enable_openapi(const std::string& title, const std::string& version, c
 }
 
 void App::listen() {
-    g_app = this;
-    
+    // Signals raised before this App started are not for it.
+    seen_signal_seq_ = g_signal_seq.load(std::memory_order_acquire);
+
 #ifndef _WIN32
     struct sigaction action;
     std::memset(&action, 0, sizeof(action));
@@ -255,28 +261,39 @@ void App::listen() {
     }
 #endif
     
-    event_loop_ = std::make_unique<EventLoop>(*listener_, router_, config_, tls_context_.get(), pass_quic_socket, pass_quic_manager);
+    {
+        std::lock_guard<std::mutex> lock(loop_mutex_);
+        event_loop_ = std::make_unique<EventLoop>(*listener_, router_, config_, tls_context_.get(), pass_quic_socket, pass_quic_manager);
 
-    // Act on signals from the loop thread, where logging and forking are safe.
-    event_loop_->set_tick_hook([this]() {
-        int signum = g_pending_signal.exchange(0, std::memory_order_relaxed);
-        if (signum == 0) return;
+        // Act on signals from the loop thread, where logging and forking are safe.
+        event_loop_->set_tick_hook([this]() {
+            unsigned seq = g_signal_seq.load(std::memory_order_acquire);
+            if (seq == seen_signal_seq_) return;
+            seen_signal_seq_ = seq;
+            int signum = g_last_signal.load(std::memory_order_relaxed);
 #ifndef _WIN32
-        if (signum == SIGUSR2) {
-            LOG_INFO("SIGUSR2 received. Initiating zero-downtime hot reload...");
-            hot_reload();
-            return;
-        }
+            if (signum == SIGUSR2) {
+                LOG_INFO("SIGUSR2 received. Initiating zero-downtime hot reload...");
+                hot_reload();
+                return;
+            }
 #endif
-        LOG_INFO("Interrupt signal (" << signum << ") received. Stopping server gracefully...");
-        stop();
-    });
+            LOG_INFO("Interrupt signal (" << signum << ") received. Stopping server gracefully...");
+            stop();
+        });
+
+        // stop() may already have been called, e.g. by a test tearing down
+        // before this thread got here.
+        if (stop_requested_) event_loop_->stop();
+    }
     
     LOG_INFO("App started listening on port " << listener_->port());
     event_loop_->run();
 }
 
 void App::stop() {
+    std::lock_guard<std::mutex> lock(loop_mutex_);
+    stop_requested_ = true;
     if (event_loop_) {
         event_loop_->stop();
     }

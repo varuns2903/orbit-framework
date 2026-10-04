@@ -7,10 +7,12 @@ namespace openapi {
 void OpenApiRegistry::register_route(http::HttpMethod method, const std::string& path, const RouteMetadata& meta) {
     // Convert /api/users/:id to /api/users/{id}
     std::string swagger_path = std::regex_replace(path, std::regex("/:([^/]+)"), "/{$1}");
+    std::lock_guard<std::mutex> lock(mutex_);
     paths_[swagger_path].methods[method] = meta;
 }
 
 void OpenApiRegistry::register_schema(const std::string& name, const std::string& json_schema_body) {
+    std::lock_guard<std::mutex> lock(mutex_);
     schemas_[name] = json_schema_body;
 }
 
@@ -42,6 +44,22 @@ std::string OpenApiRegistry::escape_json(const std::string& s) const {
 }
 
 std::string OpenApiRegistry::generate_swagger_json(const std::string& title, const std::string& version) const {
+    // Work on copies so registration can continue while a spec is generated.
+    // Schemas from the process-wide registry are included; this registry's
+    // own schemas take precedence.
+    std::unordered_map<std::string, std::string> schemas;
+    if (this != &instance()) {
+        const OpenApiRegistry& global = instance();
+        std::lock_guard<std::mutex> lock(global.mutex_);
+        schemas = global.schemas_;
+    }
+    std::map<std::string, EndpointMap> paths;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        paths = paths_;
+        for (const auto& [name, body] : schemas_) schemas[name] = body;
+    }
+
     std::stringstream ss;
     ss << "{\n";
     ss << "  \"openapi\": \"3.0.0\",\n";
@@ -52,7 +70,7 @@ std::string OpenApiRegistry::generate_swagger_json(const std::string& title, con
     ss << "  \"paths\": {\n";
     
     bool first_path = true;
-    for (const auto& [path, endpoint_map] : paths_) {
+    for (const auto& [path, endpoint_map] : paths) {
         if (!first_path) ss << ",\n";
         first_path = false;
         
@@ -150,11 +168,11 @@ std::string OpenApiRegistry::generate_swagger_json(const std::string& title, con
     
     ss << "\n  }";
     
-    if (!schemas_.empty()) {
+    if (!schemas.empty()) {
         ss << ",\n  \"components\": {\n";
         ss << "    \"schemas\": {\n";
         bool first_schema = true;
-        for (const auto& [name, schema_json] : schemas_) {
+        for (const auto& [name, schema_json] : schemas) {
             if (!first_schema) ss << ",\n";
             first_schema = false;
             ss << "      \"" << escape_json(name) << "\": " << schema_json;

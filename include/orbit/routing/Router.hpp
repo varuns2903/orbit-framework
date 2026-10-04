@@ -40,7 +40,11 @@ public:
      * @param parent Pointer to the parent router, if any.
      */
     Router(const std::string& prefix = "", Router* parent = nullptr) 
-        : prefix_(prefix), parent_(parent) {}
+        : prefix_(prefix), parent_(parent),
+          openapi_(parent ? parent->openapi_ : std::make_shared<openapi::OpenApiRegistry>()) {}
+
+    /// The OpenAPI registry for this router tree (shared by its groups).
+    openapi::OpenApiRegistry& openapi() { return *openapi_; }
 
     /**
      * @brief A builder class for fluent route configuration.
@@ -145,6 +149,7 @@ private:
     
     std::string prefix_;
     Router* parent_{nullptr};
+    std::shared_ptr<openapi::OpenApiRegistry> openapi_;
     std::vector<Middleware> local_middlewares_;
     ErrorHandler error_handler_;
     
