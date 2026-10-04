@@ -143,13 +143,13 @@ void IocpProactor::start_read(socket_t fd, void* buffer, size_t size, DWORD recv
         if (WSAGetLastError() != WSA_IO_PENDING) {
             // Take the callback before freeing the context, and call it unlocked:
             // it may start another operation on this proactor.
-            auto callback = std::move(ctx->io_callback);
+            auto failed = std::move(ctx->io_callback);
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 pending_contexts_[fd].pop_back();
             }
             delete ctx;
-            if (callback) callback(-1);
+            if (failed) failed(-1);
         }
     }
 }
@@ -172,13 +172,13 @@ void IocpProactor::async_write(socket_t fd, const void* buffer, size_t size, std
         if (WSAGetLastError() != WSA_IO_PENDING) {
             // Take the callback before freeing the context, and call it unlocked:
             // it may start another operation on this proactor.
-            auto callback = std::move(ctx->io_callback);
+            auto failed = std::move(ctx->io_callback);
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 pending_contexts_[fd].pop_back();
             }
             delete ctx;
-            if (callback) callback(-1);
+            if (failed) failed(-1);
         }
     }
 }
@@ -222,13 +222,13 @@ void IocpProactor::async_sendfile(socket_t out_fd, int in_fd, off_t offset, size
         if (WSAGetLastError() != WSA_IO_PENDING) {
             // Take the callback before freeing the context, and call it unlocked:
             // it may start another operation on this proactor.
-            auto callback = std::move(ctx->io_callback);
+            auto failed = std::move(ctx->io_callback);
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 pending_contexts_[out_fd].pop_back();
             }
             delete ctx;
-            if (callback) callback(-1);
+            if (failed) failed(-1);
         }
     }
 }
@@ -292,13 +292,13 @@ void IocpProactor::async_connect(socket_t fd, const sockaddr_in& addr, std::func
     if (pConnectEx) {
         BOOL result = pConnectEx(fd, (const sockaddr*)&addr, sizeof(addr), NULL, 0, NULL, &ctx->overlapped);
         if (result == FALSE && WSAGetLastError() != WSA_IO_PENDING) {
-            auto callback = std::move(ctx->connect_callback);
+            auto failed = std::move(ctx->connect_callback);
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 pending_contexts_[fd].pop_back();
             }
             delete ctx;
-            if (callback) callback(-1);
+            if (failed) failed(-1);
         }
     }
 }
