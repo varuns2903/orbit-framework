@@ -112,3 +112,12 @@ jobs:
           build_cov/coverage.xml
           build_cov/coverage.txt
         retention-days: 30
+
+    - name: Upload coverage to Codecov
+      if: always()
+      uses: codecov/codecov-action@v5
+      with:
+        files: build_cov/coverage.xml
+        flags: unittests
+        name: orbit-coverage
+        fail_ci_if_error: false
