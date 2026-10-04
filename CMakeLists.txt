@@ -23,6 +23,7 @@ option(ORBIT_ENABLE_MONGODB "Enable MongoDB database support" ON)
 option(ORBIT_ENABLE_HTTP3 "Enable HTTP/3 and QUIC support" ON)
 option(ORBIT_ENABLE_GRPC "Enable gRPC support" OFF)
 option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior Sanitizers" ON)
+option(ORBIT_ENABLE_TSAN "Build with ThreadSanitizer (Debug only; replaces ASan/UBSan)" OFF)
 option(ORBIT_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 
 if(ORBIT_ENABLE_COVERAGE)
@@ -32,8 +33,12 @@ if(ORBIT_ENABLE_COVERAGE)
     add_link_options(--coverage -fprofile-update=atomic)
 endif()
 
-# Optional sanitizers for debug builds to catch memory leaks and UB
-if(ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+# Optional sanitizers for debug builds to catch memory leaks and UB.
+# ThreadSanitizer cannot be combined with ASan, so it takes precedence.
+if(ORBIT_ENABLE_TSAN AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
+elseif(ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
 
     add_link_options(-fsanitize=address,undefined)
