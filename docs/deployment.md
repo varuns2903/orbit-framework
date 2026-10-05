@@ -173,6 +173,30 @@ cfg.keep_alive_timeout = std::chrono::seconds(60);
 cfg.websocket_idle_timeout = std::chrono::seconds(120);
 ```
 
+## TLS Certificates
+
+`ssl_cert` / `ssl_key` (`-c` / `-k`) set the default certificate. More certificates can be served from the same port, chosen by the name the client asks for (SNI):
+
+```cpp
+config::ServerConfig cfg;
+cfg.ssl_cert = "/etc/orbit/default.pem";
+cfg.ssl_key  = "/etc/orbit/default.key";
+cfg.sni_certificates = {
+    {"/etc/orbit/api.example.com.pem", "/etc/orbit/api.example.com.key"},
+    {"/etc/orbit/wildcard.example.org.pem", "/etc/orbit/wildcard.example.org.key"},
+};
+```
+
+On the command line: `--sni-cert <cert> <key>`, repeatable. Each certificate answers for the DNS names in its subjectAltName (or its CN if it has none), including wildcards such as `*.example.org` (one label). An exact name wins over a wildcard; clients asking for any other name, or sending no SNI, get the default certificate.
+
+**Renewing without a restart.** The certificate and key files are re-read, and new handshakes use them while open connections continue, when:
+
+- the process receives `SIGHUP` (POSIX), e.g. from a certbot deploy hook: `systemctl kill -s HUP orbit`;
+- `tls_reload_interval` (`--tls-reload-interval <seconds>`) is set and a file's size or modification time changed, which suits Kubernetes secrets and cert-manager;
+- the application calls `app.reload_tls()`.
+
+If any file cannot be loaded, or a key does not match its certificate, the reload is refused, the error is logged, and the current certificates stay in use.
+
 ## 3. Reverse Proxies (NGINX / HAProxy)
 
 While Orbit is perfectly capable of being exposed directly to the public internet (and features its own Load Balancing and Proxy middlewares), you may wish to run it behind an enterprise reverse proxy like NGINX.

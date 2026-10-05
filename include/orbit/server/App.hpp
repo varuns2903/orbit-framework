@@ -281,6 +281,17 @@ public:
      *        done. Safe to call from any thread.
      */
     void shutdown();
+
+    /**
+     * @brief Re-reads the TLS certificate and key files (ssl_cert, ssl_key and
+     *        sni_certificates). Thread-safe; also triggered by SIGHUP and by
+     *        ServerConfig::tls_reload_interval.
+     *
+     * New handshakes use the new certificates; open connections are not
+     * affected. If any file fails to load, the current certificates stay.
+     * @return False if TLS is off or loading failed (see @p error).
+     */
+    bool reload_tls(std::string* error = nullptr);
     void shutdown(std::chrono::seconds timeout);
 
     /**
@@ -315,6 +326,7 @@ private:
     std::mutex loop_mutex_;
     bool stop_requested_ = false; // guarded by loop_mutex_; a stop before the loop exists still applies
     unsigned seen_signal_seq_ = 0; // loop thread only
+    std::chrono::steady_clock::time_point next_tls_check_{}; // loop thread only
     std::atomic<bool> draining_{false};
 };
 

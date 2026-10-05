@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 #include <cstdint>
 #include <chrono>
 
@@ -14,6 +15,12 @@ enum class HttpVersion {
     Http1_1,
     Http2,
     Http3
+};
+
+/// A PEM certificate chain and its private key.
+struct TlsCertificate {
+    std::string cert_file;
+    std::string key_file;
 };
 
 struct ServerConfig {
@@ -32,6 +39,13 @@ struct ServerConfig {
     size_t max_body_size{10485760}; // Default 10 MB limit
     std::string ssl_cert{""};
     std::string ssl_key{""};
+    // More certificates, chosen by the name the client asks for (SNI). Each
+    // answers for the DNS names in its subjectAltName (or its CN); clients
+    // asking for any other name, or none, get ssl_cert.
+    std::vector<TlsCertificate> sni_certificates;
+    // How often to check the certificate and key files for changes and
+    // reload them; 0 = never. SIGHUP and App::reload_tls() reload at once.
+    std::chrono::seconds tls_reload_interval{0};
     EventEngine engine{EventEngine::Epoll}; // Default to our new fast backend!
     HttpVersion http_version{HttpVersion::Http1_1}; // Default to HTTP/1.1
 
