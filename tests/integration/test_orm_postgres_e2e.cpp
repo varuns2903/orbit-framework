@@ -92,6 +92,90 @@ concurrency::Task scenario(std::shared_ptr<database::PostgresClient> db, Results
     done->set_value();
 }
 
+struct Stock {
+    std::string name;
+    int qty = 0;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Stock, name, qty)
+
+struct CrudResults {
+    bool connected = false;
+    std::vector<std::string> page;
+    uint64_t count_over_2 = 0;
+    uint64_t updated = 0;
+    int c_qty_after_update = -1;
+    uint64_t removed = 0;
+    uint64_t remaining = 0;
+    bool unconditional_update_threw = false;
+    uint64_t updated_all = 0;
+    uint64_t nonzero_after_all = 99;
+};
+
+concurrency::Task crud_scenario(std::shared_ptr<database::PostgresClient> db, CrudResults* r, std::promise<void>* done) {
+    using Stocks = orm::QueryBuilder<database::PostgresClient, Stock>;
+    r->connected = co_await database::connect_async(db);
+    if (r->connected) {
+        // "user" is a reserved word: only works because the ORM quotes it.
+        auto create = database::query_async(db, "CREATE TABLE \"user\" (name text, qty int);");
+        co_await create;
+        const char* names[] = {"a", "b", "c", "d", "e"};
+        for (int i = 0; i < 5; ++i) {
+            Stocks ins(db, "user");
+            Stock s{names[i], i}; // qty 0..4
+            auto insert = ins.insert_async(s);
+            co_await insert;
+        }
+
+        Stocks page(db, "user");
+        page.order_by("qty", orm::Order::Desc).limit(2).offset(1);
+        auto get_page = page.get_async();
+        std::vector<Stock> rows = co_await get_page;
+        for (const auto& s : rows) r->page.push_back(s.name);
+
+        Stocks over2(db, "user");
+        over2.where(orm::Col("qty") > 2);
+        auto count = over2.count_async();
+        r->count_over_2 = co_await count;
+
+        Stocks upd(db, "user");
+        upd.where(orm::Col("name") == "c");
+        nlohmann::json changes = {{"qty", 100}};
+        auto update = upd.update_async(changes);
+        r->updated = co_await update;
+        Stocks find_c(db, "user");
+        find_c.where(orm::Col("name") == "c");
+        auto get_c = find_c.get_async();
+        std::vector<Stock> c = co_await get_c;
+        if (c.size() == 1) r->c_qty_after_update = c[0].qty;
+
+        Stocks del(db, "user");
+        del.where(orm::Col("qty") < 2);
+        auto remove = del.remove_async();
+        r->removed = co_await remove;
+        Stocks left(db, "user");
+        auto count_left = left.count_async();
+        r->remaining = co_await count_left;
+
+        try {
+            Stocks oops(db, "user");
+            nlohmann::json zero = {{"qty", 0}};
+            oops.update_async(zero);
+        } catch (const std::logic_error&) {
+            r->unconditional_update_threw = true;
+        }
+        Stocks everything(db, "user");
+        everything.all();
+        nlohmann::json zero = {{"qty", 0}};
+        auto update_all = everything.update_async(zero);
+        r->updated_all = co_await update_all;
+        Stocks nonzero(db, "user");
+        nonzero.where(orm::Col("qty") != 0);
+        auto count_nonzero = nonzero.count_async();
+        r->nonzero_after_all = co_await count_nonzero;
+    }
+    done->set_value();
+}
+
 } // namespace
 
 class OrmPostgresTest : public ::testing::Test {
@@ -277,4 +361,35 @@ TEST_F(OrmPostgresTest, ErrorsNullsAndTransactionalMigrations) {
     running = false;
     loop.join();
 }
+TEST_F(OrmPostgresTest, UpdateDeleteOrderLimitCountAndQuoting) {
+    network::EpollProactor proactor;
+    std::atomic<bool> running{true};
+    std::thread loop([&] {
+        while (running) proactor.run_once(50);
+    });
+
+    auto db = std::make_shared<database::PostgresClient>(
+        &proactor, "host=" + socket_dir + " port=" + std::to_string(kPgPort) + " user=postgres dbname=postgres");
+    CrudResults r;
+    std::promise<void> done;
+    auto finished = done.get_future();
+    crud_scenario(db, &r, &done);
+    bool completed = finished.wait_for(std::chrono::seconds(20)) == std::future_status::ready;
+
+    running = false;
+    loop.join();
+
+    ASSERT_TRUE(completed);
+    ASSERT_TRUE(r.connected);
+    EXPECT_EQ(r.page, (std::vector<std::string>{"d", "c"})); // qty 4,3,2,... skip 1, take 2
+    EXPECT_EQ(r.count_over_2, 2u);
+    EXPECT_EQ(r.updated, 1u);
+    EXPECT_EQ(r.c_qty_after_update, 100);
+    EXPECT_EQ(r.removed, 2u); // qty 0 and 1
+    EXPECT_EQ(r.remaining, 3u);
+    EXPECT_TRUE(r.unconditional_update_threw);
+    EXPECT_EQ(r.updated_all, 3u);
+    EXPECT_EQ(r.nonzero_after_all, 0u);
+}
+
 #endif

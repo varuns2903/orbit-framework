@@ -84,3 +84,97 @@ TEST(OrmTest, FloatingPointKeepsPrecision) {
     ASSERT_TRUE(q.params[0].has_value());
     EXPECT_EQ(std::stod(*q.params[0]), 0.1);
 }
+
+namespace {
+
+struct Item {
+    std::string name;
+    int qty = 0;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Item, name, qty)
+
+// Stands in for MysqlClient: escaping instead of binding marks the dialect.
+struct FakeMysql {
+    struct Awaiter {
+        bool await_ready() const { return true; }
+        void await_suspend(std::coroutine_handle<>) {}
+        database::ResultSet await_resume() { return {}; }
+    };
+    std::string escape(const std::string& s) { return s; }
+    Awaiter query_async(const std::string&) { return {}; }
+};
+
+using PgItems = QueryBuilder<database::PostgresClient, Item>;
+using MyItems = QueryBuilder<FakeMysql, Item>;
+
+} // namespace
+
+TEST(OrmBuilderTest, SelectWithOrderLimitOffset) {
+    PgItems q(nullptr, "items");
+    q.where(Col("qty") > 3).order_by("name").order_by("qty", Order::Desc).limit(10).offset(20);
+    Statement st = q.select_statement();
+    EXPECT_EQ(st.sql, "SELECT * FROM items WHERE qty > ? ORDER BY name ASC, qty DESC LIMIT 10 OFFSET 20");
+    EXPECT_EQ(st.params, P({"3"}));
+}
+
+TEST(OrmBuilderTest, MysqlOffsetNeedsALimit) {
+    MyItems q(nullptr, "items");
+    q.offset(5);
+    EXPECT_EQ(q.select_statement().sql, "SELECT * FROM items LIMIT 18446744073709551615 OFFSET 5");
+    PgItems pg(nullptr, "items");
+    pg.offset(5);
+    EXPECT_EQ(pg.select_statement().sql, "SELECT * FROM items OFFSET 5");
+}
+
+TEST(OrmBuilderTest, ReservedWordsAreQuotedPerDialect) {
+    PgItems pg(nullptr, "user");
+    pg.where(Col("order") == 1).where("group", "=", "a").order_by("desc");
+    EXPECT_EQ(pg.select_statement().sql,
+              "SELECT * FROM \"user\" WHERE \"order\" = ? AND \"group\" = ? ORDER BY \"desc\" ASC");
+
+    MyItems my(nullptr, "user");
+    my.where(Col("t.order") == 1);
+    EXPECT_EQ(my.select_statement().sql, "SELECT * FROM `user` WHERE t.`order` = ?");
+
+    // Ordinary names stay unquoted, so PostgreSQL's case folding is unchanged.
+    PgItems plain(nullptr, "CreatedItems");
+    plain.where(Col("createdAt") > 0);
+    EXPECT_EQ(plain.select_statement().sql, "SELECT * FROM CreatedItems WHERE createdAt > ?");
+}
+
+TEST(OrmBuilderTest, UpdateBindsEveryValue) {
+    PgItems q(nullptr, "items");
+    q.where(Col("name") == "widget");
+    Statement st = q.update_statement({{"qty", 7}, {"order", nullptr}});
+    EXPECT_EQ(st.sql, "UPDATE items SET \"order\" = ?, qty = ? WHERE name = ?");
+    ASSERT_EQ(st.params.size(), 3u);
+    EXPECT_EQ(st.params[0], std::nullopt);
+    EXPECT_EQ(st.params[1], "7");
+    EXPECT_EQ(st.params[2], "widget");
+}
+
+TEST(OrmBuilderTest, UpdateAndDeleteRefuseToTouchEveryRowByAccident) {
+    PgItems q(nullptr, "items");
+    EXPECT_THROW(q.update_statement({{"qty", 0}}), std::logic_error);
+    EXPECT_THROW(q.delete_statement(), std::logic_error);
+    q.all();
+    EXPECT_EQ(q.update_statement({{"qty", 0}}).sql, "UPDATE items SET qty = ?");
+    EXPECT_EQ(q.delete_statement().sql, "DELETE FROM items");
+}
+
+TEST(OrmBuilderTest, UpdateRejectsBadInput) {
+    PgItems q(nullptr, "items");
+    q.where(Col("qty") == 1);
+    EXPECT_THROW(q.update_statement(nlohmann::json::object()), std::invalid_argument);
+    EXPECT_THROW(q.update_statement(nlohmann::json::array({1})), std::invalid_argument);
+    EXPECT_THROW(q.update_statement({{"qty = 0; DROP TABLE items; --", 1}}), std::invalid_argument);
+    EXPECT_THROW(q.order_by("name; DROP TABLE items"), std::invalid_argument);
+}
+
+TEST(OrmBuilderTest, DeleteAndCount) {
+    PgItems q(nullptr, "items");
+    q.where(Col("qty") <= 0 || Col("name") == "old");
+    EXPECT_EQ(q.delete_statement().sql, "DELETE FROM items WHERE (qty <= ? OR name = ?)");
+    EXPECT_EQ(q.count_statement().sql, "SELECT COUNT(*) AS n FROM items WHERE (qty <= ? OR name = ?)");
+    EXPECT_EQ(q.count_statement().params, P({"0", "old"}));
+}

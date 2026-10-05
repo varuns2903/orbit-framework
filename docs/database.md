@@ -42,6 +42,33 @@ Task db_handler(HttpRequest& req, std::shared_ptr<ResponseWriter> writer) {
 }
 ```
 
+## ORM Queries
+
+`ORBIT_REGISTER_MODEL(Type, "table")` gives a query builder for a JSON-serialisable struct:
+
+```cpp
+struct Item { std::string name; int qty; };
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Item, name, qty)
+ORBIT_REGISTER_MODEL(Item, "items")
+
+// SELECT with sorting and paging
+auto page = co_await query_Item(db).where(orm::Col("qty") > 0)
+                                   .order_by("qty", orm::Order::Desc)
+                                   .limit(20).offset(40)
+                                   .get_async();
+
+uint64_t n = co_await query_Item(db).where(orm::Col("qty") == 0).count_async();
+
+co_await query_Item(db).insert_async(Item{"widget", 3});
+
+// UPDATE / DELETE resume with the number of rows affected
+uint64_t changed = co_await query_Item(db).where(orm::Col("name") == "widget")
+                                          .update_async({{"qty", 5}});
+uint64_t removed = co_await query_Item(db).where(orm::Col("qty") <= 0).remove_async();
+```
+
+`update_async()` and `remove_async()` refuse to run (`std::logic_error`) without a `where()` condition, so a forgotten filter cannot rewrite or empty a table; call `.all()` to really affect every row. Table and column names must be plain identifiers; SQL reserved words among them (`user`, `order`, `group`, ...) are quoted for the database (`"user"` on PostgreSQL, `` `user` `` on MySQL), while other names stay unquoted so PostgreSQL's usual lower-case folding still applies. `select_statement()`, `count_statement()`, `update_statement()` and `delete_statement()` return the generated SQL and parameters without running it.
+
 ## Parameters and SQL Injection
 
 Never build SQL by concatenating request data. Bind values instead:
