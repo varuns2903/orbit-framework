@@ -69,3 +69,30 @@ app.get("/db", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
     db_handler(req, res); // Starts the coroutine Task asynchronously
 });
 ```
+
+## Connection Pools
+
+`database::ConnectionPool` hands out connected clients and takes them back. Given a health check, it also drops clients that have stopped working (a database restart, a failover, an idle connection cut by a firewall) and connects replacements in the background, retrying failed attempts with exponential backoff:
+
+```cpp
+#include <orbit/database/ConnectionPool.hpp>
+
+database::PoolOptions<database::PostgresClient> opts;
+opts.health_check = [](database::PostgresClient& c) { return c.is_healthy(); };
+opts.initial_backoff = std::chrono::milliseconds(100); // then 200, 400, ... up to max_backoff
+opts.max_backoff = std::chrono::seconds(30);
+
+auto pool = std::make_shared<database::ConnectionPool<database::PostgresClient>>(
+    8, [&] { return std::make_shared<database::PostgresClient>(&proactor, conninfo); }, opts);
+
+pool->init([](auto client, auto done) { client->connect(done); },
+           [](bool all_connected) { /* connections that failed are retried */ });
+
+pool->acquire([pool](std::shared_ptr<database::PostgresClient> db) {
+    db->execute("SELECT 1", {}, [pool, db](const database::ResultSet& res) {
+        pool->release(db); // an unhealthy client is replaced instead of reused
+    });
+});
+```
+
+A client is checked when it is acquired and when it is released; a dead one is never handed out. Replacements go to waiting `acquire()` calls first. Retries wait on a detached thread by default; set `opts.schedule` to run them on your own timers. `idle_count()`, `waiting_count()` and `reconnecting_count()` expose the pool's state, for example for a readiness check.
