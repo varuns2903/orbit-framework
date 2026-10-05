@@ -1,0 +1,23 @@
+# Coverage reported by .github/workflows/coverage.yml (gcovr over src/ and
+# include/orbit/). The ignores guard against anything else being uploaded.
+coverage:
+  status:
+    # Reported on pull requests, but never blocks a merge.
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+ignore:
+  - "tests/**"
+  - "examples/**"
+  - "benchmarks/**"
+  - "tools/**"
+  - "**/_deps/**"
+  - "include/orbit/http/json.hpp"
+
+comment:
+  layout: "diff, files"
+  require_changes: true
