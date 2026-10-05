@@ -201,6 +201,10 @@ server {
 }
 ```
 
+### HTTP/2 without TLS (h2c)
+
+Behind a proxy that terminates TLS, Orbit can also speak HTTP/2 over the plaintext hop. With HTTP/2 enabled (`--http-version 2`, or `3`), a plaintext connection that opens with the HTTP/2 connection preface is served as HTTP/2 ("prior knowledge", RFC 9113 section 3.3); other connections on the same port keep using HTTP/1.1. The `Upgrade: h2c` handshake is not supported, as RFC 9113 deprecated it. For example, Envoy (`http2_protocol_options` on the upstream cluster), HAProxy (`proto h2` on the server line) and `curl --http2-prior-knowledge` all use prior knowledge.
+
 ## 4. Bare Metal / VPS Deployment (systemd)
 
 To deploy without Docker on a Linux VPS (Ubuntu/Debian):

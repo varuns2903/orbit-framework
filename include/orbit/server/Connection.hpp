@@ -47,6 +47,8 @@ struct ConnectionLimits {
     size_t max_request_line = 4096;
     size_t max_headers = 100;         ///< Header fields per request
     size_t websocket_max_message_size = 16 * 1024 * 1024;
+    /// Accept HTTP/2 with prior knowledge (h2c) on plaintext connections.
+    bool h2c = false;
 };
 
 struct ConnectionTimeouts {
@@ -203,6 +205,7 @@ private:
     RequestState check_request_state();
     std::string request_body_storage_; // Owns a decoded chunked request body
     std::atomic<bool> should_close_{false};
+    bool h2c_decided_ = false; // event-loop thread: the connection's first bytes were checked
     // Set (under write_mutex_) together with the final response's bytes;
     // the connection closes when everything queued has been written.
     bool close_after_write_{false};

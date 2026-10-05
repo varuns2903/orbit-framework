@@ -1,4 +1,5 @@
 #include <orbit/server/Connection.hpp>
+#include <algorithm>
 #include <orbit/utils/Logger.hpp>
 #include <orbit/server/ConnectionManager.hpp>
 #include <orbit/http/HttpParser.hpp>
@@ -234,6 +235,35 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         read_buffer_.insert(read_buffer_.end(), async_read_buf_, async_read_buf_ + bytes_read);
     }
     
+    // h2c with prior knowledge (RFC 9113 section 3.3): a plaintext client
+    // may open with the HTTP/2 preface instead of an HTTP/1.1 request.
+    if (!ssl_ && limits_.h2c && state_ == ConnectionState::HTTP && !h2c_decided_) {
+        static constexpr std::string_view kPreface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+        bool is_preface = false;
+        bool maybe_preface = false;
+        {
+            std::lock_guard<std::mutex> lock(read_mutex_);
+            std::string_view head(read_buffer_.data(), std::min(read_buffer_.size(), kPreface.size()));
+            is_preface = head.size() == kPreface.size() && head == kPreface;
+            maybe_preface = head.size() < kPreface.size() && kPreface.substr(0, head.size()) == head;
+        }
+        if (maybe_preface) {
+            // Not enough bytes to tell yet; an HTTP/1.1 parse of a partial
+            // preface would see a "PRI" request. The header timeout applies.
+            if (buffer_was_empty) arm_timer(timeouts_.header);
+            trigger_read();
+            return;
+        }
+        h2c_decided_ = true; // prior knowledge is only ever at the start
+        if (is_preface) {
+            state_ = ConnectionState::HTTP2;
+            // nghttp2 expects the preface itself, so the bytes stay buffered.
+            h2_session_ = std::make_shared<http::h2::Http2Session>(
+                std::weak_ptr<Connection>(shared_from_this()), proactor_, router_, thread_pool_,
+                client_ip_, max_body_size_);
+        }
+    }
+
     // We defer checking max body size to check_request_state()
     
     if (have_tls_output) {
