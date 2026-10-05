@@ -227,8 +227,11 @@ std::string TlsContext::file_stamp() const {
         std::error_code ec;
         auto size = std::filesystem::file_size(path, ec);
         auto time = std::filesystem::last_write_time(path, ec);
-        stamp += path + '|' + std::to_string(ec ? 0 : size) + '|' +
-                 std::to_string(ec ? 0 : time.time_since_epoch().count()) + '\n';
+        // Explicit types: libc++ counts file time in __int128, which
+        // std::to_string has no overload for.
+        auto ticks = static_cast<long long>(ec ? 0 : time.time_since_epoch().count());
+        stamp += path + '|' + std::to_string(static_cast<unsigned long long>(ec ? 0 : size)) + '|' +
+                 std::to_string(ticks) + '\n';
     };
     add(default_cert_.cert_file);
     add(default_cert_.key_file);
