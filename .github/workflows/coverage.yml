@@ -116,11 +116,19 @@ jobs:
           build_cov/coverage.txt
         retention-days: 30
 
+    # Upload exactly the gcovr report above (src/ and include/orbit/). With
+    # its default search and gcov plugin the uploader also ran gcov over the
+    # whole build and added system headers, googletest, inja and the tests.
+    # Codecov refuses uploads from this repository without CODECOV_TOKEN;
+    # a failed upload on main fails the job instead of passing silently.
     - name: Upload coverage to Codecov
       if: always()
       uses: codecov/codecov-action@v5
       with:
+        token: ${{ secrets.CODECOV_TOKEN }}
         files: build_cov/coverage.xml
+        disable_search: true
+        plugins: noop
         flags: unittests
         name: orbit-coverage
-        fail_ci_if_error: false
+        fail_ci_if_error: ${{ github.event_name == 'push' }}
