@@ -212,6 +212,7 @@ std::string HttpResponse::serialize_headers() const {
     out << "HTTP/1.1 " << code << " " << reason_phrase(code) << "\r\n";
 
     bool has_content_length = false;
+    bool has_transfer_encoding = false;
     for (const auto& [key, value] : headers) {
         // A CR or LF from application data would end this header and let the
         // rest of the value become new headers or a new response.
@@ -220,6 +221,7 @@ std::string HttpResponse::serialize_headers() const {
             continue;
         }
         if (utils::CaseInsensitiveEqual{}(std::string_view(key), std::string_view("Content-Length"))) has_content_length = true;
+        if (utils::CaseInsensitiveEqual{}(std::string_view(key), std::string_view("Transfer-Encoding"))) has_transfer_encoding = true;
         out << key << ": " << value << "\r\n";
     }
 
@@ -242,7 +244,11 @@ std::string HttpResponse::serialize_headers() const {
 
     // 1xx, 204 and 304 responses never carry content (RFC 9110 section 6.4.1).
     const bool bodiless = code < 200 || code == 204 || code == 304;
-    if (!has_content_length && !body.empty() && !bodiless) {
+    // Every other response states its length, including an empty one:
+    // without Content-Length (or chunked framing) an HTTP/1.1 client must
+    // read the body until the connection closes (RFC 9112 section 6.3), so
+    // a keep-alive client waited for the idle timeout after, e.g., a 302.
+    if (!has_content_length && !has_transfer_encoding && !bodiless) {
         out << "Content-Length: " << body.length() << "\r\n";
     }
 
