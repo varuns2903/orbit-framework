@@ -96,3 +96,38 @@ TEST(ResponseSerializationTest, HeaderValidators) {
     EXPECT_FALSE(is_valid_header_value("a\nb"));
     EXPECT_FALSE(is_valid_header_value(std::string("a\0b", 3)));
 }
+
+// Without a length, an HTTP/1.1 client reads an empty-bodied response until
+// the connection closes (RFC 9112 section 6.3): a keep-alive client sat
+// waiting for the idle timeout after every redirect.
+TEST(ResponseSerializationTest, EmptyBodyStatesZeroLength) {
+    http::HttpResponse redirect;
+    redirect.status(http::HttpStatus::Found);
+    redirect.headers["Location"] = "/elsewhere";
+    EXPECT_NE(redirect.serialize().find("\r\nContent-Length: 0\r\n"), std::string::npos) << redirect.serialize();
+
+    http::HttpResponse created;
+    created.status(http::HttpStatus::Created);
+    EXPECT_NE(created.serialize().find("Content-Length: 0"), std::string::npos);
+}
+
+TEST(ResponseSerializationTest, NoLengthForBodilessOrChunkedResponses) {
+    http::HttpResponse no_content;
+    no_content.status(http::HttpStatus::NoContent);
+    EXPECT_EQ(no_content.serialize().find("Content-Length"), std::string::npos);
+
+    http::HttpResponse not_modified;
+    not_modified.status(http::HttpStatus::NotModified);
+    EXPECT_EQ(not_modified.serialize().find("Content-Length"), std::string::npos);
+
+    http::HttpResponse streamed;
+    streamed.headers["Transfer-Encoding"] = "chunked";
+    EXPECT_EQ(streamed.serialize_headers().find("Content-Length"), std::string::npos);
+}
+
+TEST(ResponseSerializationTest, ExplicitLengthIsNotDuplicated) {
+    http::HttpResponse res;
+    res.headers["Content-Length"] = "5"; // e.g. HEAD for a 5-byte resource
+    std::string out = res.serialize_headers();
+    EXPECT_EQ(out.find("Content-Length"), out.rfind("Content-Length"));
+}

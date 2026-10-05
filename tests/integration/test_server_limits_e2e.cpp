@@ -87,6 +87,12 @@ public:
             res.set_body("ok");
             w->send(std::move(res));
         });
+        app_->get("/moved", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
+            http::HttpResponse res; // no body
+            res.status(http::HttpStatus::Found);
+            res.headers["Location"] = "/ok";
+            w->send(std::move(res));
+        });
         app_->ws("/ws", [](http::websocket::WebSocketConnection& ws) {
             ws.on_message([&ws](const std::string& m) { ws.send(m); });
         });
@@ -213,4 +219,26 @@ TEST(ServerLimitsTest, WebSocketMessageLimitFromConfig) {
     ASSERT_GE(reply.size(), 4u);
     EXPECT_EQ(static_cast<uint8_t>(reply[0]), 0x88) << "expected a close frame";
     EXPECT_EQ((static_cast<uint8_t>(reply[2]) << 8) | static_cast<uint8_t>(reply[3]), 1009);
+}
+
+TEST(ServerLimitsTest, EmptyBodyResponseKeepsTheConnectionUsable) {
+    config::ServerConfig cfg;
+    cfg.port = 8147;
+    Server server(cfg);
+
+    network::socket_t fd = connect_to(8147, 2000);
+    ASSERT_NE(fd, network::INVALID_SOCKET_FD);
+    send_str(fd, "GET /moved HTTP/1.1\r\nHost: x\r\n\r\n");
+    std::string first = read_some(fd);
+    EXPECT_EQ(first.rfind("HTTP/1.1 302", 0), 0u) << first;
+    EXPECT_NE(first.find("Content-Length: 0\r\n"), std::string::npos) << first;
+
+    // The client knows the 302 ended, so it can send the next request at once.
+    auto started = std::chrono::steady_clock::now();
+    send_str(fd, "GET /ok HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    std::string second = read_some(fd);
+    auto took = std::chrono::steady_clock::now() - started;
+    network::close_socket(fd);
+    EXPECT_EQ(second.rfind("HTTP/1.1 200", 0), 0u) << second;
+    EXPECT_LT(took, std::chrono::milliseconds(1000));
 }
