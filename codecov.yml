@@ -10,6 +10,15 @@ coverage:
       default:
         informational: true
 
+# The headline figure is line coverage, as in docs/coverage.md. Codecov
+# otherwise counts an executed line as uncovered ("partial") when any of its
+# branches was not taken, and gcov reports a hidden exception-unwinding
+# branch on most C++ lines that call a function: 46% on the badge for 82%
+# of lines executed. Branch coverage stays in the gcovr report.
+parsers:
+  cobertura:
+    partials_as_hits: true
+
 ignore:
   - "tests/**"
   - "examples/**"

@@ -86,6 +86,8 @@ jobs:
           --filter "${GITHUB_WORKSPACE}/src/" \
           --filter "${GITHUB_WORKSPACE}/include/orbit/" \
           --exclude '.*json\.hpp' \
+          --exclude-throw-branches \
+          --exclude-unreachable-branches \
           --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
           --html-details coverage.html \
           --xml coverage.xml \
