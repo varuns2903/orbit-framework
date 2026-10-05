@@ -50,6 +50,9 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
     limits.max_request_line = config.max_request_line;
     limits.max_headers = config.max_headers;
     limits.websocket_max_message_size = config.websocket_max_message_size;
+    // HTTP/2 over TLS is negotiated with ALPN; on plaintext connections it
+    // needs prior knowledge (h2c), offered whenever HTTP/2 is enabled.
+    limits.h2c = config.http_version != config::HttpVersion::Http1_1;
     connection_manager_.set_limits(limits);
     websocket_ping_interval_ = config.websocket_ping_interval;
     last_websocket_ping_ = std::chrono::steady_clock::now();
