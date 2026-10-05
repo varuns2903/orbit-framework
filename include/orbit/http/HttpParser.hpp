@@ -33,6 +33,18 @@ bool connection_option_present(std::string_view field_value, std::string_view op
 bool percent_decode(std::string_view in, std::string& out, bool plus_as_space, bool for_path);
 
 /**
+ * @brief Decodes application/x-www-form-urlencoded data: a query string or
+ *        a form body (WHATWG URL Standard section 5.1).
+ *
+ * Pairs are separated by '&', names from values by the first '='; '+' is a
+ * space. A name without '=' gets an empty value, and a repeated name keeps
+ * its last value.
+ *
+ * @return False on a malformed escape; @p out may then hold earlier pairs.
+ */
+bool parse_urlencoded(std::string_view data, std::unordered_map<std::string, std::string>& out);
+
+/**
  * @brief How the length of a request body is determined (RFC 9112 section 6).
  */
 struct MessageFraming {
@@ -40,6 +52,7 @@ struct MessageFraming {
     bool chunked{false};              ///< Transfer-Encoding ends in "chunked".
     bool has_content_length{false};   ///< A Content-Length header is present.
     size_t content_length{0};         ///< Its value, when has_content_length is true.
+    bool expect_continue{false};      ///< "Expect: 100-continue" (RFC 9110 section 10.1.1).
 };
 
 /**
