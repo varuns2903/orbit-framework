@@ -216,3 +216,46 @@ TEST(MultipartTest, NameIsNotTakenFromFilename) {
     parser.feed("--b\r\nContent-Disposition: form-data; filename=\"report.pdf\"; name=\"doc\"\r\n\r\nx\r\n" + kEnd);
     EXPECT_EQ(seen_name, "doc");
 }
+
+TEST(MultipartBoundaryTest, TokenQuotedAndOtherParameters) {
+    EXPECT_EQ(multipart_boundary("multipart/form-data; boundary=abc123"), "abc123");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; charset=utf-8; boundary=abc"), "abc");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; boundary=abc; charset=utf-8"), "abc");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; BOUNDARY=Up"), "Up");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; boundary=\"with space;and=semi\""), "with space;and=semi");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; boundary=\"esc\\\"aped\""), "esc\"aped");
+}
+
+TEST(MultipartBoundaryTest, MissingOrInvalid) {
+    EXPECT_EQ(multipart_boundary("multipart/form-data"), "");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; boundary="), "");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; boundary=\"unterminated"), "");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; boundary=" + std::string(71, 'b')), "");
+    EXPECT_EQ(multipart_boundary("multipart/form-data; boundary=" + std::string(70, 'b')), std::string(70, 'b'));
+    EXPECT_EQ(multipart_boundary("multipart/form-data; xboundary=abc"), "");
+}
+
+TEST(MultipartBoundaryTest, MultipartFormUsesTheParsedBoundary) {
+    // The old parser took everything after "boundary=", quotes included.
+    std::string body = "--b1\r\nContent-Disposition: form-data; name=\"f\"\r\n\r\nv\r\n--b1--\r\n";
+    auto form = MultipartForm::parse("multipart/form-data; boundary=\"b1\"; charset=utf-8", body);
+    EXPECT_EQ(form.fields["f"], "v");
+}
+
+TEST(MultipartTest, CompleteOnlyAfterTheClosingBoundary) {
+    std::string part = "--bnd\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n";
+    {
+        MultipartStreamParser parser("bnd", [](const std::string&, const std::string&) {},
+                                     [](const std::string&, const std::string&, const std::string&, const std::string&) {});
+        parser.feed(part);
+        parser.end();
+        EXPECT_FALSE(parser.complete()); // truncated: no "--bnd--"
+    }
+    {
+        MultipartStreamParser parser("bnd", [](const std::string&, const std::string&) {},
+                                     [](const std::string&, const std::string&, const std::string&, const std::string&) {});
+        parser.feed(part + "--bnd--\r\n");
+        parser.end();
+        EXPECT_TRUE(parser.complete());
+    }
+}

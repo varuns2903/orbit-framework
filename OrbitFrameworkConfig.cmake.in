@@ -9,6 +9,8 @@ set(ORBIT_ENABLE_REDIS @ORBIT_ENABLE_REDIS@)
 set(ORBIT_ENABLE_POSTGRES @ORBIT_ENABLE_POSTGRES@)
 set(ORBIT_ENABLE_MARIADB @ORBIT_ENABLE_MARIADB@)
 set(ORBIT_ENABLE_MONGODB @ORBIT_ENABLE_MONGODB@)
+set(ORBIT_ENABLE_BROTLI @ORBIT_ENABLE_BROTLI@)
+set(ORBIT_ENABLE_ZSTD @ORBIT_ENABLE_ZSTD@)
 
 find_dependency(OpenSSL)
 find_dependency(ZLIB)
@@ -44,6 +46,12 @@ endif()
 # Imported targets referenced by the exported link interface must be recreated
 # here, or the consumer's link line refers to targets that do not exist.
 pkg_check_modules(NGHTTP2 REQUIRED IMPORTED_TARGET libnghttp2)
+if(ORBIT_ENABLE_BROTLI)
+    pkg_check_modules(BROTLIENC REQUIRED IMPORTED_TARGET libbrotlienc)
+endif()
+if(ORBIT_ENABLE_ZSTD)
+    pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
+endif()
 
 if(ORBIT_ENABLE_HTTP3)
     pkg_check_modules(NGTCP2 REQUIRED IMPORTED_TARGET libngtcp2)

@@ -52,17 +52,11 @@ bool Csrf::operator()(http::HttpRequest& req, std::shared_ptr<http::ResponseWrit
         auto ct_it = req.headers.find("Content-Type");
         if (ct_it != req.headers.end()) {
             if (ct_it->second.find("application/x-www-form-urlencoded") != std::string_view::npos) {
-                std::string prefix = "_csrf=";
-                size_t start = req.body.find(prefix);
-                if (start != std::string_view::npos) {
-                    start += prefix.length();
-                    size_t end = req.body.find('&', start);
-                    if (end == std::string_view::npos) {
-                        provided_token = std::string(req.body.substr(start));
-                    } else {
-                        provided_token = std::string(req.body.substr(start, end - start));
-                    }
-                }
+                // A real form parse: searching the body for "_csrf=" also
+                // matched inside other names, such as "x_csrf=".
+                auto fields = req.form_fields();
+                auto field = fields.find("_csrf");
+                if (field != fields.end()) provided_token = field->second;
             } else if (ct_it->second.find("multipart/form-data") != std::string_view::npos) {
                 auto form = req.form();
                 if (form.fields.find("_csrf") != form.fields.end()) {

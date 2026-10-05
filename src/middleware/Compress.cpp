@@ -1,5 +1,11 @@
 #include <orbit/middleware/Compress.hpp>
 #include <zlib.h>
+#ifdef ORBIT_ENABLE_BROTLI
+#include <brotli/encode.h>
+#endif
+#ifdef ORBIT_ENABLE_ZSTD
+#include <zstd.h>
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -54,7 +60,8 @@ bool is_compressible_type(std::string_view content_type) {
     if (icontains(content_type, "image/svg")) return true;
     return !(icontains(content_type, "image/") || icontains(content_type, "video/") ||
              icontains(content_type, "audio/") || icontains(content_type, "application/zip") ||
-             icontains(content_type, "application/gzip") || icontains(content_type, "font/woff"));
+             icontains(content_type, "application/gzip") || icontains(content_type, "application/zstd") ||
+             icontains(content_type, "font/woff"));
 }
 
 void add_vary_accept_encoding(http::HttpResponse& res) {
@@ -66,11 +73,11 @@ void add_vary_accept_encoding(http::HttpResponse& res) {
     }
 }
 
-bool gzip(const std::string& in, std::string& out) {
+bool gzip(const std::string& in, std::string& out, int level) {
     z_stream zs;
     std::memset(&zs, 0, sizeof(zs));
     // 15 + 16 enables gzip envelope
-    if (deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+    if (deflateInit2(&zs, level, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
         return false;
     }
     zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(in.data()));
@@ -89,11 +96,13 @@ bool gzip(const std::string& in, std::string& out) {
     return ret == Z_STREAM_END;
 }
 
-} // namespace
+// The q-values a client gave each coding: -1 where it said nothing.
+struct Acceptance {
+    double gzip = -1, br = -1, zstd = -1, star = -1;
+};
 
-bool accepts_gzip(std::string_view accept_encoding) {
-    double gzip_q = -1; // -1: not mentioned
-    double star_q = -1;
+Acceptance parse_accept_encoding(std::string_view accept_encoding) {
+    Acceptance a;
     while (!accept_encoding.empty()) {
         size_t comma = accept_encoding.find(',');
         std::string_view element = trim(accept_encoding.substr(0, comma));
@@ -101,34 +110,129 @@ bool accepts_gzip(std::string_view accept_encoding) {
         std::string_view coding = trim(element.substr(0, semi));
         double q = semi == std::string_view::npos ? 1.0 : quality(element.substr(semi + 1));
         if (iequals(coding, "gzip") || iequals(coding, "x-gzip")) {
-            gzip_q = std::max(gzip_q, q);
+            a.gzip = std::max(a.gzip, q);
+        } else if (iequals(coding, "br")) {
+            a.br = std::max(a.br, q);
+        } else if (iequals(coding, "zstd")) {
+            a.zstd = std::max(a.zstd, q);
         } else if (coding == "*") {
-            star_q = q;
+            a.star = q;
         }
         if (comma == std::string_view::npos) break;
         accept_encoding.remove_prefix(comma + 1);
     }
-    // An explicit entry wins over the wildcard.
-    if (gzip_q >= 0) return gzip_q > 0;
-    return star_q > 0;
+    return a;
 }
 
-routing::Middleware compress() {
-    return [](http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> writer) -> bool {
+} // namespace
+
+bool coding_available(ContentCoding coding) {
+    switch (coding) {
+        case ContentCoding::Identity:
+        case ContentCoding::Gzip:
+            return true;
+        case ContentCoding::Brotli:
+#ifdef ORBIT_ENABLE_BROTLI
+            return true;
+#else
+            return false;
+#endif
+        case ContentCoding::Zstd:
+#ifdef ORBIT_ENABLE_ZSTD
+            return true;
+#else
+            return false;
+#endif
+    }
+    return false;
+}
+
+std::string_view coding_name(ContentCoding coding) {
+    switch (coding) {
+        case ContentCoding::Gzip: return "gzip";
+        case ContentCoding::Brotli: return "br";
+        case ContentCoding::Zstd: return "zstd";
+        case ContentCoding::Identity: break;
+    }
+    return "";
+}
+
+ContentCoding negotiate_coding(std::string_view accept_encoding, const std::vector<ContentCoding>& preference) {
+    Acceptance a = parse_accept_encoding(accept_encoding);
+    ContentCoding best = ContentCoding::Identity;
+    double best_q = 0;
+    for (ContentCoding coding : preference) {
+        if (coding == ContentCoding::Identity || !coding_available(coding)) continue;
+        double explicit_q = coding == ContentCoding::Gzip ? a.gzip : coding == ContentCoding::Brotli ? a.br : a.zstd;
+        // An explicit entry wins over the wildcard.
+        double q = explicit_q >= 0 ? explicit_q : std::max(a.star, 0.0);
+        if (q > best_q) { // strictly greater: ties keep the earlier preference
+            best = coding;
+            best_q = q;
+        }
+    }
+    return best;
+}
+
+bool compress_body(ContentCoding coding, const std::string& in, std::string& out, const CompressOptions& options) {
+    switch (coding) {
+        case ContentCoding::Gzip:
+            return gzip(in, out, options.gzip_level);
+        case ContentCoding::Brotli: {
+#ifdef ORBIT_ENABLE_BROTLI
+            size_t size = BrotliEncoderMaxCompressedSize(in.size());
+            if (size == 0) return false;
+            out.resize(size);
+            if (!BrotliEncoderCompress(options.brotli_quality, BROTLI_DEFAULT_WINDOW, BROTLI_DEFAULT_MODE, in.size(),
+                                       reinterpret_cast<const uint8_t*>(in.data()), &size,
+                                       reinterpret_cast<uint8_t*>(out.data()))) {
+                return false;
+            }
+            out.resize(size);
+            return true;
+#else
+            return false;
+#endif
+        }
+        case ContentCoding::Zstd: {
+#ifdef ORBIT_ENABLE_ZSTD
+            out.resize(ZSTD_compressBound(in.size()));
+            size_t size = ZSTD_compress(out.data(), out.size(), in.data(), in.size(), options.zstd_level);
+            if (ZSTD_isError(size)) return false;
+            out.resize(size);
+            return true;
+#else
+            return false;
+#endif
+        }
+        case ContentCoding::Identity:
+            break;
+    }
+    return false;
+}
+
+bool accepts_gzip(std::string_view accept_encoding) {
+    return negotiate_coding(accept_encoding, {ContentCoding::Gzip}) == ContentCoding::Gzip;
+}
+
+routing::Middleware compress(CompressOptions options) {
+    return [options](http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> writer) -> bool {
         auto ae = request.headers.find("Accept-Encoding");
-        const bool client_accepts = ae != request.headers.end() && accepts_gzip(ae->second);
+        const ContentCoding coding = ae == request.headers.end()
+            ? ContentCoding::Identity
+            : negotiate_coding(ae->second, options.preference);
 
         // Registered for every request: even an uncompressed response must
         // carry Vary, or a shared cache could hand it (or the gzip variant)
         // to the wrong client.
-        writer->add_interceptor([client_accepts](http::HttpResponse& res) {
+        writer->add_interceptor([coding, options](http::HttpResponse& res) {
             // Don't compress empty bodies or raw file descriptors
             if (res.body.empty() || res.file_fd != -1) return;
             int status = static_cast<int>(res.status_code);
             if (status < 200 || status == 204 || status == 304) return;
 
             // Don't compress very small payloads (overhead > savings)
-            if (res.body.size() < 150) return;
+            if (res.body.size() < options.min_size) return;
 
             // Already encoded by the handler.
             if (res.headers.count("Content-Encoding")) return;
@@ -141,13 +245,16 @@ routing::Middleware compress() {
             if (ct_it != res.headers.end() && !is_compressible_type(ct_it->second)) return;
 
             add_vary_accept_encoding(res);
-            if (!client_accepts) return;
+            if (coding == ContentCoding::Identity) return;
 
             std::string compressed_body;
-            if (!gzip(res.body, compressed_body) || compressed_body.size() >= res.body.size()) return;
+            if (!compress_body(coding, res.body, compressed_body, options) ||
+                compressed_body.size() >= res.body.size()) {
+                return;
+            }
 
             res.body = std::move(compressed_body);
-            res.headers["Content-Encoding"] = "gzip";
+            res.headers["Content-Encoding"] = std::string(coding_name(coding));
             res.headers["Content-Length"] = std::to_string(res.body.size());
 
             // The bytes differ from the identity variant, so a strong

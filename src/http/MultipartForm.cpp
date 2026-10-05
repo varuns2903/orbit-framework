@@ -1,17 +1,15 @@
 #include <orbit/http/MultipartForm.hpp>
+#include <orbit/http/MultipartStreamParser.hpp>
 
 namespace http {
 
 MultipartForm MultipartForm::parse(std::string_view content_type_header, std::string_view body) {
     MultipartForm form;
     
-    std::string_view boundary_marker = "boundary=";
-    size_t boundary_pos = content_type_header.find(boundary_marker);
-    if (boundary_pos == std::string_view::npos) return form;
-    
-    std::string_view boundary = content_type_header.substr(boundary_pos + boundary_marker.length());
-    
-    std::string delimiter = "--" + std::string(boundary);
+    std::string boundary = multipart_boundary(content_type_header);
+    if (boundary.empty()) return form;
+
+    std::string delimiter = "--" + boundary;
 
     size_t pos = body.find(delimiter);
     if (pos == std::string_view::npos) return form;
