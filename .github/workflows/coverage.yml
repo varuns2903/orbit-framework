@@ -38,6 +38,9 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential cmake
+        # initdb/pg_ctl for the PostgreSQL tests (outside PATH on the runner).
+        pg_bin=$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)
+        if [ -n "$pg_bin" ]; then echo "$pg_bin" >> "$GITHUB_PATH"; fi
         pipx install gcovr || pip install --user gcovr
 
     - name: Setup vcpkg (pinned to builtin-baseline)

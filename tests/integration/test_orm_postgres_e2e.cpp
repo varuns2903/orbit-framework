@@ -122,7 +122,12 @@ protected:
     }
 
     void SetUp() override {
-        if (!available) GTEST_SKIP() << "PostgreSQL server binaries not available";
+        if (available) return;
+        // CI sets this, so a runner without initdb/pg_ctl fails instead of
+        // skipping the PostgreSQL tests unnoticed.
+        const char* required = std::getenv("ORBIT_REQUIRE_POSTGRES_TESTS");
+        if (required && *required) FAIL() << "could not start a PostgreSQL server";
+        GTEST_SKIP() << "PostgreSQL server binaries not available";
     }
 };
 
