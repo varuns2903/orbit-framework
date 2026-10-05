@@ -21,6 +21,15 @@ struct MultipartLimits {
 };
 
 /**
+ * @brief Extracts the boundary parameter from a multipart Content-Type value,
+ *        e.g. `multipart/form-data; boundary="abc"` (RFC 9110 section 5.6.6,
+ *        RFC 2046 section 5.1.1).
+ * @return The boundary, unquoted; empty if absent or invalid (more than 70
+ *         characters, or an unterminated quoted string).
+ */
+std::string multipart_boundary(std::string_view content_type);
+
+/**
  * @brief Streaming parser for multipart/form-data.
  *
  * Files are written to unpredictable names, created exclusively with
@@ -64,6 +73,9 @@ public:
     /// True if a limit was exceeded or a file could not be written.
     bool failed() const { return failed_; }
     const std::string& error() const { return error_; }
+    /// True once the closing boundary has been seen without a failure. A
+    /// body that ended before it (a truncated upload) is not complete.
+    bool complete() const { return finished_ && !failed_; }
 
 private:
     std::string boundary_;
@@ -91,6 +103,7 @@ private:
     size_t total_size_ = 0;
     size_t parts_ = 0;
     bool failed_ = false;
+    bool finished_ = false;
     std::string error_;
 
     void process_buffer();

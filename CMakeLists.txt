@@ -169,6 +169,7 @@ set(SERVER_SOURCES
     src/http/HttpResponse.cpp
     src/http/MultipartForm.cpp
     src/http/MultipartStreamParser.cpp
+    src/http/MultipartUpload.cpp
     src/http/WebSocketConnection.cpp
     src/http/Http2Session.cpp
     src/routing/Router.cpp

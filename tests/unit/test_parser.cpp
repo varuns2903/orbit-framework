@@ -134,3 +134,61 @@ TEST(PercentDecodingTest, SlashAllowedInQuery) {
     ASSERT_TRUE(req.has_value());
     EXPECT_EQ(req->query["code"], "4/0Ab");
 }
+
+TEST(UrlEncodedTest, DecodesPairs) {
+    std::unordered_map<std::string, std::string> out;
+    ASSERT_TRUE(http::parse_urlencoded("a=1&b=two+words&c=%26%3D&empty=&flag&&x=%E2%9C%93", out));
+    EXPECT_EQ(out["a"], "1");
+    EXPECT_EQ(out["b"], "two words");
+    EXPECT_EQ(out["c"], "&=");
+    EXPECT_EQ(out["empty"], "");
+    EXPECT_TRUE(out.count("flag"));
+    EXPECT_EQ(out["flag"], "");
+    EXPECT_EQ(out["x"], "\xE2\x9C\x93");
+    EXPECT_EQ(out.size(), 6u);
+}
+
+TEST(UrlEncodedTest, LastValueWinsAndValueKeepsLaterEquals) {
+    std::unordered_map<std::string, std::string> out;
+    ASSERT_TRUE(http::parse_urlencoded("k=1&k=2&e=a=b", out));
+    EXPECT_EQ(out["k"], "2");
+    EXPECT_EQ(out["e"], "a=b");
+}
+
+TEST(UrlEncodedTest, MalformedEscapeFails) {
+    std::unordered_map<std::string, std::string> out;
+    EXPECT_FALSE(http::parse_urlencoded("a=%zz", out));
+    EXPECT_FALSE(http::parse_urlencoded("a=%4", out));
+    EXPECT_TRUE(http::parse_urlencoded("", out));
+}
+
+TEST(FormFieldsTest, OnlyForUrlEncodedBodies) {
+    http::HttpRequest req;
+    req.body = "name=Ada+Lovelace&lang=c%2B%2B";
+    EXPECT_TRUE(req.form_fields().empty()); // no Content-Type
+
+    req.set_header("Content-Type", "application/json");
+    EXPECT_TRUE(req.form_fields().empty());
+
+    req.set_header("Content-Type", "Application/X-WWW-Form-URLEncoded ; charset=UTF-8");
+    auto fields = req.form_fields();
+    EXPECT_EQ(fields["name"], "Ada Lovelace");
+    EXPECT_EQ(fields["lang"], "c++");
+
+    req.set_header("Content-Type", "application/x-www-form-urlencoded-extra");
+    EXPECT_TRUE(req.form_fields().empty());
+}
+
+TEST(FormFieldsTest, MalformedBodyGivesNoFields) {
+    http::HttpRequest req;
+    req.set_header("Content-Type", "application/x-www-form-urlencoded");
+    req.body = "ok=1&bad=%G0";
+    EXPECT_TRUE(req.form_fields().empty());
+}
+
+TEST(ExpectContinueTest, FramingRecordsTheExpectation) {
+    EXPECT_TRUE(http::parse_framing("Host: x\r\nExpect: 100-continue\r\nContent-Length: 5\r\n").expect_continue);
+    EXPECT_TRUE(http::parse_framing("expect:  100-Continue \r\n").expect_continue);
+    EXPECT_FALSE(http::parse_framing("Host: x\r\nContent-Length: 5\r\n").expect_continue);
+    EXPECT_FALSE(http::parse_framing("Expect: something-else\r\n").expect_continue);
+}

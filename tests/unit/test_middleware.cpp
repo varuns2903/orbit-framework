@@ -222,3 +222,24 @@ TEST(HttpRequestTest, SetHeaderOwnsNameAndValue) {
     req.set_header("x-0", "replaced");
     EXPECT_EQ(req.headers["X-0"], "replaced");
 }
+
+// The form token is read with a real form parse: "_csrf=" inside another
+// field name (here "x_csrf") is not the token.
+TEST(MiddlewareTest, CsrfReadsTheFormFieldNotASubstring) {
+    auto m = csrf_protection();
+    const std::string token = "token-value-long-enough-for-the-test";
+
+    auto post = [&](const std::string& body) {
+        HttpRequest req;
+        req.method = HttpMethod::POST;
+        req.cookies["csrf_token"] = token;
+        req.set_header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+        req.body = body;
+        auto writer = std::make_shared<MiddlewareMockResponseWriter>();
+        return m(req, writer);
+    };
+    EXPECT_TRUE(post("name=a&_csrf=" + token));
+    EXPECT_TRUE(post("_csrf=" + token + "&name=a"));
+    EXPECT_FALSE(post("x_csrf=" + token));
+    EXPECT_FALSE(post("name=x_csrf%3D&x_csrf=" + token));
+}
