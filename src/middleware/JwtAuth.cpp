@@ -7,7 +7,7 @@
 #include <openssl/ecdsa.h>
 #include <openssl/core_names.h>
 #include <openssl/param_build.h>
-#include <curl/curl.h>
+#include <orbit/http/Client.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <stdexcept>
 #include <vector>
@@ -227,13 +227,6 @@ bool verify_with_key(const PublicKey& key, const std::string& signed_part, const
 
 // --- JWKS ---
 
-size_t collect(void* data, size_t size, size_t n, void* out) {
-    auto* body = static_cast<std::string*>(out);
-    if (body->size() + size * n > 1024 * 1024) return 0; // a key set is small; refuse anything huge
-    body->append(static_cast<char*>(data), size * n);
-    return size * n;
-}
-
 class JwksCache {
 public:
     JwksCache(std::string url, std::chrono::seconds refresh, std::chrono::seconds min_refetch, std::chrono::seconds timeout)
@@ -270,31 +263,18 @@ private:
     void fetch_locked() {
         attempted_ = true;
         attempted_at_ = Clock::now();
-        static std::once_flag curl_init;
-        std::call_once(curl_init, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
-
-        CURL* curl = curl_easy_init();
-        if (!curl) return;
-        std::string body;
-        curl_easy_setopt(curl, CURLOPT_URL, url_.c_str());
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(timeout_.count()));
-        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-#if LIBCURL_VERSION_NUM >= 0x075500
-        curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https,http");
-#else
-        curl_easy_setopt(curl, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS | CURLPROTO_HTTP));
-#endif
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, collect);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
-        CURLcode rc = curl_easy_perform(curl);
-        long status = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-        curl_easy_cleanup(curl);
-        if (rc != CURLE_OK || status != 200) {
+        http::ClientRequest request;
+        request.url = url_;
+        request.timeout = timeout_;
+        request.follow_redirects = false;
+        request.max_response_size = 1024 * 1024; // a key set is small; refuse anything huge
+        http::ClientResponse response = http::Client::shared().send_sync(std::move(request));
+        if (!response.ok() || response.status != 200) {
             LOG_WARN("jwt_auth: fetching JWKS from " << url_ << " failed: "
-                     << (rc != CURLE_OK ? curl_easy_strerror(rc) : ("HTTP " + std::to_string(status)).c_str()));
+                     << (!response.ok() ? response.error : "HTTP " + std::to_string(response.status)));
             return; // keep the keys we had
         }
+        const std::string& body = response.body;
 
         auto json = nlohmann::json::parse(body, nullptr, false);
         if (!json.is_object() || !json.contains("keys") || !json["keys"].is_array()) {

@@ -1,8 +1,6 @@
 #include <orbit/middleware/OAuth2.hpp>
 #include <orbit/http/HttpResponse.hpp>
-#include <curl/curl.h>
-// After curl.h: on Windows it pulls in <windows.h>, which #defines ERROR;
-// Logger.hpp #undefs it again so LOG_ERROR expands correctly.
+#include <orbit/http/Client.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -19,12 +17,6 @@ namespace {
 constexpr const char* kStateCookie = "oauth_state";
 constexpr const char* kVerifierCookie = "oauth_pkce";
 constexpr long kFlowCookieSeconds = 600;
-
-size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp) {
-    size_t total_size = size * nmemb;
-    userp->append(static_cast<char*>(contents), total_size);
-    return total_size;
-}
 
 std::string base64url(const unsigned char* data, size_t len) {
     std::string out(4 * ((len + 2) / 3) + 1, '\0');
@@ -55,53 +47,36 @@ struct HttpResult {
 
 HttpResult fetch(const OAuth2Config& config, const std::string& url, const std::string& post_body,
                  const std::string& auth_header) {
-    static std::once_flag curl_init;
-    std::call_once(curl_init, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
-
-    HttpResult result;
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        result.error = "curl_easy_init failed";
-        return result;
-    }
-
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, config.connect_timeout_seconds);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, config.request_timeout_seconds);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L); // timeouts must not use signals in a threaded server
-#if LIBCURL_VERSION_NUM >= 0x075500
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https,http");
-#else
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS | CURLPROTO_HTTP));
-#endif
-
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "User-Agent: Orbit-Framework");
-    headers = curl_slist_append(headers, "Accept: application/json");
+    http::ClientRequest request;
+    request.url = url;
+    request.connect_timeout = std::chrono::seconds(config.connect_timeout_seconds);
+    request.timeout = std::chrono::seconds(config.request_timeout_seconds);
+    // A redirect would carry the client secret (and the code) elsewhere.
+    request.follow_redirects = false;
+    request.headers.push_back({"Accept", "application/json"});
     if (!auth_header.empty()) {
-        headers = curl_slist_append(headers, auth_header.c_str());
+        size_t colon = auth_header.find(':');
+        request.headers.push_back({auth_header.substr(0, colon), auth_header.substr(colon + 2)});
     }
     if (!post_body.empty()) {
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_body.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(post_body.size()));
-        headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
+        request.method = "POST";
+        request.body = post_body;
+        request.headers.push_back({"Content-Type", "application/x-www-form-urlencoded"});
     }
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result.body);
 
-    CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) {
-        result.error = curl_easy_strerror(res);
+    // Worker thread: blocking here is what the handler did before; the shared
+    // client keeps connections to the provider alive between logins.
+    http::ClientResponse response = http::Client::shared().send_sync(std::move(request));
+    HttpResult result;
+    if (!response.ok()) {
+        result.error = response.error;
         LOG_ERROR("OAuth2 request to " << url << " failed: " << result.error);
-    } else {
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.status);
-        result.ok = result.status >= 200 && result.status < 300;
-        if (!result.ok) result.error = "HTTP " + std::to_string(result.status);
+        return result;
     }
-
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+    result.status = response.status;
+    result.body = std::move(response.body);
+    result.ok = result.status >= 200 && result.status < 300;
+    if (!result.ok) result.error = "HTTP " + std::to_string(result.status);
     return result;
 }
 

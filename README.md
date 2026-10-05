@@ -542,6 +542,7 @@ cmake -B build \
 | [🛡️ Middleware](docs/middleware.md) | Built-in middleware and custom middleware authoring |
 | [💾 Database & Coroutines](docs/database.md) | PostgreSQL, Redis, and C++20 async/await |
 | [🔀 Proxy & Load Balancing](docs/proxy.md) | Reverse proxy, connection pooling, and load balancing |
+| [🌐 HTTP Client](docs/http-client.md) | Outbound requests with coroutines, timeouts, TLS verification |
 | [🔌 WebSockets](docs/websockets.md) | RFC 6455 WebSockets and EventRouter |
 | [⚡ HTTP/3 & QUIC](docs/http3.md) | Enabling and using HTTP/3 |
 | [📋 Changelog](CHANGELOG.md) | Release history and breaking changes |
