@@ -191,6 +191,26 @@ app.use(middleware::static_files("public", opts));
   requests get the whole file.
 - `middleware::mime_type_for_extension(".woff2")` exposes the built-in type table.
 
+### Compression
+
+`middleware::compress()` compresses response bodies with brotli (`br`), zstd or gzip, whichever the client's `Accept-Encoding` allows with the highest q-value; ties go to the server's preference (brotli, zstd, gzip). Every compressible response gets `Vary: Accept-Encoding`. Bodies that are small, already encoded, already-compressed media, streamed, or marked `Cache-Control: no-transform` are left alone, and a strong `ETag` on a compressed body becomes weak.
+
+```cpp
+#include <orbit/middleware/Compress.hpp>
+
+app.use(middleware::compress());
+
+// Or tune it:
+middleware::CompressOptions opts;
+opts.preference = {middleware::ContentCoding::Zstd, middleware::ContentCoding::Gzip};
+opts.brotli_quality = 4; // 0-11
+opts.zstd_level = 3;     // 1-19
+opts.min_size = 512;
+app.use(middleware::compress(opts));
+```
+
+Brotli and zstd come from the `ORBIT_ENABLE_BROTLI` and `ORBIT_ENABLE_ZSTD` build options (both on by default; with vcpkg, the `brotli` and `zstd` manifest features). A coding left out of the build is simply never chosen.
+
 ### Security Headers
 Adds common hardening headers to every response. They are defaults: a handler
 that sets the same header keeps its own value.

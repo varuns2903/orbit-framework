@@ -218,7 +218,7 @@ protected:
         });
         app->get("/blob", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
             http::HttpResponse res;
-            res.set_body(pattern(256 * 1024));
+            res.set_body(pattern(64 * 1024));
             w->send(std::move(res));
         });
         app->get("/empty", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
@@ -368,7 +368,8 @@ TEST_F(Http3Test, ManySequentialRequests) {
 TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
     // Handlers finish on different worker threads while the event loop
     // keeps reading: responses are submitted concurrently on one connection.
-    // Kept small enough for the valgrind run in CI.
+    // Kept small, with a generous timeout, for the valgrind run in CI
+    // (about 100 KB/s there).
     constexpr int kStreams = 16;
     CURLM* multi = curl_multi_init();
     curl_multi_setopt(multi, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
@@ -385,7 +386,7 @@ TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
         curl_easy_setopt(c, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_3ONLY);
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
-        curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 20000L);
+        curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 60000L);
         curl_easy_setopt(c, CURLOPT_PIPEWAIT, 1L); // wait for the first connection and share it
         curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, collect);
         curl_easy_setopt(c, CURLOPT_WRITEDATA, &bodies[i]);
@@ -406,7 +407,7 @@ TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
         connects += n;
         EXPECT_EQ(status, 200) << "stream " << i;
         if (i % 2) {
-            EXPECT_EQ(bodies[i].size(), 256u * 1024) << "stream " << i;
+            EXPECT_EQ(bodies[i].size(), 64u * 1024) << "stream " << i;
             EXPECT_TRUE(bodies[i] == pattern(bodies[i].size())) << "stream " << i;
         } else {
             EXPECT_EQ(bodies[i], "user " + std::to_string(i));

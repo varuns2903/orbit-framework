@@ -85,6 +85,14 @@ struct HttpRequest {
     }
 
     /**
+     * @brief Parses an application/x-www-form-urlencoded body (an HTML form
+     *        submitted without files).
+     * @return The decoded fields; empty if the Content-Type is not
+     *         application/x-www-form-urlencoded or the body is malformed.
+     */
+    std::unordered_map<std::string, std::string> form_fields() const;
+
+    /**
      * @brief Parses the request body as multipart/form-data.
      * @return MultipartForm object containing the parsed fields and files. Returns an empty form if the content type is not multipart/form-data.
      */

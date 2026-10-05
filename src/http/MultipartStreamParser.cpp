@@ -1,4 +1,5 @@
 #include <orbit/http/MultipartStreamParser.hpp>
+#include <cctype>
 #include <orbit/utils/Random.hpp>
 
 #include <cerrno>
@@ -18,6 +19,54 @@
 #endif
 
 namespace http {
+
+std::string multipart_boundary(std::string_view content_type) {
+    size_t pos = content_type.find(';');
+    while (pos != std::string_view::npos) {
+        ++pos;
+        while (pos < content_type.size() && (content_type[pos] == ' ' || content_type[pos] == '\t')) ++pos;
+        size_t eq = content_type.find('=', pos);
+        if (eq == std::string_view::npos) return {};
+        std::string_view name = content_type.substr(pos, eq - pos);
+        while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.remove_suffix(1);
+        bool is_boundary = name.size() == 8;
+        for (size_t i = 0; is_boundary && i < 8; ++i) {
+            is_boundary = std::tolower(static_cast<unsigned char>(name[i])) == "boundary"[i];
+        }
+        std::string value;
+        size_t next;
+        if (eq + 1 < content_type.size() && content_type[eq + 1] == '"') {
+            // quoted-string: backslash escapes the next character.
+            size_t i = eq + 2;
+            bool closed = false;
+            for (; i < content_type.size(); ++i) {
+                char ch = content_type[i];
+                if (ch == '\\' && i + 1 < content_type.size()) {
+                    value.push_back(content_type[++i]);
+                } else if (ch == '"') {
+                    closed = true;
+                    ++i;
+                    break;
+                } else {
+                    value.push_back(ch);
+                }
+            }
+            if (!closed) return {};
+            next = content_type.find(';', i);
+        } else {
+            next = content_type.find(';', eq + 1);
+            std::string_view token = content_type.substr(eq + 1, next == std::string_view::npos ? std::string_view::npos : next - eq - 1);
+            while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) token.remove_suffix(1);
+            value = std::string(token);
+        }
+        if (is_boundary) {
+            return (value.empty() || value.size() > 70) ? std::string() : value;
+        }
+        pos = next;
+    }
+    return {};
+}
+
 
 namespace {
 
@@ -194,7 +243,8 @@ void MultipartStreamParser::process_buffer() {
             // Check for \r\n or --
             if (buffer_.length() >= 2) {
                 if (buffer_.substr(0, 2) == "--") {
-                    // EOF
+                    // The close delimiter: the body is complete.
+                    finished_ = true;
                     buffer_.clear();
                     break;
                 } else if (buffer_.substr(0, 2) == "\r\n") {

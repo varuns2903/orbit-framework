@@ -27,6 +27,9 @@ KNOWN = {
     # the frame is discarded as above; otherwise nghttp2 sends RST_STREAM.
     ("http2/5.1", "half closed (remote): Sends a HEADERS frame"):
         "races the response; closed streams discard frames (RFC 9113)",
+    # Same race: DATA sent on a stream whose request has ended.
+    ("http2/6.1", 'Sends a DATA frame on the stream that is not in "open" or "half-closed (local)" state'):
+        "races the response; closed streams discard frames (RFC 9113)",
     # RFC 9113 deprecated the RFC 7540 priority scheme.
     ("http2/5.3.1", "Sends PRIORITY frame that depend on itself"):
         "RFC 9113 deprecated RFC 7540 priorities",
