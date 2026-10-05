@@ -1,6 +1,7 @@
 #include <orbit/http/HttpParser.hpp>
 #include <sstream>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <string>
@@ -129,6 +130,8 @@ MessageFraming parse_framing(std::string_view header_section) {
             size_t last_comma = value.rfind(',');
             std::string_view last = trim_ows(last_comma == std::string_view::npos ? value : value.substr(last_comma + 1));
             framing.chunked = iequals(last, "chunked");
+        } else if (iequals(name, "Expect")) {
+            framing.expect_continue = iequals(value, "100-continue");
         }
     }
 
@@ -185,6 +188,45 @@ ChunkedStatus decode_chunked(std::string_view data, std::string& out, size_t& co
         out.append(data.substr(pos, chunk_size));
         pos += chunk_size + 2;
     }
+}
+
+bool parse_urlencoded(std::string_view data, std::unordered_map<std::string, std::string>& out) {
+    size_t pos = 0;
+    while (pos <= data.size()) {
+        size_t amp = data.find('&', pos);
+        std::string_view pair = data.substr(pos, amp == std::string_view::npos ? std::string_view::npos : amp - pos);
+        if (!pair.empty()) {
+            size_t eq = pair.find('=');
+            std::string name, value;
+            if (!percent_decode(pair.substr(0, eq), name, true, false) ||
+                !percent_decode(eq == std::string_view::npos ? std::string_view{} : pair.substr(eq + 1), value, true, false)) {
+                return false;
+            }
+            out[std::move(name)] = std::move(value);
+        }
+        if (amp == std::string_view::npos) break;
+        pos = amp + 1;
+    }
+    return true;
+}
+
+std::unordered_map<std::string, std::string> HttpRequest::form_fields() const {
+    std::unordered_map<std::string, std::string> fields;
+    auto ct = headers.find("Content-Type");
+    if (ct == headers.end()) return fields;
+    // The media type, without parameters such as charset, is case-insensitive.
+    std::string_view media = ct->second.substr(0, ct->second.find(';'));
+    while (!media.empty() && (media.back() == ' ' || media.back() == '\t')) media.remove_suffix(1);
+    while (!media.empty() && (media.front() == ' ' || media.front() == '\t')) media.remove_prefix(1);
+    constexpr std::string_view kForm = "application/x-www-form-urlencoded";
+    if (media.size() != kForm.size() ||
+        !std::equal(media.begin(), media.end(), kForm.begin(), [](char a, char b) {
+            return std::tolower(static_cast<unsigned char>(a)) == b;
+        })) {
+        return fields;
+    }
+    if (!parse_urlencoded(body, fields)) fields.clear(); // all or nothing
+    return fields;
 }
 
 bool percent_decode(std::string_view in, std::string& out, bool plus_as_space, bool for_path) {
@@ -253,22 +295,9 @@ std::optional<HttpRequest> HttpParser::parse(std::string_view raw_request) {
         if (!percent_decode(raw_path, request.uri, false, true)) {
             return std::nullopt;
         }
-        if (q_mark != std::string::npos) {
-            std::string query_string = full_uri.substr(q_mark + 1);
-            
-            std::istringstream q_stream(query_string);
-            std::string kv;
-            while (std::getline(q_stream, kv, '&')) {
-                if (kv.empty()) continue;
-                auto eq_pos = kv.find('=');
-                std::string key, value;
-                std::string_view raw_key = std::string_view(kv).substr(0, eq_pos);
-                std::string_view raw_value = eq_pos == std::string::npos ? std::string_view{} : std::string_view(kv).substr(eq_pos + 1);
-                if (!percent_decode(raw_key, key, true, false) || !percent_decode(raw_value, value, true, false)) {
-                    return std::nullopt;
-                }
-                request.query[key] = value; // A key with no '=' gets an empty value
-            }
+        if (q_mark != std::string::npos &&
+            !parse_urlencoded(std::string_view(full_uri).substr(q_mark + 1), request.query)) {
+            return std::nullopt;
         }
 
 

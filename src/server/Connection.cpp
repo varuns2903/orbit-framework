@@ -324,6 +324,9 @@ void Connection::on_read_complete(ssize_t bytes_read) {
             headers_done = std::string_view(read_buffer_.data(), read_buffer_.size()).find("\r\n\r\n") != std::string_view::npos;
         }
         if (headers_done) {
+            // The body is within limits (oversized ones were refused above):
+            // tell a client waiting on "Expect: 100-continue" to send it.
+            send_continue_if_expected();
             // Receiving the body: each read extends the deadline.
             arm_timer(timeouts_.idle);
         } else if (buffer_was_empty) {
@@ -340,6 +343,7 @@ void Connection::on_read_complete(ssize_t bytes_read) {
             arm_timer(state == RequestState::HEADERS_COMPLETE ? timeouts_.idle : std::chrono::milliseconds(0));
             if (state == RequestState::HEADERS_COMPLETE) {
                 state_ = ConnectionState::HTTP_STREAMING_BODY;
+                send_continue_if_expected();
             }
             auto self = shared_from_this();
             thread_pool_.enqueue([self]() {
@@ -363,6 +367,8 @@ void Connection::on_read_complete(ssize_t bytes_read) {
 }
 
 void Connection::process_request() {
+    // Any 100 Continue for this request has been sent; the next may need one.
+    continue_sent_ = false;
     {
         // Headers and interceptors registered by middleware belong to one
         // request. Keeping them would re-apply them to every later response
@@ -762,6 +768,12 @@ void Connection::send_sse_event(std::string_view data, std::string_view event, s
     }
     sse_msg += "\n";
     write_chunk(sse_msg);
+}
+
+void Connection::send_continue_if_expected() {
+    if (!expect_continue_ || continue_sent_) return;
+    continue_sent_ = true;
+    send_data("HTTP/1.1 100 Continue\r\n\r\n");
 }
 
 void Connection::send_data(std::string_view data, bool close_after) {
@@ -1174,6 +1186,9 @@ RequestState Connection::check_request_state() {
     if (!framing.valid) {
         return RequestState::ERROR_BAD_REQUEST;
     }
+    // Only HTTP/1.1 clients may be sent an interim 100 (RFC 9110 section 10.1.1).
+    expect_continue_ = framing.expect_continue &&
+        buf_view.substr(0, first_line_end).ends_with(" HTTP/1.1");
     
     // -------------------------------------------------------------
     // Check if this route is a STREAM route. If so, return HEADERS_COMPLETE

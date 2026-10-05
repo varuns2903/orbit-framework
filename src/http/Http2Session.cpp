@@ -99,25 +99,7 @@ bool apply_request_target(std::string_view target, http::HttpRequest& req) {
     req.target = std::string(target);
     size_t q = target.find('?');
     if (!http::percent_decode(target.substr(0, q), req.uri, false, true)) return false;
-    if (q == std::string_view::npos) return true;
-    std::string_view query = target.substr(q + 1);
-    size_t pos = 0;
-    while (pos <= query.size()) {
-        size_t amp = query.find('&', pos);
-        std::string_view kv = query.substr(pos, amp == std::string_view::npos ? std::string_view::npos : amp - pos);
-        if (!kv.empty()) {
-            size_t eq = kv.find('=');
-            std::string key, value;
-            if (!http::percent_decode(kv.substr(0, eq), key, true, false) ||
-                !http::percent_decode(eq == std::string_view::npos ? std::string_view{} : kv.substr(eq + 1), value, true, false)) {
-                return false;
-            }
-            req.query[key] = value;
-        }
-        if (amp == std::string_view::npos) break;
-        pos = amp + 1;
-    }
-    return true;
+    return q == std::string_view::npos || http::parse_urlencoded(target.substr(q + 1), req.query);
 }
 
 void parse_cookies(std::string_view cookies, http::HttpRequest& req) {

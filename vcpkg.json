@@ -61,6 +61,18 @@
         }
       ]
     },
+    "brotli": {
+      "description": "brotli response compression (ORBIT_ENABLE_BROTLI)",
+      "dependencies": [
+        "brotli"
+      ]
+    },
+    "zstd": {
+      "description": "zstd response compression (ORBIT_ENABLE_ZSTD)",
+      "dependencies": [
+        "zstd"
+      ]
+    },
     "grpc": {
       "description": "gRPC support",
       "dependencies": [
@@ -72,6 +84,8 @@
     "postgres",
     "mariadb",
     "mongodb",
-    "http3"
+    "http3",
+    "brotli",
+    "zstd"
   ]
 }

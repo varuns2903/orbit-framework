@@ -144,6 +144,8 @@ private:
     void process_request();
     // Queues bytes for writing; with close_after, closes once they are sent.
     void send_data(std::string_view data, bool close_after = false);
+    /// Sends "100 Continue" once per request to a client that asked for it.
+    void send_continue_if_expected();
     void arm_timer(std::chrono::milliseconds timeout);
     void arm_timer_for_current_phase();
     // WebSocket or raw stream: long-lived, timed out by peer inactivity only.
@@ -206,6 +208,10 @@ private:
     std::string request_body_storage_; // Owns a decoded chunked request body
     std::atomic<bool> should_close_{false};
     bool h2c_decided_ = false; // event-loop thread: the connection's first bytes were checked
+    // Expect: 100-continue on the request being read, and whether the 100
+    // has been sent for it.
+    std::atomic<bool> expect_continue_{false};
+    std::atomic<bool> continue_sent_{false};
     // Set (under write_mutex_) together with the final response's bytes;
     // the connection closes when everything queued has been written.
     bool close_after_write_{false};
