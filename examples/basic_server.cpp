@@ -12,7 +12,7 @@
 #include <orbit/database/MongoClient.hpp>
 #include <orbit/config/Config.hpp>
 #include <orbit/http/MultipartForm.hpp>
-#include <orbit/http/MultipartStreamParser.hpp>
+#include <orbit/http/MultipartUpload.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <orbit/concurrency/Task.hpp>
 #include <orbit/middleware/Proxy.hpp>
@@ -148,48 +148,24 @@ int main(int argc, char* argv[]) {
         app.enable_openapi("Orbit API", "1.0.0");
 
             api.add_stream_route(http::HttpMethod::POST, "/upload_multipart", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) {
-                auto ct_it = req.headers.find("Content-Type");
-                if (ct_it == req.headers.end() || !ct_it->second.starts_with("multipart/form-data")) {
+                // File parts are streamed to private temporary files as they arrive.
+                http::receive_multipart(req, writer, [writer](http::MultipartUpload& upload) {
                     http::HttpResponse res;
-                    res.status(http::HttpStatus::BadRequest).send("Expected multipart/form-data");
-                    writer->send(std::move(res));
-                    return;
-                }
-
-                std::string_view ct = ct_it->second;
-                size_t b_pos = ct.find("boundary=");
-                if (b_pos == std::string::npos) {
-                    http::HttpResponse res;
-                    res.status(http::HttpStatus::BadRequest).send("No boundary found");
-                    writer->send(std::move(res));
-                    return;
-                }
-                
-                std::string boundary(ct.substr(b_pos + 9));
-                
-                // We use a shared_ptr for the parser because the callbacks might outlive this function context
-                auto parser = std::make_shared<http::MultipartStreamParser>(
-                    boundary,
-                    [](const std::string& name, const std::string& value) {
-                        std::cout << "[Upload] Field: " << name << " = " << value << std::endl;
-                    },
-                    [](const std::string& name, const std::string& filename, const std::string& content_type, const std::string& tmp_filepath) {
-                        std::cout << "[Upload] File saved: " << name << " -> " << tmp_filepath 
-                                  << " (" << filename << ", " << content_type << ")" << std::endl;
-                    }
-                );
-
-                writer->read_body_stream(
-                    [parser](std::string_view chunk) {
-                        parser->feed(chunk);
-                    },
-                    [writer, parser]() {
-                        parser->end();
-                        http::HttpResponse res;
+                    if (!upload.ok()) {
+                        res.status(http::HttpStatus::BadRequest).send(upload.error);
+                    } else {
+                        for (const auto& [name, value] : upload.fields) {
+                            std::cout << "[Upload] Field: " << name << " = " << value << std::endl;
+                        }
+                        for (const auto& file : upload.files) {
+                            std::cout << "[Upload] File saved: " << file.field << " -> " << file.path
+                                      << " (" << file.filename << ", " << file.content_type << ")" << std::endl;
+                        }
+                        upload.discard(); // a real application would move the files into place
                         res.status(http::HttpStatus::OK).send("Upload processed successfully (Streaming)!");
-                        writer->send(std::move(res));
                     }
-                );
+                    writer->send(std::move(res));
+                });
             });
 
             api.add_stream_route(http::HttpMethod::POST, "/upload", [](http::HttpRequest& /*req*/, std::shared_ptr<http::ResponseWriter> res) {

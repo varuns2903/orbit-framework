@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     libcurl4-openssl-dev \
     zlib1g-dev \
+    libbrotli-dev \
+    libzstd-dev \
     libnghttp2-dev \
     liburing-dev \
     libmariadb-dev \
@@ -77,6 +79,8 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     libcurl4 \
     zlib1g \
+    libbrotli1 \
+    libzstd1 \
     libnghttp2-14 \
     liburing2 \
     libmariadb-dev \
