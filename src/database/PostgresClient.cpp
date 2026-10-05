@@ -7,13 +7,36 @@ PostgresClient::PostgresClient(network::Proactor* proactor, const std::string& c
     : proactor_(proactor), conninfo_(conninfo) {}
 
 PostgresClient::~PostgresClient() {
+    close_connection();
+}
+
+void PostgresClient::close_connection() {
     if (conn_) {
         proactor_->remove(PQsocket(conn_));
         PQfinish(conn_);
+        conn_ = nullptr;
     }
+    connected_ = false;
+    prepared_.clear(); // prepared statements belong to the server session
+}
+
+bool PostgresClient::is_healthy() const {
+    return connected_ && conn_ && PQstatus(conn_) == CONNECTION_OK;
+}
+
+bool PostgresClient::in_transaction() const {
+    if (!conn_) return false;
+    PGTransactionStatusType st = PQtransactionStatus(conn_);
+    return st == PQTRANS_INTRANS || st == PQTRANS_INERROR || st == PQTRANS_ACTIVE;
+}
+
+void PostgresClient::reconnect(std::function<void(bool)> callback) {
+    close_connection();
+    connect(std::move(callback));
 }
 
 void PostgresClient::connect(std::function<void(bool)> callback) {
+    if (conn_) close_connection();
     conn_ = PQconnectStart(conninfo_.c_str());
     if (PQstatus(conn_) == CONNECTION_BAD) {
         callback(false);
@@ -39,10 +62,85 @@ void PostgresClient::handle_connect(std::function<void(bool)> callback) {
         });
     } else if (status == PGRES_POLLING_OK) {
         connected_ = true;
-        callback(true);
+        finish_connect(std::move(callback));
     } else if (status == PGRES_POLLING_FAILED) {
         callback(false);
     }
+}
+
+void PostgresClient::finish_connect(std::function<void(bool)> callback) {
+    if (statement_timeout_.count() <= 0) {
+        callback(true);
+        return;
+    }
+    // A plain integer: no value is spliced from outside.
+    std::string sql = "SET statement_timeout = " + std::to_string(statement_timeout_.count());
+    query(sql, [cb = std::move(callback)](const ResultSet& res) { cb(res.ok()); });
+}
+
+void PostgresClient::begin(std::function<void(const ResultSet&)> callback) {
+    query("BEGIN", std::move(callback));
+}
+
+void PostgresClient::commit(std::function<void(const ResultSet&)> callback) {
+    // COMMIT of a failed transaction "succeeds" with a ROLLBACK tag; report
+    // it as the failure it is.
+    bool failed = conn_ && PQtransactionStatus(conn_) == PQTRANS_INERROR;
+    query("COMMIT", [failed, cb = std::move(callback)](const ResultSet& res) {
+        if (failed && res.ok()) {
+            cb(ResultSet::failure("transaction was rolled back after an earlier error"));
+        } else {
+            cb(res);
+        }
+    });
+}
+
+void PostgresClient::rollback(std::function<void(const ResultSet&)> callback) {
+    query("ROLLBACK", std::move(callback));
+}
+
+void PostgresClient::execute(const std::string& sql, const std::vector<std::optional<std::string>>& params,
+                             std::function<void(const ResultSet&)> callback) {
+    if (!connected_) {
+        callback(ResultSet::failure("not connected"));
+        return;
+    }
+    auto run_prepared = [params](std::shared_ptr<PostgresClient> self, const std::string& name,
+                                 std::function<void(const ResultSet&)> cb) {
+        std::vector<const char*> values;
+        values.reserve(params.size());
+        for (const auto& p : params) values.push_back(p ? p->c_str() : nullptr);
+        if (PQsendQueryPrepared(self->conn_, name.c_str(), static_cast<int>(values.size()),
+                                values.empty() ? nullptr : values.data(), nullptr, nullptr, 0) == 0) {
+            cb(ResultSet::failure(PQerrorMessage(self->conn_)));
+            return;
+        }
+        self->handle_query(std::move(cb));
+    };
+
+    auto self = shared_from_this();
+    if (auto it = prepared_.find(sql); it != prepared_.end()) {
+        run_prepared(self, it->second, std::move(callback));
+        return;
+    }
+    if (prepared_.size() >= max_prepared_) {
+        query(sql, params, std::move(callback)); // cache full: run unprepared
+        return;
+    }
+
+    std::string name = "orbit_" + std::to_string(next_statement_++);
+    if (PQsendPrepare(conn_, name.c_str(), sql.c_str(), static_cast<int>(params.size()), nullptr) == 0) {
+        callback(ResultSet::failure(PQerrorMessage(conn_)));
+        return;
+    }
+    handle_query([self, sql, name, run_prepared, cb = std::move(callback)](const ResultSet& prepared) mutable {
+        if (!prepared.ok()) {
+            cb(prepared); // e.g. a syntax error: nothing is cached
+            return;
+        }
+        self->prepared_[sql] = name;
+        run_prepared(self, name, std::move(cb));
+    });
 }
 
 void PostgresClient::query(const std::string& sql, std::function<void(const ResultSet&)> callback) {

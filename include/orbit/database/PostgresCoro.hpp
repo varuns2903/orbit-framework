@@ -87,4 +87,52 @@ inline QueryAwaiter query_async(std::shared_ptr<PostgresClient> client, const st
     return QueryAwaiter{std::move(client), sql, ResultSet{}, std::move(params), true};
 }
 
+/**
+ * @brief Awaits any PostgresClient operation that reports a ResultSet.
+ */
+struct ResultAwaiter {
+    std::function<void(std::function<void(const ResultSet&)>)> start;
+    ResultSet result;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> h) {
+        start([this, h](const ResultSet& r) {
+            result = r;
+            h.resume();
+        });
+    }
+    ResultSet await_resume() { return std::move(result); }
+};
+
+/// Runs a statement through the prepared-statement cache (PostgresClient::execute).
+inline ResultAwaiter execute_async(std::shared_ptr<PostgresClient> client, std::string sql,
+                                   std::vector<std::optional<std::string>> params = {}) {
+    return ResultAwaiter{[client = std::move(client), sql = std::move(sql), params = std::move(params)](auto done) {
+        client->execute(sql, params, std::move(done));
+    }, ResultSet{}};
+}
+
+/**
+ * @brief Transaction control for coroutines.
+ *
+ * @code
+ * if (!(co_await begin_async(db)).ok()) co_return;
+ * auto debit = co_await execute_async(db, "UPDATE accounts SET balance = balance - $1 WHERE id = $2", {amount, from});
+ * auto credit = co_await execute_async(db, "UPDATE accounts SET balance = balance + $1 WHERE id = $2", {amount, to});
+ * if (debit.ok() && credit.ok()) co_await commit_async(db);
+ * else co_await rollback_async(db);
+ * @endcode
+ */
+inline ResultAwaiter begin_async(std::shared_ptr<PostgresClient> client) {
+    return ResultAwaiter{[client = std::move(client)](auto done) { client->begin(std::move(done)); }, ResultSet{}};
+}
+
+inline ResultAwaiter commit_async(std::shared_ptr<PostgresClient> client) {
+    return ResultAwaiter{[client = std::move(client)](auto done) { client->commit(std::move(done)); }, ResultSet{}};
+}
+
+inline ResultAwaiter rollback_async(std::shared_ptr<PostgresClient> client) {
+    return ResultAwaiter{[client = std::move(client)](auto done) { client->rollback(std::move(done)); }, ResultSet{}};
+}
+
 } // namespace database

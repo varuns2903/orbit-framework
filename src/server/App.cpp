@@ -38,7 +38,8 @@ App::App(const config::ServerConfig& config) : config_(config) {
     utils::Logger::init(config.log_level);
     utils::Logger::set_format(config.log_format);
     if (!config_.ssl_cert.empty() && !config_.ssl_key.empty()) {
-        tls_context_ = std::make_unique<network::TlsContext>(config_.ssl_cert, config_.ssl_key, config_.http_version);
+        tls_context_ = std::make_unique<network::TlsContext>(
+            config::TlsCertificate{config_.ssl_cert, config_.ssl_key}, config_.sni_certificates, config_.http_version);
     }
 }
 
@@ -229,6 +230,7 @@ void App::listen() {
     sigaction(SIGINT, &action, nullptr);
     sigaction(SIGTERM, &action, nullptr);
     sigaction(SIGUSR2, &action, nullptr);
+    sigaction(SIGHUP, &action, nullptr);
     action.sa_handler = SIG_IGN;
     sigaction(SIGPIPE, &action, nullptr);
 #else
@@ -268,11 +270,26 @@ void App::listen() {
 
         // Act on signals from the loop thread, where logging and forking are safe.
         event_loop_->set_tick_hook([this]() {
+            // Renewed certificate files (certbot, cert-manager) are picked up
+            // without a signal.
+            if (tls_context_ && config_.tls_reload_interval.count() > 0) {
+                auto now = std::chrono::steady_clock::now();
+                if (now >= next_tls_check_) {
+                    next_tls_check_ = now + config_.tls_reload_interval;
+                    if (tls_context_->files_changed()) tls_context_->reload();
+                }
+            }
+
             unsigned seq = g_signal_seq.load(std::memory_order_acquire);
             if (seq == seen_signal_seq_) return;
             seen_signal_seq_ = seq;
             int signum = g_last_signal.load(std::memory_order_relaxed);
 #ifndef _WIN32
+            if (signum == SIGHUP) {
+                LOG_INFO("SIGHUP received. Reloading TLS certificates...");
+                reload_tls();
+                return;
+            }
             if (signum == SIGUSR2) {
                 LOG_INFO("SIGUSR2 received. Initiating zero-downtime hot reload...");
                 hot_reload();
@@ -296,6 +313,14 @@ void App::listen() {
     
     LOG_INFO("App started listening on port " << listener_->port());
     event_loop_->run();
+}
+
+bool App::reload_tls(std::string* error) {
+    if (!tls_context_) {
+        if (error) *error = "TLS is not enabled";
+        return false;
+    }
+    return tls_context_->reload(error);
 }
 
 void App::shutdown() {

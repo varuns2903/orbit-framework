@@ -5,9 +5,54 @@
 #include <optional>
 #include <memory>
 #include <stdexcept>
+#include <charconv>
+#include <limits>
+#include <locale>
+#include <sstream>
+#include <type_traits>
 #include <orbit/http/json.hpp>
 
 namespace database {
+
+namespace detail {
+
+/**
+ * @brief Converts a column's text to T: bool, an integer, a floating-point
+ *        type or std::string. The whole text must convert; "12abc" is not 12.
+ *        Booleans accept t/f, true/false, 1/0 (PostgreSQL and MySQL spellings).
+ */
+template <typename T>
+std::optional<T> convert(const std::string& text) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        return text;
+    } else if constexpr (std::is_same_v<T, bool>) {
+        if (text == "t" || text == "true" || text == "1" || text == "TRUE") return true;
+        if (text == "f" || text == "false" || text == "0" || text == "FALSE") return false;
+        return std::nullopt;
+    } else if constexpr (std::is_integral_v<T>) {
+        T value{};
+        auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (ec != std::errc() || end != text.data() + text.size()) return std::nullopt;
+        return value;
+    } else if constexpr (std::is_floating_point_v<T>) {
+        // A stream with the classic locale: strtod depends on the process locale.
+        std::istringstream in(text);
+        in.imbue(std::locale::classic());
+        T value{};
+        in >> value;
+        if (in.fail() || in.peek() != std::char_traits<char>::eof()) {
+            if (text == "NaN") return std::numeric_limits<T>::quiet_NaN();
+            if (text == "Infinity") return std::numeric_limits<T>::infinity();
+            if (text == "-Infinity") return -std::numeric_limits<T>::infinity();
+            return std::nullopt;
+        }
+        return value;
+    } else {
+        static_assert(sizeof(T) == 0, "get_as<T> supports bool, integers, floating point and std::string");
+    }
+}
+
+} // namespace detail
 
 /**
  * @brief Represents a single row of a database result set.
@@ -46,6 +91,39 @@ public:
             return get(it->second);
         }
         return std::nullopt;
+    }
+
+    /**
+     * @brief Gets a column converted to T (bool, an integer type, a floating
+     *        point type or std::string).
+     * @return std::nullopt if the column is missing, NULL, or does not
+     *         convert exactly (out of range, trailing characters).
+     */
+    template <typename T>
+    std::optional<T> get_as(size_t index) const {
+        auto text = get(index);
+        if (!text) return std::nullopt;
+        return detail::convert<T>(*text);
+    }
+
+    template <typename T>
+    std::optional<T> get_as(const std::string& col_name) const {
+        auto text = get(col_name);
+        if (!text) return std::nullopt;
+        return detail::convert<T>(*text);
+    }
+
+    /// get_as<T>(), or @p fallback when that is std::nullopt.
+    template <typename T>
+    T value_or(const std::string& col_name, T fallback) const {
+        return get_as<T>(col_name).value_or(std::move(fallback));
+    }
+
+    /// True if the column exists and is SQL NULL.
+    bool is_null(const std::string& col_name) const {
+        if (!col_map_) return false;
+        auto it = col_map_->find(col_name);
+        return it != col_map_->end() && it->second < values_.size() && !values_[it->second];
     }
 
     /**

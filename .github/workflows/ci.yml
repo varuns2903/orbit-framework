@@ -43,6 +43,10 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y valgrind wrk
+        # The PostgreSQL tests start a throwaway server with initdb/pg_ctl.
+        # The runner image has them, but outside PATH, so they were skipped.
+        pg_bin=$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n1)
+        if [ -n "$pg_bin" ]; then echo "$pg_bin" >> "$GITHUB_PATH"; fi
 
     - name: Setup vcpkg (Unix, pinned to builtin-baseline)
       if: runner.os != 'Windows'
@@ -94,6 +98,8 @@ jobs:
       env:
         # vcpkg's http3-tests feature provides libcurl with HTTP/3.
         ORBIT_REQUIRE_HTTP3_TESTS: "1"
+        # Linux only: the PostgreSQL tests are not built elsewhere.
+        ORBIT_REQUIRE_POSTGRES_TESTS: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
       # A hung test fails within minutes instead of holding the runner for
       # GitHub's 6-hour job limit.
       run: ctest -C Release --output-on-failure --timeout 300

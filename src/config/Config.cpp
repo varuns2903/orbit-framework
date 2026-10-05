@@ -25,6 +25,8 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                       << "  -m, --max-body-size <bytes>   Max request body size\n"
                       << "  -c, --ssl-cert <file>         SSL certificate file (enables HTTPS)\n"
                       << "  -k, --ssl-key <file>          SSL private key file\n"
+                      << "      --sni-cert <cert> <key>   Another certificate, chosen by SNI (repeatable)\n"
+                      << "      --tls-reload-interval <s> Check certificate files for changes every s seconds (default: 0, off)\n"
                       << "  -e, --engine <engine>         Event loop engine (epoll, iouring) (default: epoll)\n"
                       << "  -v, --http-version <version>  HTTP version to enable (1.1, 2, 3) (default: 1.1)\n"
                       << "  -h, --help                    Show this help message\n";
@@ -51,6 +53,12 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             cfg.ssl_cert = argv[++i];
         } else if ((arg == "-k" || arg == "--ssl-key") && i + 1 < argc) {
             cfg.ssl_key = argv[++i];
+        } else if (arg == "--sni-cert" && i + 2 < argc) {
+            std::string cert = argv[++i];
+            std::string key = argv[++i];
+            cfg.sni_certificates.push_back({cert, key});
+        } else if (arg == "--tls-reload-interval" && i + 1 < argc) {
+            cfg.tls_reload_interval = std::chrono::seconds(std::stoll(argv[++i]));
         } else if ((arg == "-e" || arg == "--engine") && i + 1 < argc) {
             std::string engine_str = argv[++i];
             if (engine_str == "epoll") {
