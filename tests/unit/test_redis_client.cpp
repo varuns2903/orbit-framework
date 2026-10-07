@@ -168,8 +168,9 @@ TEST(DistributedRateLimiterTest, RedisDownFailsClosedByDefault) {
     EXPECT_TRUE(open(req, writer));
 }
 
-// Separate port again, so these can run in parallel with the tests above.
-constexpr int kCommandsPort = 6398;
+// Separate port again (6398 is the session-store test's), so these can
+// run in parallel with the tests above.
+constexpr int kCommandsPort = 6399;
 
 TEST(RedisClientTest, PingSetGetDelAndExpire) {
     ORBIT_START_REDIS_OR_SKIP(kCommandsPort);
