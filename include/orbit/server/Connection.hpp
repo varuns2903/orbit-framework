@@ -6,6 +6,7 @@
 #include <orbit/server/TimerManager.hpp>
 #include <orbit/network/TlsContext.hpp>
 #include <orbit/http/ResponseWriter.hpp>
+#include <orbit/http/Http1Parser.hpp>
 #include <vector>
 #include <chrono>
 #include <string_view>
@@ -33,7 +34,8 @@ enum class RequestState {
     HEADERS_COMPLETE,
     ERROR_PAYLOAD_TOO_LARGE,
     ERROR_HEADERS_TOO_LARGE,
-    ERROR_BAD_REQUEST
+    ERROR_BAD_REQUEST,
+    ERROR_NOT_IMPLEMENTED
 };
 
 /**
@@ -177,7 +179,6 @@ private:
 
     std::unordered_map<std::string, std::string> default_headers_; // Populated by middlewares; guarded by write_mutex_
     std::unordered_map<std::string, std::string> default_headers_snapshot();
-    std::string current_request_buffer_; // Holds the request data for string_views during async processing
     std::atomic<bool> is_reading_{false};
 
     // Runs submit() (one proactor_.async_* call) unless the connection has
@@ -197,15 +198,17 @@ private:
     std::atomic<bool> is_writing_{false};
     // Separate flags: a handler may start a chunked response while a
     // chunked request body is still being streamed in.
-    bool request_chunked_{false};  // decoding the incoming body (event-loop thread)
     bool response_chunked_{false}; // encoding the outgoing body (handler threads)
     bool is_head_request_{false}; // Responses to HEAD carry headers only
-    bool is_chunk_header_mode_{true};
-    size_t chunk_bytes_remaining_{0};
-    size_t content_length_remaining_{0};
 
     RequestState check_request_state();
-    std::string request_body_storage_; // Owns a decoded chunked request body
+    // HTTP/1.1 request parsing. Guarded by read_mutex_; fed only while no
+    // handler is using the request it holds (except a streamed body).
+    std::unique_ptr<http::Http1Parser> parser_;
+    bool message_started_ = false;  // bytes of the current request were parsed
+    bool headers_parsed_ = false;   // its headers are complete, a body follows
+    bool request_complete_ = false; // it is whole, waiting to be handled
+    bool streaming_request_ = false; // a stream route: the handler reads the body
     std::atomic<bool> should_close_{false};
     bool h2c_decided_ = false; // event-loop thread: the connection's first bytes were checked
     // Expect: 100-continue on the request being read, and whether the 100

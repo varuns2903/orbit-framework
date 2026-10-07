@@ -1,4 +1,5 @@
 #include <orbit/server/Connection.hpp>
+#include <limits>
 #include <algorithm>
 #include <orbit/utils/Logger.hpp>
 #include <orbit/server/ConnectionManager.hpp>
@@ -146,7 +147,9 @@ void Connection::on_read_complete(ssize_t bytes_read) {
     bool buffer_was_empty;
     {
         std::lock_guard<std::mutex> lock(read_mutex_);
-        buffer_was_empty = read_buffer_.empty();
+        // The parser drains read_buffer_ as it goes, so an empty buffer alone
+        // does not mean a new request: a half-parsed one may be in progress.
+        buffer_was_empty = read_buffer_.empty() && !message_started_;
     }
     
     bool have_tls_output = false;
@@ -315,13 +318,17 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         return;
     }
     
+    // A handler is using the request the parser holds: keep these bytes
+    // buffered until continue_after_response() moves on to them.
+    if (is_processing_request_) return;
+
     RequestState state = check_request_state();
 
     if (state == RequestState::INCOMPLETE && !is_processing_request_) {
         bool headers_done;
         {
             std::lock_guard<std::mutex> lock(read_mutex_);
-            headers_done = std::string_view(read_buffer_.data(), read_buffer_.size()).find("\r\n\r\n") != std::string_view::npos;
+            headers_done = headers_parsed_;
         }
         if (headers_done) {
             // The body is within limits (oversized ones were refused above):
@@ -361,6 +368,8 @@ void Connection::on_read_complete(ssize_t bytes_read) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
     } else if (state == RequestState::ERROR_BAD_REQUEST) {
         send_error(http::HttpStatus::BadRequest, "400 Bad Request");
+    } else if (state == RequestState::ERROR_NOT_IMPLEMENTED) {
+        send_error(http::HttpStatus::NotImplemented, "501 Not Implemented");
     } else {
         trigger_read();
     }
@@ -378,13 +387,14 @@ void Connection::process_request() {
         default_headers_.clear();
         interceptors_.clear();
     }
+    // The parser holds the request (headers and body owned by it) and is not
+    // fed again until continue_after_response() calls next().
+    http::HttpRequest* parsed_req = nullptr;
     {
         std::lock_guard<std::mutex> lock(read_mutex_);
-        current_request_buffer_ = std::string(read_buffer_.begin(), read_buffer_.end());
+        if (parser_ && (request_complete_ || streaming_request_)) parsed_req = &parser_->request();
     }
-    std::string_view raw_request(current_request_buffer_.data(), current_request_buffer_.size());
-    auto parsed_req = http::HttpParser::parse(raw_request);
-    
+
     if (parsed_req) {
         http::HttpRequest& req = *parsed_req;
         req.client_ip = client_ip_;
@@ -396,16 +406,8 @@ void Connection::process_request() {
         if (upgrade_it != req.headers.end() &&
             http::connection_option_present(upgrade_it->second, "websocket") &&
             router_.has_ws_route(req.uri)) {
-            // Consume the handshake request; anything after it is WebSocket data.
-            {
-                size_t consumed_bytes = raw_request.find("\r\n\r\n") + 4;
-                std::lock_guard<std::mutex> lock(read_mutex_);
-                if (consumed_bytes <= read_buffer_.size()) {
-                    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<std::ptrdiff_t>(consumed_bytes));
-                } else {
-                    read_buffer_.clear();
-                }
-            }
+            // The parser stopped at the end of the handshake: anything still
+            // buffered is WebSocket data.
 
             auto writer = std::dynamic_pointer_cast<http::ResponseWriter>(shared_from_this());
             auto reject = [&](const std::string& message) {
@@ -515,37 +517,6 @@ void Connection::process_request() {
             should_close_ = true;
         } else if (is_http_10 && !has_keep_alive) {
             should_close_ = true;
-        }
-        
-        // Erase request from read buffer. The parser has already rejected
-        // malformed framing, so Content-Length here is a validated number.
-        size_t headers_end = raw_request.find("\r\n\r\n");
-        size_t consumed_bytes = headers_end + 4;
-        
-        if (state_ != ConnectionState::HTTP_STREAMING_BODY) {
-            size_t request_line_end = raw_request.find("\r\n");
-            http::MessageFraming framing = http::parse_framing(
-                raw_request.substr(request_line_end + 2, headers_end + 2 - (request_line_end + 2)));
-            if (framing.chunked) {
-                size_t encoded_size = 0;
-                http::decode_chunked(raw_request.substr(headers_end + 4), request_body_storage_,
-                                     encoded_size, max_body_size_);
-                req.body = request_body_storage_;
-                consumed_bytes += encoded_size;
-            } else if (framing.has_content_length) {
-                consumed_bytes += framing.content_length;
-            }
-        } else {
-            req.body = {};
-        }
-        
-        {
-            std::lock_guard<std::mutex> lock(read_mutex_);
-            if (consumed_bytes <= read_buffer_.size()) {
-                read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<std::ptrdiff_t>(consumed_bytes));
-            } else {
-                read_buffer_.clear(); 
-            }
         }
         
         auto writer = std::dynamic_pointer_cast<http::ResponseWriter>(shared_from_this());
@@ -697,23 +668,51 @@ void Connection::send(http::HttpResponse&& response) {
 // Moves on after a complete response: serves the next pipelined request if
 // it has already arrived, otherwise goes back to reading.
 void Connection::continue_after_response() {
+    bool body_unread = false;
+    {
+        std::lock_guard<std::mutex> lock(read_mutex_);
+        // A streamed body the handler answered before reading to its end:
+        // the rest of it is still on the wire, so this connection cannot
+        // carry another request.
+        body_unread = streaming_request_ && !request_complete_;
+        if (parser_ && request_complete_) parser_->next();
+        message_started_ = false;
+        headers_parsed_ = false;
+        request_complete_ = false;
+        streaming_request_ = false;
+    }
+    // The previous request's body stream is over, whatever happened to it.
+    if (state_ == ConnectionState::HTTP_STREAMING_BODY) state_ = ConnectionState::HTTP;
+    if (body_unread) {
+        send_data("", true); // close once the response has been written
+        return;
+    }
+
     RequestState state = check_request_state();
-    if (state == RequestState::COMPLETE) {
+    if (state == RequestState::COMPLETE || state == RequestState::HEADERS_COMPLETE) {
         // We already hold is_processing_request_ == true from the current request
+        if (state == RequestState::HEADERS_COMPLETE) {
+            state_ = ConnectionState::HTTP_STREAMING_BODY;
+            send_continue_if_expected();
+        }
         auto self = shared_from_this();
         thread_pool_.enqueue([self]() {
             self->process_request();
         });
+        if (state == RequestState::HEADERS_COMPLETE) trigger_read();
     } else if (state == RequestState::ERROR_PAYLOAD_TOO_LARGE) {
         send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
     } else if (state == RequestState::ERROR_HEADERS_TOO_LARGE) {
         send_error(http::HttpStatus::RequestHeaderFieldsTooLarge, "431 Request Header Fields Too Large");
     } else if (state == RequestState::ERROR_BAD_REQUEST) {
         send_error(http::HttpStatus::BadRequest, "400 Bad Request");
+    } else if (state == RequestState::ERROR_NOT_IMPLEMENTED) {
+        send_error(http::HttpStatus::NotImplemented, "501 Not Implemented");
     } else {
         is_processing_request_ = false;
         arm_timer_for_current_phase();
-        // Double check state after releasing the lock, just in case data was appended concurrently
+        // Bytes may have been buffered (not parsed) while the handler ran,
+        // and more may arrive between releasing the flag and this check.
         if (check_request_state() == RequestState::COMPLETE) {
             bool expected = false;
             if (is_processing_request_.compare_exchange_strong(expected, true)) {
@@ -1041,7 +1040,9 @@ void Connection::on_server_shutdown() {
     bool idle;
     {
         std::lock_guard<std::mutex> lock(read_mutex_);
-        idle = !is_processing_request_ && read_buffer_.empty();
+        // A request whose bytes are still arriving is in flight even though
+        // the parser has drained them from read_buffer_.
+        idle = !is_processing_request_ && read_buffer_.empty() && !message_started_;
     }
     if (idle) mark_for_close();
 }
@@ -1079,178 +1080,117 @@ void Connection::upgrade_to_raw_stream(std::function<void(std::string_view)> on_
 }
 
 void Connection::read_body_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_end) {
-    body_stream_on_data_ = std::move(on_data);
-    body_stream_on_end_ = std::move(on_end);
+    bool already_over = false;
+    {
+        std::lock_guard<std::mutex> lock(read_mutex_);
+        body_stream_on_data_ = std::move(on_data);
+        body_stream_on_end_ = std::move(on_end);
+        // A stream route whose request carried no body completed with its
+        // headers: there is nothing to stream.
+        already_over = !streaming_request_;
+    }
+    if (already_over) {
+        if (auto end = std::move(body_stream_on_end_)) end();
+        return;
+    }
     process_streaming_data();
 }
 
 void Connection::process_streaming_data() {
-    std::lock_guard<std::mutex> lock(read_mutex_);
-    if (read_buffer_.empty()) return;
-    
-    // Do not consume data until the handler has registered the callback!
-    if (!body_stream_on_data_) return;
-    
-    if (request_chunked_) {
-        while (!read_buffer_.empty()) {
-            if (is_chunk_header_mode_) {
-                std::string_view buf(read_buffer_.data(), read_buffer_.size());
-                size_t crlf = buf.find("\r\n");
-                if (crlf == std::string_view::npos) break; 
-                
-                std::string_view hex_str = buf.substr(0, crlf);
-                try {
-                    chunk_bytes_remaining_ = std::stoull(std::string(hex_str), nullptr, 16);
-                } catch (...) { break; }
-                
-                read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + crlf + 2);
-                is_chunk_header_mode_ = false;
-                
-                if (chunk_bytes_remaining_ == 0) {
-                    if (body_stream_on_end_) {
-                        auto on_end = std::move(body_stream_on_end_);
-                        on_end();
-                    }
-                    if (read_buffer_.size() >= 2) read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + 2);
-                    break;
-                }
-            } else {
-                size_t available = read_buffer_.size();
-                size_t to_read = std::min(available, chunk_bytes_remaining_);
-                if (to_read > 0 && body_stream_on_data_) {
-                    body_stream_on_data_(std::string_view(read_buffer_.data(), to_read));
-                }
-                read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + to_read);
-                chunk_bytes_remaining_ -= to_read;
-                
-                if (chunk_bytes_remaining_ == 0) {
-                    if (read_buffer_.size() >= 2) {
-                        read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + 2);
-                        is_chunk_header_mode_ = true;
-                    } else if (read_buffer_.size() == 1 && read_buffer_[0] == '\r') {
-                        break;
-                    } else if (read_buffer_.empty()) {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
+    bool finished = false;
+    RequestState error = RequestState::INCOMPLETE;
+    {
+        std::lock_guard<std::mutex> lock(read_mutex_);
+        // Nothing is parsed until the handler has asked for the body; until
+        // then it stays buffered.
+        if (!streaming_request_ || request_complete_ || !body_stream_on_data_ || read_buffer_.empty()) return;
+        parser_->set_body_handler(body_stream_on_data_); // chunks are delivered under the lock
+        size_t used = 0;
+        auto event = parser_->feed(std::string_view(read_buffer_.data(), read_buffer_.size()), used);
+        read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<std::ptrdiff_t>(used));
+        if (event == http::Http1Parser::Event::MessageComplete) {
+            request_complete_ = true;
+            finished = true;
+        } else if (event == http::Http1Parser::Event::Error) {
+            error = parser_->error_status() == 413 ? RequestState::ERROR_PAYLOAD_TOO_LARGE
+                                                   : RequestState::ERROR_BAD_REQUEST;
         }
-    } else {
-        size_t available = read_buffer_.size();
-        size_t to_read = std::min(available, content_length_remaining_);
-        if (to_read > 0 && body_stream_on_data_) {
-            body_stream_on_data_(std::string_view(read_buffer_.data(), to_read));
-        }
-        read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + to_read);
-        
-        if (content_length_remaining_ != static_cast<size_t>(-1)) {
-            content_length_remaining_ -= to_read;
-            if (content_length_remaining_ == 0 && body_stream_on_end_) {
-                auto on_end = std::move(body_stream_on_end_);
-                on_end();
-            }
-        }
+    }
+    // Outside the lock: the handler typically answers from on_end, and the
+    // end of a response re-enters the parser (continue_after_response).
+    if (finished) {
+        if (auto end = std::move(body_stream_on_end_)) end();
+    } else if (error == RequestState::ERROR_PAYLOAD_TOO_LARGE) {
+        send_error(http::HttpStatus::PayloadTooLarge, "413 Payload Too Large");
+    } else if (error == RequestState::ERROR_BAD_REQUEST) {
+        send_error(http::HttpStatus::BadRequest, "400 Bad Request");
     }
 }
 
+// Feeds buffered bytes to the parser and reports where the current request
+// stands. Bytes the parser used are removed from read_buffer_; what is left
+// belongs to a later request or, after an upgrade, to the new protocol.
+// Callers must not call this while a handler is using the parsed request,
+// except continue_after_response(), which has just finished with it.
 RequestState Connection::check_request_state() {
     std::lock_guard<std::mutex> lock(read_mutex_);
-    std::string_view buf_view(read_buffer_.data(), read_buffer_.size());
-    size_t headers_end = buf_view.find("\r\n\r\n");
-    
-    size_t first_line_end = buf_view.find("\r\n");
-    // A request line longer than allowed is refused as soon as it is seen,
-    // without waiting for the headers (431, as for oversized headers).
-    if ((first_line_end == std::string_view::npos && buf_view.size() > limits_.max_request_line) ||
-        (first_line_end != std::string_view::npos && first_line_end > limits_.max_request_line)) {
-        return RequestState::ERROR_HEADERS_TOO_LARGE;
+    if (!parser_) {
+        http::Http1Parser::Limits limits;
+        limits.max_request_line = limits_.max_request_line;
+        limits.max_header_bytes = limits_.max_header_bytes;
+        limits.max_headers = limits_.max_headers;
+        limits.max_body_size = max_body_size_;
+        parser_ = std::make_unique<http::Http1Parser>(limits);
+        // Stream routes exist for uploads of any size: the handler reads the
+        // body, so max_body_size does not apply to them.
+        const routing::Router* router = &router_;
+        const size_t max_body = max_body_size_;
+        parser_->set_body_limit([router, max_body](const http::HttpRequest& r) {
+            return router->is_stream_route(r.method, r.uri) ? std::numeric_limits<size_t>::max() : max_body;
+        });
     }
+    if (request_complete_) return RequestState::COMPLETE;
+    if (streaming_request_) return RequestState::HEADERS_COMPLETE;
 
-    if (headers_end == std::string_view::npos) {
-        // If we haven't found headers end, check if headers are too large
-        if (read_buffer_.size() > limits_.max_header_bytes) {
-            return RequestState::ERROR_HEADERS_TOO_LARGE;
+    using Event = http::Http1Parser::Event;
+    RequestState result = RequestState::INCOMPLETE;
+    size_t pos = 0;
+    // At most two passes: HeadersComplete once, then the body.
+    for (int pass = 0; pass < 2; ++pass) {
+        size_t used = 0;
+        Event event = parser_->feed(std::string_view(read_buffer_.data() + pos, read_buffer_.size() - pos), used);
+        pos += used;
+        if (used > 0) message_started_ = true;
+        if (event == Event::NeedMore) break;
+        if (event == Event::MessageComplete) {
+            message_started_ = true;
+            request_complete_ = true;
+            result = RequestState::COMPLETE;
+            break;
         }
-        return RequestState::INCOMPLETE;
-    }
-    if (headers_end > limits_.max_header_bytes) {
-        return RequestState::ERROR_HEADERS_TOO_LARGE;
-    }
-    // Many tiny fields are cheap to send and costly to process.
-    size_t header_fields = 0;
-    for (size_t pos = first_line_end; pos < headers_end; pos = buf_view.find("\r\n", pos + 2)) {
-        if (++header_fields > limits_.max_headers) return RequestState::ERROR_HEADERS_TOO_LARGE;
-    }
-
-    // Framing is decided once, strictly, from the parsed header lines. Both
-    // this check and process_request() use the same rules, so they can never
-    // disagree about where a request ends.
-    http::MessageFraming framing = http::parse_framing(
-        buf_view.substr(first_line_end + 2, headers_end + 2 - (first_line_end + 2)));
-    if (!framing.valid) {
-        return RequestState::ERROR_BAD_REQUEST;
-    }
-    // Only HTTP/1.1 clients may be sent an interim 100 (RFC 9110 section 10.1.1).
-    expect_continue_ = framing.expect_continue &&
-        buf_view.substr(0, first_line_end).ends_with(" HTTP/1.1");
-    
-    // -------------------------------------------------------------
-    // Check if this route is a STREAM route. If so, return HEADERS_COMPLETE
-    // -------------------------------------------------------------
-    std::string_view request_line = buf_view.substr(0, first_line_end);
-    size_t space1 = request_line.find(' ');
-    size_t space2 = request_line.find(' ', space1 + 1);
-    if (space1 != std::string_view::npos && space2 != std::string_view::npos && space1 != space2) {
-        http::HttpMethod method = http::HttpParser::parse_method(request_line.substr(0, space1));
-        std::string_view full_uri = request_line.substr(space1 + 1, space2 - space1 - 1);
-        size_t q_mark = full_uri.find('?');
-        // Match stream routes on the decoded path, as the router does.
-        std::string uri;
-        if (!http::percent_decode(full_uri.substr(0, q_mark), uri, false, true)) {
-            uri.clear();
-        }
-        
-        if (router_.is_stream_route(method, uri)) {
-            if (framing.chunked) {
-                request_chunked_ = true;
-                is_chunk_header_mode_ = true;
-            } else {
-                request_chunked_ = false;
-                // Without Content-Length the stream runs until the peer closes,
-                // matching the previous streaming-route behaviour.
-                content_length_remaining_ = framing.has_content_length
-                    ? framing.content_length
-                    : static_cast<size_t>(-1);
+        if (event == Event::Error) {
+            switch (parser_->error_status()) {
+                case 413: result = RequestState::ERROR_PAYLOAD_TOO_LARGE; break;
+                case 431: result = RequestState::ERROR_HEADERS_TOO_LARGE; break;
+                case 501: result = RequestState::ERROR_NOT_IMPLEMENTED; break;
+                default:  result = RequestState::ERROR_BAD_REQUEST; break;
             }
-            return RequestState::HEADERS_COMPLETE;
+            break;
         }
-    }
-    // -------------------------------------------------------------
-
-    std::string_view body = buf_view.substr(headers_end + 4);
-
-    if (framing.chunked) {
-        std::string decoded;
-        size_t consumed = 0;
-        switch (http::decode_chunked(body, decoded, consumed, max_body_size_)) {
-            case http::ChunkedStatus::Complete: return RequestState::COMPLETE;
-            case http::ChunkedStatus::Incomplete: return RequestState::INCOMPLETE;
-            case http::ChunkedStatus::TooLarge: return RequestState::ERROR_PAYLOAD_TOO_LARGE;
-            case http::ChunkedStatus::Invalid: return RequestState::ERROR_BAD_REQUEST;
+        // HeadersComplete: a body follows.
+        headers_parsed_ = true;
+        const http::HttpRequest& req = parser_->request();
+        // Only HTTP/1.1 clients may be sent an interim 100 (RFC 9110 section 10.1.1).
+        expect_continue_ = parser_->expect_continue() && req.http_version == "HTTP/1.1";
+        if (router_.is_stream_route(req.method, req.uri)) {
+            streaming_request_ = true;
+            result = RequestState::HEADERS_COMPLETE;
+            break;
         }
+        // Otherwise read the body into the request: parse on.
     }
-
-    if (framing.has_content_length) {
-        if (framing.content_length > max_body_size_) {
-            return RequestState::ERROR_PAYLOAD_TOO_LARGE;
-        }
-        return body.size() >= framing.content_length ? RequestState::COMPLETE : RequestState::INCOMPLETE;
-    }
-
-    // No Content-Length and no Transfer-Encoding: the body is empty (RFC 9112 section 6.3).
-    return RequestState::COMPLETE;
+    read_buffer_.erase(read_buffer_.begin(), read_buffer_.begin() + static_cast<std::ptrdiff_t>(pos));
+    return result;
 }
 
 } // namespace server
