@@ -5,6 +5,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -50,7 +51,7 @@ protected:
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         app = new server::App(cfg);
 

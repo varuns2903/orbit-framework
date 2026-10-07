@@ -8,6 +8,7 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 using namespace http;
 namespace fs = std::filesystem;
@@ -67,7 +68,7 @@ protected:
         fs::create_directories(dir);
         std::ofstream(dir / "alphabet.txt", std::ios::binary) << "abcdefghijklmnopqrstuvwxyz";
 
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         app = new server::App(cfg);
         app->use(middleware::static_files(dir.string()));

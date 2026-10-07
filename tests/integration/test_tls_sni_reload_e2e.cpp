@@ -17,6 +17,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../utils/TestConfig.hpp"
 
 // TLS certificates chosen by SNI, and reloaded without a restart.
 
@@ -161,7 +162,7 @@ private:
 };
 
 config::ServerConfig sni_config() {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = kPort;
     cfg.http_version = config::HttpVersion::Http2;
     cfg.ssl_cert = path("default.pem");

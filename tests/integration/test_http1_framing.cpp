@@ -5,6 +5,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 using namespace http;
 
@@ -58,7 +59,7 @@ protected:
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.max_body_size = 64;
         app = new server::App(cfg);

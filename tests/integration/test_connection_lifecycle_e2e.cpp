@@ -7,6 +7,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -80,7 +81,7 @@ protected:
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.header_timeout = std::chrono::seconds(1);
         cfg.keep_alive_timeout = std::chrono::seconds(1);

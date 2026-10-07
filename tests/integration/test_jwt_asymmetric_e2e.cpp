@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 using namespace http;
 
@@ -206,7 +207,7 @@ TEST(JwtAsymmetricTest, JwksSelectsKeysByKidAndFollowsRotation) {
     std::mutex mutex;
     nlohmann::json jwks = {{"keys", nlohmann::json::array({jwk(k1, "k1")})}};
 
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8128;
     server::App issuer(cfg);
     issuer.get("/jwks.json", [&](HttpRequest&, std::shared_ptr<ResponseWriter> w) {

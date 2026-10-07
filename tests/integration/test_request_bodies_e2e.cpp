@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 // Request bodies over HTTP/1.1: Expect: 100-continue, form fields and
 // multipart uploads streamed to disk.
@@ -117,7 +118,7 @@ protected:
         std::filesystem::remove_all(upload_dir());
         std::filesystem::create_directories(upload_dir());
 
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.max_body_size = kMaxBody;
         app = new server::App(cfg);

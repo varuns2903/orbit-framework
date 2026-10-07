@@ -15,6 +15,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../utils/TestConfig.hpp"
 
 // HTTP/3 requests through the Router, driven by libcurl. Skipped when the
 // framework is built without HTTP/3 or libcurl cannot speak it.
@@ -169,7 +170,7 @@ protected:
             f.write(data.data(), static_cast<std::streamsize>(data.size()));
         }
 
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.ssl_cert = g_cert;
         cfg.ssl_key = g_key;

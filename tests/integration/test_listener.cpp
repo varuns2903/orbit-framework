@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../utils/TestConfig.hpp"
 
 using namespace http;
 
@@ -202,7 +203,7 @@ TEST_F(ListenerTest, ConfigParsesListenOptions) {
 }
 
 TEST_F(ListenerTest, ManyQueuedConnectionsAreAllServed) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.host = "127.0.0.1";
     cfg.port = 8112;
     RunningApp server(cfg, "127.0.0.1");
@@ -224,7 +225,7 @@ TEST_F(ListenerTest, ManyQueuedConnectionsAreAllServed) {
 }
 
 TEST_F(ListenerTest, MaxConnectionsQueuesExtraClients) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.host = "127.0.0.1";
     cfg.port = 8113;
     cfg.max_connections = 2;
@@ -262,7 +263,7 @@ TEST_F(ListenerTest, MaxConnectionsQueuesExtraClients) {
 
 TEST_F(ListenerTest, ClientIpOnDualStackServer) {
     if (!ipv6_available()) GTEST_SKIP() << "IPv6 is not available";
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.host = "::";
     cfg.port = 8114;
     RunningApp server(cfg, "127.0.0.1");

@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -130,7 +131,7 @@ protected:
         g_key = (dir / "orbit_h2p_key.pem").string();
         ASSERT_TRUE(make_self_signed(g_cert, g_key));
 
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.ssl_cert = g_cert;
         cfg.ssl_key = g_key;

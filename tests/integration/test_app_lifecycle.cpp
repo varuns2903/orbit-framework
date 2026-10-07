@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -66,7 +67,7 @@ const auto noop = [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w
 } // namespace
 
 TEST(AppLifecycleTest, EachAppPublishesItsOwnOpenApiSpec) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     server::App a(cfg);
     server::App b(cfg);
     a.get("/only-in-a", noop);
@@ -90,7 +91,7 @@ TEST(AppLifecycleTest, EachAppPublishesItsOwnOpenApiSpec) {
 }
 
 TEST(AppLifecycleTest, GroupsShareTheirAppsRegistry) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     server::App app(cfg);
     app.group("/api", [](routing::Router& api) {
         api.group("/v1", [](routing::Router& v1) { v1.get("/items/:id", noop); });
@@ -99,7 +100,7 @@ TEST(AppLifecycleTest, GroupsShareTheirAppsRegistry) {
 }
 
 TEST(AppLifecycleTest, StopBeforeTheLoopExistsStillStopsIt) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8118;
     server::App app(cfg);
     app.stop(); // before listen(): must not be lost
@@ -112,7 +113,7 @@ TEST(AppLifecycleTest, StopRightAfterStartingIsSafe) {
     // stop() races with listen() creating the event loop; under TSan this
     // used to report a data race, and a lost stop could hang the test.
     for (int i = 0; i < 20; ++i) {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = 8119;
         server::App app(cfg);
         Running running(app);
@@ -123,9 +124,9 @@ TEST(AppLifecycleTest, StopRightAfterStartingIsSafe) {
 
 #ifndef _WIN32
 TEST(AppLifecycleTest, SignalStopsEveryApp) {
-    config::ServerConfig cfg_a;
+    config::ServerConfig cfg_a = orbit::test::server_config();
     cfg_a.port = 8120;
-    config::ServerConfig cfg_b;
+    config::ServerConfig cfg_b = orbit::test::server_config();
     cfg_b.port = 8121;
     server::App a(cfg_a);
     server::App b(cfg_b);

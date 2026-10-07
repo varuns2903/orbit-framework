@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 // HTTP/2 over plaintext with prior knowledge (h2c, RFC 9113 section 3.3).
 
@@ -80,7 +81,7 @@ Result get(uint16_t port, const std::string& path, long http_version) {
 class Server {
 public:
     Server(uint16_t port, config::HttpVersion version) {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = port;
         cfg.http_version = version;
         app_ = std::make_unique<server::App>(cfg);

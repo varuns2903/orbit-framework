@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 using namespace http;
 
@@ -122,7 +123,7 @@ struct ServerThread {
 // request body is still arriving. The response flag used to be shared with
 // the request decoder, so the rest of the body was read as raw bytes.
 TEST(ConnectionStateTest, ResponseFramingDoesNotChangeRequestDecoding) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = kPlainPort;
     auto* app = new server::App(cfg);
     app->group("/s", [](routing::Router& r) {
@@ -173,7 +174,7 @@ TEST(ConnectionStateTest, TlsCloseNotifyClosesTheConnection) {
     std::string key = (dir / "orbit_conn_state_key.pem").string();
     ASSERT_TRUE(make_self_signed(cert, key));
 
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = kTlsPort;
     cfg.ssl_cert = cert;
     cfg.ssl_key = key;

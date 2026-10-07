@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -121,7 +122,7 @@ private:
 } // namespace
 
 TEST(ServerLimitsTest, RequestLineHeaderCountAndSizeAreConfigurable) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8129;
     cfg.max_request_line = 100;
     cfg.max_headers = 5;
@@ -145,7 +146,7 @@ TEST(ServerLimitsTest, RequestLineHeaderCountAndSizeAreConfigurable) {
 }
 
 TEST(ServerLimitsTest, ServerPingsWebSockets) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8130;
     cfg.websocket_ping_interval = std::chrono::seconds(1);
     Server server(cfg);
@@ -159,7 +160,7 @@ TEST(ServerLimitsTest, ServerPingsWebSockets) {
 }
 
 TEST(ServerLimitsTest, PingsKeepLivePeersAndIdleTimeoutDropsSilentOnes) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8131;
     cfg.websocket_ping_interval = std::chrono::seconds(1);
     cfg.websocket_idle_timeout = std::chrono::seconds(2);
@@ -206,7 +207,7 @@ TEST(ServerLimitsTest, PingsKeepLivePeersAndIdleTimeoutDropsSilentOnes) {
 }
 
 TEST(ServerLimitsTest, WebSocketMessageLimitFromConfig) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8132;
     cfg.websocket_max_message_size = 10;
     Server server(cfg);
@@ -222,7 +223,7 @@ TEST(ServerLimitsTest, WebSocketMessageLimitFromConfig) {
 }
 
 TEST(ServerLimitsTest, EmptyBodyResponseKeepsTheConnectionUsable) {
-    config::ServerConfig cfg;
+    config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8147;
     Server server(cfg);
 
