@@ -2,6 +2,7 @@
 #include <orbit/http/Http1Parser.hpp>
 
 #include <cctype>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -341,6 +342,26 @@ TEST(Http1ParserTest, ChunkedBodyOverTheLimitIs413) {
     // Exactly at the limit is fine.
     EXPECT_EQ(parse("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\n0123456789", 1000, limits).bodies.at(0),
               "0123456789");
+}
+
+TEST(Http1ParserTest, BodyLimitCanBeChosenPerRequest) {
+    Http1Parser::Limits limits;
+    limits.max_body_size = 4;
+    Http1Parser p(limits);
+    p.set_body_limit([](const http::HttpRequest& r) -> size_t {
+        return r.uri == "/upload" ? SIZE_MAX : 4;
+    });
+    const std::string big = "POST /upload HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\n0123456789";
+    size_t used = 0;
+    std::string_view rest = big;
+    ASSERT_EQ(p.feed(rest, used), Event::HeadersComplete);
+    rest.remove_prefix(used);
+    ASSERT_EQ(p.feed(rest, used), Event::MessageComplete);
+    EXPECT_EQ(p.request().body, "0123456789");
+    p.next();
+    // The limit is chosen again for the next request on the connection.
+    EXPECT_EQ(p.feed("POST /other HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\n", used), Event::Error);
+    EXPECT_EQ(p.error_status(), 413);
 }
 
 // --- Strict framing (request smuggling) ---

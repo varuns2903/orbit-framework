@@ -69,6 +69,12 @@ public:
     /// HeadersComplete; cleared by next().
     void set_body_handler(std::function<void(std::string_view)> handler);
 
+    /// Chooses the body size limit per request, from its method, path and
+    /// headers, in place of Limits::max_body_size (e.g. none for a route that
+    /// streams large uploads). Called once the headers are parsed, before a
+    /// declared Content-Length is checked. Stays set across requests.
+    void set_body_limit(std::function<size_t(const HttpRequest&)> limit_for);
+
     bool expect_continue() const; ///< "Expect: 100-continue" was sent.
     bool chunked() const;         ///< Transfer-Encoding: chunked.
     bool has_body() const;        ///< A body follows the headers (chunked or Content-Length > 0).

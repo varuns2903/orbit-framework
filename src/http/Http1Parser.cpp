@@ -33,6 +33,8 @@ struct Http1Parser::Impl {
     HttpRequest request;
     std::string body;
     std::function<void(std::string_view)> body_handler;
+    std::function<size_t(const HttpRequest&)> body_limit_for;
+    size_t body_limit = 0; // for the current message
 
     // The message being parsed.
     std::string method;
@@ -167,11 +169,12 @@ struct Http1Parser::Impl {
         auto cookie = req.headers.find("Cookie");
         if (cookie != req.headers.end()) parse_cookie_header(cookie->second, req.cookies);
 
+        self.body_limit = self.body_limit_for ? self.body_limit_for(req) : self.limits.max_body_size;
         self.chunked = (p->flags & F_CHUNKED) != 0;
         const bool has_length = (p->flags & F_CONTENT_LENGTH) != 0;
         self.has_body = self.chunked || (has_length && p->content_length > 0);
         // Refuse an oversized body from its declared length, before reading it.
-        if (has_length && p->content_length > self.limits.max_body_size) {
+        if (has_length && p->content_length > self.body_limit) {
             return self.fail(413, "Content-Length exceeds the body size limit");
         }
         // Pause only when a body follows: the caller may want to stream it or
@@ -183,7 +186,7 @@ struct Http1Parser::Impl {
     static int on_body(llhttp_t* p, const char* at, size_t len) {
         Impl& self = of(p);
         self.body_bytes += len;
-        if (self.body_bytes > self.limits.max_body_size) {
+        if (self.body_bytes > self.body_limit) {
             return self.fail(413, "Body exceeds the size limit");
         }
         if (self.body_handler) {
@@ -279,6 +282,10 @@ HttpRequest& Http1Parser::request() { return impl_->request; }
 
 void Http1Parser::set_body_handler(std::function<void(std::string_view)> handler) {
     impl_->body_handler = std::move(handler);
+}
+
+void Http1Parser::set_body_limit(std::function<size_t(const HttpRequest&)> limit_for) {
+    impl_->body_limit_for = std::move(limit_for);
 }
 
 bool Http1Parser::expect_continue() const { return impl_->expect_continue; }
