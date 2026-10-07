@@ -1,0 +1,42 @@
+name: gRPC wrapper (experimental)
+
+# server::GrpcServer is experimental (#22) and the main CI builds with
+# ORBIT_ENABLE_GRPC=OFF. This job keeps it from rotting unnoticed: it builds
+# the wrapper against the distribution's gRPC and runs real RPCs through it.
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "include/orbit/server/GrpcServer.hpp"
+      - "src/server/GrpcServer.cpp"
+      - "tests/grpc/**"
+      - ".github/workflows/grpc.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "include/orbit/server/GrpcServer.hpp"
+      - "src/server/GrpcServer.cpp"
+      - "tests/grpc/**"
+      - ".github/workflows/grpc.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  grpc-smoke:
+    name: Build and run the gRPC smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v7
+
+    - name: Install gRPC
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ pkg-config libgrpc++-dev protobuf-compiler-grpc
+
+    - name: Build and run
+      run: tests/grpc/run.sh

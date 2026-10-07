@@ -1,6 +1,7 @@
 #pragma once
 #include <orbit/http/HttpResponse.hpp>
 #include <string_view>
+#include <atomic>
 #include <memory>
 #include <orbit/http/json.hpp>
 
@@ -89,6 +90,25 @@ public:
      * @param on_end Callback invoked when the entire body has been read.
      */
     virtual void read_body_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_end) = 0;
+
+    /**
+     * @brief True once anything of a response to the current request has
+     *        been sent: a full response, its headers, a chunk or an event.
+     *
+     * The router reads it after an error handler fails, to answer the
+     * request with a 500 only if nothing has been sent yet.
+     */
+    bool has_responded() const { return responded_.load(); }
+
+protected:
+    /// Implementations call this whenever they write part of a response.
+    void mark_responded() { responded_ = true; }
+    /// For writers reused across requests (an HTTP/1.1 keep-alive
+    /// connection), at the start of each request.
+    void reset_responded() { responded_ = false; }
+
+private:
+    std::atomic<bool> responded_{false};
 };
 
 } // namespace http

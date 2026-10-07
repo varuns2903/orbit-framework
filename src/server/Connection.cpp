@@ -378,6 +378,7 @@ void Connection::on_read_complete(ssize_t bytes_read) {
 void Connection::process_request() {
     // Any 100 Continue for this request has been sent; the next may need one.
     continue_sent_ = false;
+    reset_responded();
     {
         // Headers and interceptors registered by middleware belong to one
         // request. Keeping them would re-apply them to every later response
@@ -568,6 +569,7 @@ void Connection::add_interceptor(std::function<void(http::HttpResponse&)> interc
 }
 
 void Connection::send_headers(http::HttpResponse& response) {
+    mark_responded();
     // Interceptors see streamed responses too, as on HTTP/2 (access logs,
     // metrics and session cookies would otherwise miss them).
     {
@@ -602,6 +604,7 @@ void Connection::send_headers(http::HttpResponse& response) {
 }
 
 void Connection::send(http::HttpResponse&& response) {
+    mark_responded();
     {
         std::lock_guard<std::mutex> lock(write_mutex_);
         for (auto& interceptor : interceptors_) {
@@ -725,6 +728,7 @@ void Connection::continue_after_response() {
 }
 
 void Connection::write_chunk(std::string_view chunk) {
+    mark_responded();
     if (is_head_request_) return;
     if (response_chunked_) {
         std::string formatted_chunk;
@@ -740,6 +744,7 @@ void Connection::write_chunk(std::string_view chunk) {
 }
 
 void Connection::end() {
+    mark_responded();
     const bool last_response = should_close_;
     // Closes once everything queued is written.
     send_data(response_chunked_ && !is_head_request_ ? "0\r\n\r\n" : "", last_response);
@@ -750,6 +755,7 @@ void Connection::end() {
 }
 
 void Connection::send_sse_event(std::string_view data, std::string_view event, std::string_view id) {
+    mark_responded();
     std::string sse_msg;
     if (!event.empty()) sse_msg += "event: " + std::string(event) + "\n";
     if (!id.empty()) sse_msg += "id: " + std::string(id) + "\n";
