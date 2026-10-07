@@ -488,6 +488,7 @@ void Http2ResponseWriter::apply_response_hooks(http::HttpResponse& response) {
 }
 
 void Http2ResponseWriter::send(http::HttpResponse&& response) {
+    mark_responded();
     if (headers_sent_) return;
     headers_sent_ = true;
     apply_response_hooks(response);
@@ -501,6 +502,7 @@ void Http2ResponseWriter::send(http::HttpResponse&& response) {
 }
 
 void Http2ResponseWriter::send_headers(http::HttpResponse& response) {
+    mark_responded();
     if (headers_sent_) return;
     headers_sent_ = true;
     apply_response_hooks(response);
@@ -512,6 +514,7 @@ void Http2ResponseWriter::send_headers(http::HttpResponse& response) {
 }
 
 void Http2ResponseWriter::write_chunk(std::string_view chunk) {
+    mark_responded();
     if (chunk.empty()) return;
     if (auto session = session_.lock()) {
         session->submit_data(stream_id_, chunk);
@@ -519,12 +522,14 @@ void Http2ResponseWriter::write_chunk(std::string_view chunk) {
 }
 
 void Http2ResponseWriter::end() {
+    mark_responded();
     if (auto session = session_.lock()) {
         session->end_stream(stream_id_);
     }
 }
 
 void Http2ResponseWriter::send_sse_event(std::string_view data, std::string_view event, std::string_view id) {
+    mark_responded();
     std::string msg;
     if (!event.empty()) msg += "event: " + std::string(event) + "\n";
     if (!id.empty()) msg += "id: " + std::string(id) + "\n";

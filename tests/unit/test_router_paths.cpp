@@ -19,7 +19,10 @@ public:
 
     const HttpResponse& last() const { return sent.back(); }
 
-    void send(HttpResponse&& response) override { sent.push_back(std::move(response)); }
+    void send(HttpResponse&& response) override {
+        mark_responded();
+        sent.push_back(std::move(response));
+    }
     void send_headers(HttpResponse&) override {}
     void write_chunk(std::string_view) override {}
     void end() override {}
@@ -274,6 +277,43 @@ TEST(RouterPathsTest, GlobalMiddlewareCanAnswerBeforeRouting) {
     auto w = dispatch(r, HttpMethod::GET, "/nowhere");
     ASSERT_EQ(w->sent.size(), 1u);
     EXPECT_EQ(w->last().status_code, HttpStatus::TooManyRequests);
+}
+
+// An error handler that throws still gets the client an answer.
+TEST(RouterPathsTest, ThrowingErrorHandlerStillAnswers500) {
+    Router r;
+    r.on_error([](const std::exception&, HttpRequest&, std::shared_ptr<ResponseWriter>) {
+        throw std::runtime_error("the error handler failed too");
+    });
+    r.get("/x", [](HttpRequest&, std::shared_ptr<ResponseWriter>) { throw std::runtime_error("first"); });
+    auto w = dispatch(r, HttpMethod::GET, "/x");
+    ASSERT_EQ(w->sent.size(), 1u);
+    EXPECT_EQ(w->last().status_code, HttpStatus::InternalServerError);
+    EXPECT_EQ(w->last().body.find("failed too"), std::string::npos);
+}
+
+TEST(RouterPathsTest, ErrorHandlerThrowingANonStandardValueStillAnswers500) {
+    Router r;
+    r.on_error([](const std::exception&, HttpRequest&, std::shared_ptr<ResponseWriter>) { throw 5; });
+    r.get("/x", [](HttpRequest&, std::shared_ptr<ResponseWriter>) { throw std::runtime_error("first"); });
+    auto w = dispatch(r, HttpMethod::GET, "/x");
+    ASSERT_EQ(w->sent.size(), 1u);
+    EXPECT_EQ(w->last().status_code, HttpStatus::InternalServerError);
+}
+
+// If the handler already sent a response, no second one follows.
+TEST(RouterPathsTest, ErrorHandlerThatRespondedThenThrewSendsNothingMore) {
+    Router r;
+    r.on_error([](const std::exception&, HttpRequest&, std::shared_ptr<ResponseWriter> w) {
+        HttpResponse res;
+        res.status(HttpStatus::Conflict).send("already answered");
+        w->send(std::move(res));
+        throw std::runtime_error("then failed");
+    });
+    r.get("/x", [](HttpRequest&, std::shared_ptr<ResponseWriter>) { throw std::runtime_error("first"); });
+    auto w = dispatch(r, HttpMethod::GET, "/x");
+    ASSERT_EQ(w->sent.size(), 1u);
+    EXPECT_EQ(w->last().status_code, HttpStatus::Conflict);
 }
 
 // --- WebSocket routes ---
