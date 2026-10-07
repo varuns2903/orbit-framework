@@ -15,6 +15,7 @@ set(ORBIT_ENABLE_ZSTD @ORBIT_ENABLE_ZSTD@)
 find_dependency(OpenSSL)
 find_dependency(ZLIB)
 find_dependency(CURL)
+find_dependency(llhttp CONFIG)
 find_package(PkgConfig REQUIRED)
 
 if(ORBIT_ENABLE_POSTGRES)

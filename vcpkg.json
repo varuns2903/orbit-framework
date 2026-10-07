@@ -12,6 +12,7 @@
         "http2"
       ]
     },
+    "llhttp",
     "nghttp2",
     "pkgconf",
     {

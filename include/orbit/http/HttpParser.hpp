@@ -44,6 +44,10 @@ bool percent_decode(std::string_view in, std::string& out, bool plus_as_space, b
  */
 bool parse_urlencoded(std::string_view data, std::unordered_map<std::string, std::string>& out);
 
+/// Adds the name=value pairs of a Cookie header to `out` (a later pair with
+/// the same name wins).
+void parse_cookie_header(std::string_view cookie_header, std::unordered_map<std::string, std::string>& out);
+
 /**
  * @brief How the length of a request body is determined (RFC 9112 section 6).
  */
