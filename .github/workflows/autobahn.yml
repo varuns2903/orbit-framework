@@ -52,18 +52,27 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_GRPC=OFF -DORBIT_BUILD_TESTS=OFF -DORBIT_BUILD_EXAMPLES=ON
         cmake --build build --parallel 4 --target websocket_echo_server
 
+    # wstest's memory grows across a run and is not given back between cases:
+    # over the whole suite it passes 2 GB and some CI runs were SIGKILLed in
+    # section 12 (exit 137), while the echo server stayed under 100 MB. A
+    # fresh wstest per section peaks under 1.8 GB. Every section is listed
+    # (8 and 11 do not exist; 9 is excluded in fuzzingclient.json), and the
+    # check below fails if any case went missing.
     - name: Run Autobahn against it
       run: |
         ./build/websocket_echo_server --port 9001 --log-level WARN &
         for i in $(seq 1 50); do nc -z 127.0.0.1 9001 && break; sleep 0.2; done
-        mkdir -p reports
-        docker run --rm --network host \
-          -v "$PWD/.github/autobahn:/config" -v "$PWD/reports:/reports" \
-          crossbario/autobahn-testsuite \
-          wstest -m fuzzingclient -s /config/fuzzingclient.json
+        mkdir -p reports/specs
+        for section in 1 2 3 4 5 6 7 10 12.1 12.2 12.3 12.4 12.5 \
+                       13.1 13.2 13.3 13.4 13.5 13.6 13.7; do
+          python3 .github/autobahn/batch_spec.py "$section" > "reports/specs/$section.json"
+          docker run --rm --network host -v "$PWD/reports:/reports" \
+            crossbario/autobahn-testsuite \
+            wstest -m fuzzingclient -s "/reports/specs/$section.json"
+        done
 
     - name: Check results
-      run: python3 .github/autobahn/check_results.py reports/servers/index.json
+      run: python3 .github/autobahn/check_results.py --expect 427 reports/servers/*/index.json
 
     - name: Upload report
       if: always()
