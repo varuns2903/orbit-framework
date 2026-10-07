@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 using namespace http;
 
@@ -110,7 +111,7 @@ protected:
     static std::thread provider_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kProviderPort;
         provider = new server::App(cfg);
         provider->post("/token", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {

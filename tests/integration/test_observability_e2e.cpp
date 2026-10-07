@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -79,7 +80,7 @@ protected:
             g_lines.push_back(line);
         });
 
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.log_format = "json";
         app = new server::App(cfg);

@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -69,7 +70,7 @@ std::string read_response(network::socket_t fd) {
 class Server {
 public:
     explicit Server(uint16_t port, std::chrono::seconds shutdown_timeout = std::chrono::seconds(30)) : port_(port) {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = port;
         cfg.shutdown_timeout = shutdown_timeout;
         app_ = std::make_unique<server::App>(cfg);

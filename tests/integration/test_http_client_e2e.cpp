@@ -18,6 +18,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 // http::Client against local Orbit servers (plain HTTP and TLS).
 
@@ -182,7 +183,7 @@ protected:
     static std::unique_ptr<Server> tls_server;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.worker_threads = 8;
         server = std::make_unique<Server>(cfg);
@@ -191,7 +192,7 @@ protected:
         g_cert = (dir / "orbit_client_cert.pem").string();
         g_key = (dir / "orbit_client_key.pem").string();
         if (make_self_signed(g_cert, g_key)) {
-            config::ServerConfig tls;
+            config::ServerConfig tls = orbit::test::server_config();
             tls.port = kTlsPort;
             tls.ssl_cert = g_cert;
             tls.ssl_key = g_key;

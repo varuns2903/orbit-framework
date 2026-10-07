@@ -20,6 +20,7 @@
 #ifndef _WIN32
 #include <unistd.h>
 #endif
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -102,7 +103,7 @@ protected:
         for (int i = 0; i < 100000; ++i) g_file_content += "line " + std::to_string(i) + "\n";
         std::ofstream(g_file, std::ios::binary) << g_file_content;
 
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.ssl_cert = g_cert;
         cfg.ssl_key = g_key;

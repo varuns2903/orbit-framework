@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <string>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -151,19 +152,19 @@ protected:
         g_key_path = (dir / "orbit_proxy_test_key.pem").string();
         ASSERT_TRUE(make_self_signed(g_cert_path, g_key_path));
 
-        config::ServerConfig ucfg;
+        config::ServerConfig ucfg = orbit::test::server_config();
         ucfg.port = kUpstreamPort;
         upstream = new server::App(ucfg);
         add_upstream_routes(*upstream);
 
-        config::ServerConfig tcfg;
+        config::ServerConfig tcfg = orbit::test::server_config();
         tcfg.port = kTlsUpstreamPort;
         tcfg.ssl_cert = g_cert_path;
         tcfg.ssl_key = g_key_path;
         tls_upstream = new server::App(tcfg);
         add_upstream_routes(*tls_upstream);
 
-        config::ServerConfig pcfg;
+        config::ServerConfig pcfg = orbit::test::server_config();
         pcfg.port = kProxyPort;
         proxy_app = new server::App(pcfg);
 

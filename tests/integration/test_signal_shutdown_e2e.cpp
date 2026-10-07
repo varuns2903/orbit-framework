@@ -10,6 +10,7 @@
 #include <memory>
 #include <pthread.h>
 #include <thread>
+#include "../utils/TestConfig.hpp"
 
 namespace {
 
@@ -20,7 +21,7 @@ struct RunningApp {
     std::shared_ptr<std::atomic<bool>> returned = std::make_shared<std::atomic<bool>>(false);
 
     explicit RunningApp(uint16_t port) {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = port;
         app = new server::App(cfg);
         app->get("/", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {

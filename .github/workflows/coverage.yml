@@ -74,6 +74,15 @@ jobs:
       working-directory: build_cov
       run: ctest --output-on-failure --timeout 300
 
+    # The servers in the integration tests default to epoll, so a second pass
+    # on io_uring is what exercises IoUringProactor. Its .gcda counts add to
+    # the first pass, so the report below covers both engines.
+    - name: Run tests on io_uring
+      working-directory: build_cov
+      env:
+        ORBIT_TEST_ENGINE: iouring
+      run: ctest --output-on-failure --timeout 300
+
     # Count only Orbit's own sources. An exclude list is the wrong tool here —
     # it silently let libstdc++ headers pulled in through templates into the
     # denominator. Allow-listing src/ and include/orbit/ is exact, and the

@@ -14,6 +14,7 @@
 #include <thread>
 #include <chrono>
 #include <memory>
+#include "../utils/TestConfig.hpp"
 
 using namespace orbit;
 using namespace http;
@@ -24,7 +25,7 @@ protected:
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg;
+        config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = 8089; // Use unique port
         app_ptr = new server::App(cfg);
 
