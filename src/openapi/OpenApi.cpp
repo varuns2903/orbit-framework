@@ -38,6 +38,13 @@ std::string OpenApiRegistry::escape_json(const std::string& s) const {
         else if (c == '\n') out += "\\n";
         else if (c == '\r') out += "\\r";
         else if (c == '\t') out += "\\t";
+        else if (static_cast<unsigned char>(c) < 0x20) {
+            // Any other control character is invalid raw in a JSON string.
+            static const char hex[] = "0123456789abcdef";
+            out += "\\u00";
+            out += hex[(c >> 4) & 0xF];
+            out += hex[c & 0xF];
+        }
         else out += c;
     }
     return out;
@@ -114,16 +121,24 @@ std::string OpenApiRegistry::generate_swagger_json(const std::string& title, con
                 first_response = false;
                 
                 ss << "          \"" << status << "\": {\n";
+                if (schema.empty()) {
+                    // A status with no body schema: description only.
+                    ss << "            \"description\": \"Response for status " << status << "\"\n";
+                    ss << "          }\n";
+                    continue;
+                }
                 ss << "            \"description\": \"Response for status " << status << "\",\n";
                 ss << "            \"content\": {\n";
                 ss << "              \"application/json\": {\n";
-                ss << "                \"schema\": {\n";
-                if (schema.front() == '{') { // Inline schema
-                    ss << schema << "\n";
+                if (schema.front() == '{') {
+                    // An inline schema is the value itself; wrapping it in
+                    // another object made the whole spec invalid JSON.
+                    ss << "                \"schema\": " << schema << "\n";
                 } else {
+                    ss << "                \"schema\": {\n";
                     ss << "                  \"$ref\": \"#/components/schemas/" << escape_json(schema) << "\"\n";
+                    ss << "                }\n";
                 }
-                ss << "                }\n";
                 ss << "              }\n";
                 ss << "            }\n";
                 ss << "          }\n";
