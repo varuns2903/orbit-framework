@@ -134,31 +134,40 @@ jobs:
           --json-summary coverage-summary.json \
           --print-summary
 
-    # The 85% line-coverage goal (#133) is a notice, not a gate: below it the
-    # run gets a warning annotation and a line in the summary, and still
-    # passes. Raise TARGET as coverage grows.
-    - name: Compare with the coverage target
+    # Coverage targets (#133) are notices, not gates: below a target the run
+    # gets a warning annotation and a line in the summary, and still passes.
+    # Raise a target once coverage has grown past it (docs/coverage.md).
+    - name: Compare with the coverage targets
       if: always()
       working-directory: build_cov
       env:
-        TARGET: "85"
+        LINE_TARGET: "90"
+        BRANCH_TARGET: "75"
       run: |
         python3 - <<'PY'
         import json, os
-        target = float(os.environ["TARGET"])
         try:
-            pct = json.load(open("coverage-summary.json"))["line_percent"]
-        except (OSError, KeyError, ValueError) as e:
+            summary = json.load(open("coverage-summary.json"))
+        except (OSError, ValueError) as e:
             print(f"::warning title=Coverage target::No coverage summary to compare ({e})")
             raise SystemExit(0)
-        msg = f"Line coverage is {pct:.1f}%; the target is {target:g}%."
-        if pct < target:
-            print(f"::warning title=Line coverage below target::{msg}")
-        else:
-            print(f"::notice title=Line coverage::{msg}")
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+        lines = []
+        for kind, key, env in (("Line", "line_percent", "LINE_TARGET"),
+                               ("Branch", "branch_percent", "BRANCH_TARGET")):
+            target = float(os.environ[env])
+            pct = summary.get(key)
+            if pct is None:
+                print(f"::warning title=Coverage target::No {kind.lower()} coverage in the summary")
+                continue
+            msg = f"{kind} coverage is {pct:.1f}%; the target is {target:g}%."
+            if pct < target:
+                print(f"::warning title={kind} coverage below target::{msg}")
+            else:
+                print(f"::notice title={kind} coverage::{msg}")
             mark = "⚠️ below target" if pct < target else "✅ meets target"
-            f.write(f"**Line coverage {pct:.1f}%** (target {target:g}%): {mark}\n\n")
+            lines.append(f"**{kind} coverage {pct:.1f}%** (target {target:g}%): {mark}")
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            f.write("\n\n".join(lines) + "\n\n")
         PY
 
     - name: Publish summary
