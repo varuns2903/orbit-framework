@@ -94,8 +94,11 @@ private:
     bool connect_locked();
     void close_locked();
 
-    std::string send_command(const std::vector<std::string>& args);
-    std::string read_response(bool& ok);
+    // The reply as text; "" on failure or an error reply. *no_value, when
+    // given, is set unless the reply carried a value: a nil reply, an error
+    // reply or a failure. "" alone cannot tell those from an empty string.
+    std::string send_command(const std::vector<std::string>& args, bool* no_value = nullptr);
+    std::string read_response(bool& ok, bool& no_value);
 
     std::string host_;
     int port_;

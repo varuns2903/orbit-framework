@@ -76,7 +76,7 @@ void RedisClient::disconnect() {
     close_locked();
 }
 
-std::string RedisClient::send_command(const std::vector<std::string>& args) {
+std::string RedisClient::send_command(const std::vector<std::string>& args, bool* no_value) {
     std::ostringstream oss;
     oss << "*" << args.size() << "\r\n";
     for (const auto& arg : args) {
@@ -85,6 +85,8 @@ std::string RedisClient::send_command(const std::vector<std::string>& args) {
     
     std::string req = oss.str();
     
+    if (no_value) *no_value = true;
+
     // connect_locked() rather than connect(): mutex_ is not recursive, and
     // re-locking it here deadlocked every caller after the first disconnect.
     std::lock_guard<std::mutex> lock(mutex_);
@@ -101,7 +103,9 @@ std::string RedisClient::send_command(const std::vector<std::string>& args) {
     }
 
     bool ok = false;
-    std::string response = read_response(ok);
+    bool nil = true;
+    std::string response = read_response(ok, nil);
+    if (no_value) *no_value = !ok || nil;
     if (!ok) {
         // A failed or partial read leaves the stream at an unknown position;
         // start over on a fresh connection next time.
@@ -110,8 +114,9 @@ std::string RedisClient::send_command(const std::vector<std::string>& args) {
     return response;
 }
 
-std::string RedisClient::read_response(bool& ok) {
+std::string RedisClient::read_response(bool& ok, bool& no_value) {
     ok = false;
+    no_value = false;
     // A simple, unoptimized RESP reader for synchronous reading.
     char c;
     std::string line;
@@ -137,6 +142,7 @@ std::string RedisClient::read_response(bool& ok) {
         // Error reply: the stream is still in sync.
         LOG_ERROR("Redis Error: " << line);
         ok = true;
+        no_value = true;
         return "";
     } else if (type == ':') {
         // Integer
@@ -152,7 +158,8 @@ std::string RedisClient::read_response(bool& ok) {
         }
         if (len == -1) {
             ok = true;
-            return ""; // Null
+            no_value = true;
+            return "";
         }
         if (len < 0 || len > 512LL * 1024 * 1024) return "";
         
@@ -194,8 +201,10 @@ bool RedisClient::set(const std::string& key, const std::string& value, int expi
 }
 
 std::optional<std::string> RedisClient::get(const std::string& key) {
-    std::string res = send_command({"GET", key});
-    if (res.empty()) return std::nullopt; // nullopt or actual empty based on logic
+    // A missing key is a nil reply; a key holding "" is an empty bulk string.
+    bool no_value = true;
+    std::string res = send_command({"GET", key}, &no_value);
+    if (no_value) return std::nullopt;
     return res;
 }
 

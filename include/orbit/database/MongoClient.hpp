@@ -109,7 +109,6 @@ private:
     mongoc_uri_t* uri_{nullptr};
     mongoc_client_pool_t* pool_{nullptr};
     
-    static std::atomic<int> init_count_;
 };
 
 } // namespace database
