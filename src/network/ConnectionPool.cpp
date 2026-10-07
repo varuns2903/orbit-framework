@@ -33,8 +33,12 @@ std::pair<int, void*> ConnectionPool::acquire(const std::string& host, int port)
             // Recursive fallback to get the next one
             lock.unlock();
             return acquire(host, port);
-        } else if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-            // Socket has an error
+        } else if ((ret > 0 && !ssl) || (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+            // Bytes waiting on an idle plain connection (typically a 408 sent
+            // before the server closes it) would be read as the next
+            // request's response, so like an error it cannot be reused. Not
+            // for TLS, where they may be harmless post-handshake records such
+            // as session tickets.
             if (ssl) SSL_free(static_cast<SSL*>(ssl));
             network::close_socket(fd);
             lock.unlock();
