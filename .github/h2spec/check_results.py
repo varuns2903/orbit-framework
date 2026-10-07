@@ -27,6 +27,14 @@ KNOWN = {
     # the frame is discarded as above; otherwise nghttp2 sends RST_STREAM.
     ("http2/5.1", "half closed (remote): Sends a HEADERS frame"):
         "races the response; closed streams discard frames (RFC 9113)",
+    # The same race with DATA (#149). When stream 1's response has already
+    # been sent, the stream is closed rather than half-closed, nghttp2 has
+    # dropped it, and DATA for a stream it no longer tracks is ignored; h2spec
+    # then times out waiting for STREAM_CLOSED. Seen intermittently in CI,
+    # including on main, with a fast release build; a slower debug build
+    # passed 40 of 40 runs.
+    ("http2/5.1", "half closed (remote): Sends a DATA frame"):
+        "races the response; closed streams discard frames (RFC 9113)",
     # Same race: DATA sent on a stream whose request has ended.
     ("http2/6.1", 'Sends a DATA frame on the stream that is not in "open" or "half-closed (local)" state'):
         "races the response; closed streams discard frames (RFC 9113)",
