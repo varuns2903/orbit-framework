@@ -1,4 +1,5 @@
 #include <orbit/server/App.hpp>
+#include <algorithm>
 #include <orbit/utils/Logger.hpp>
 #include <orbit/utils/PrometheusRegistry.hpp>
 #include <orbit/openapi/OpenApi.hpp>
@@ -238,8 +239,28 @@ void App::listen() {
     signal(SIGTERM, signal_handler);
 #endif
 
-    listener_ = std::make_unique<Listener>(config_.host, config_.port, config_.backlog);
-    listener_->start();
+    size_t loop_count = std::max<size_t>(1, config_.event_loops);
+#ifndef __linux__
+    // Only Linux spreads connections across SO_REUSEPORT sockets; elsewhere
+    // the last socket bound would take them all.
+    if (loop_count > 1) {
+        LOG_WARN("event_loops = " << loop_count << " is supported on Linux only; using 1");
+        loop_count = 1;
+    }
+#endif
+    {
+        std::lock_guard<std::mutex> lock(loop_mutex_);
+        event_loops_.clear();
+        listeners_.clear();
+    }
+    // The first socket may be given port 0 and get a free one; the others
+    // join it on the port it got.
+    listeners_.push_back(std::make_unique<Listener>(config_.host, config_.port, config_.backlog));
+    listeners_.front()->start();
+    for (size_t i = 1; i < loop_count; ++i) {
+        listeners_.push_back(std::make_unique<Listener>(config_.host, listeners_.front()->port(), config_.backlog));
+        listeners_.back()->start();
+    }
     
     network::UdpSocket* pass_quic_socket = nullptr;
     QuicConnectionManager* pass_quic_manager = nullptr;
@@ -266,10 +287,26 @@ void App::listen() {
     
     {
         std::lock_guard<std::mutex> lock(loop_mutex_);
-        event_loop_ = std::make_unique<EventLoop>(*listener_, router_, config_, tls_context_.get(), pass_quic_socket, pass_quic_manager);
+        thread_pool_ = std::make_unique<concurrency::ThreadPool>(config_.worker_threads);
+        for (size_t i = 0; i < loop_count; ++i) {
+            // HTTP/3 has one UDP socket; it stays on the first loop.
+            event_loops_.push_back(std::make_unique<EventLoop>(
+                *listeners_[i], router_, config_, *thread_pool_, tls_context_.get(),
+                i == 0 ? pass_quic_socket : nullptr, i == 0 ? pass_quic_manager : nullptr));
+        }
+        if (loop_count > 1) {
+            // max_connections is one limit for the whole App.
+            for (auto& loop : event_loops_) {
+                loop->set_connection_counter([this] {
+                    size_t total = 0;
+                    for (const auto& l : event_loops_) total += l->connection_count();
+                    return total;
+                });
+            }
+        }
 
         // Act on signals from the loop thread, where logging and forking are safe.
-        event_loop_->set_tick_hook([this]() {
+        event_loops_.front()->set_tick_hook([this]() {
             // Renewed certificate files (certbot, cert-manager) are picked up
             // without a signal.
             if (tls_context_ && config_.tls_reload_interval.count() > 0) {
@@ -308,11 +345,29 @@ void App::listen() {
 
         // stop() may already have been called, e.g. by a test tearing down
         // before this thread got here.
-        if (stop_requested_) event_loop_->stop();
+        if (stop_requested_) {
+            for (auto& loop : event_loops_) loop->stop();
+        }
+        for (size_t i = 1; i < event_loops_.size(); ++i) {
+            EventLoop* loop = event_loops_[i].get();
+            loop_threads_.emplace_back([loop] { loop->run(); });
+        }
     }
-    
-    LOG_INFO("App started listening on port " << listener_->port());
-    event_loop_->run();
+
+    LOG_INFO("App started listening on port " << listeners_.front()->port()
+             << (loop_count > 1 ? " with " + std::to_string(loop_count) + " event loops" : std::string()));
+    event_loops_.front()->run();
+    // The other loops stop with the first (stop()) or drain on their own
+    // (shutdown()); either way, wait for them.
+    for (auto& t : loop_threads_) t.join();
+    loop_threads_.clear();
+}
+
+std::vector<size_t> App::connections_per_event_loop() const {
+    std::lock_guard<std::mutex> lock(loop_mutex_);
+    std::vector<size_t> counts;
+    for (const auto& loop : event_loops_) counts.push_back(loop->connection_count());
+    return counts;
 }
 
 bool App::reload_tls(std::string* error) {
@@ -330,8 +385,9 @@ void App::shutdown() {
 void App::shutdown(std::chrono::seconds timeout) {
     std::lock_guard<std::mutex> lock(loop_mutex_);
     draining_ = true;
-    if (event_loop_) {
-        event_loop_->request_shutdown(std::chrono::steady_clock::now() + timeout);
+    if (!event_loops_.empty()) {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        for (auto& loop : event_loops_) loop->request_shutdown(deadline);
     } else {
         // Not started yet: nothing to drain.
         stop_requested_ = true;
@@ -360,9 +416,7 @@ App& App::enable_health_checks(const std::string& liveness, const std::string& r
 void App::stop() {
     std::lock_guard<std::mutex> lock(loop_mutex_);
     stop_requested_ = true;
-    if (event_loop_) {
-        event_loop_->stop();
-    }
+    for (auto& loop : event_loops_) loop->stop();
 }
 
 void App::hot_reload() {

@@ -33,7 +33,11 @@ public:
      * @param quic_socket The QUIC UDP socket (optional).
      * @param quic_manager The QUIC connection manager (optional).
      */
-    EventLoop(Listener& listener, const routing::Router& router, const config::ServerConfig& config, network::TlsContext* tls_context = nullptr, network::UdpSocket* quic_socket = nullptr, QuicConnectionManager* quic_manager = nullptr);
+    /// @param thread_pool Runs request handlers; shared by every loop of an App
+    ///        and must outlive this loop's connections.
+    EventLoop(Listener& listener, const routing::Router& router, const config::ServerConfig& config,
+              concurrency::ThreadPool& thread_pool, network::TlsContext* tls_context = nullptr,
+              network::UdpSocket* quic_socket = nullptr, QuicConnectionManager* quic_manager = nullptr);
     
     /**
      * @brief Starts the event loop.
@@ -77,6 +81,14 @@ public:
      */
     concurrency::ThreadPool& get_thread_pool() { return thread_pool_; }
 
+    /// Counts connections across every loop of the App, so max_connections
+    /// stays one limit when there are several loops. Unset, only this loop's
+    /// connections count.
+    void set_connection_counter(std::function<size_t()> total) { total_connections_ = std::move(total); }
+
+    /// Connections this loop currently holds.
+    size_t connection_count() const { return connection_manager_.get_connection_count(); }
+
 private:
     void do_accept();
     void do_read_quic();
@@ -92,7 +104,7 @@ private:
     Listener& listener_;
     TimerManager timer_manager_;
     std::unique_ptr<network::Proactor> proactor_;
-    concurrency::ThreadPool thread_pool_;
+    concurrency::ThreadPool& thread_pool_;
     ConnectionManager connection_manager_;
     network::UdpSocket* quic_socket_;
     QuicConnectionManager* quic_manager_;
@@ -112,6 +124,8 @@ private:
     void drain_step();
 
     size_t max_connections_ = 0;
+
+    std::function<size_t()> total_connections_;
     bool nonblocking_accepts_ = true; // accepted sockets must match the proactor's own accept
     // Loop-thread only: accept is not armed while paused (fd limit or
     // max_connections reached); new connections wait in the backlog.

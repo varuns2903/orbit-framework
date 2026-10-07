@@ -33,6 +33,11 @@ struct ServerConfig {
     // connections wait in the listen backlog until a slot frees up.
     size_t max_connections{0};
     size_t worker_threads{4};
+    // Event loops (reactors), each on its own thread with its own listening
+    // socket (SO_REUSEPORT; the kernel spreads connections across them).
+    // A connection stays on the loop that accepted it, TLS included. Handlers
+    // still run on the worker_threads pool. Linux only: elsewhere 1 is used.
+    size_t event_loops{1};
     std::string log_level{"INFO"};
     std::string log_format{"text"};  // "text" or "json" (one JSON object per line)
     std::string static_dir{"./public"};

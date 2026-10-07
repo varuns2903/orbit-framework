@@ -12,13 +12,19 @@ The QUIC transport (ngtcp2/nghttp3) completes handshakes, but
 fixed placeholder response, and file responses are not supported. Serve
 production traffic over HTTP/1.1 or HTTP/2.
 
-## 2. One event loop per `App`
+## 2. Event loops are opt-in, and Linux-only beyond one
 
-Each `App` runs a single event-loop thread that accepts connections and
-performs all socket I/O; handlers run on a worker thread pool
+By default an `App` runs a single event-loop thread that accepts connections
+and performs all socket I/O and TLS; handlers run on a worker thread pool
 (`ServerConfig::worker_threads`). I/O-heavy workloads saturate that one
-thread before the CPU does. To use more cores for I/O, run several processes
-on the same port: the listener sets `SO_REUSEPORT` on Linux and macOS.
+thread before the CPU does.
+
+On Linux, `ServerConfig::event_loops` (or `--event-loops N`) runs N loops,
+each with its own `SO_REUSEPORT` listening socket; the kernel spreads new
+connections across them and a connection stays on its loop. Elsewhere the
+setting falls back to one loop, because other systems do not balance
+`SO_REUSEPORT` sockets; run several processes instead. HTTP/3 (QUIC) stays on
+the first loop.
 
 ## 3. Large default dependency set
 
@@ -30,11 +36,12 @@ features is tracked in #36).
 
 ## 4. Custom protocol parsers
 
-HTTP/1.1, multipart and WebSocket parsing are implemented in Orbit rather
-than taken from a widely deployed library, which makes them the main attack
-surface. Mitigations in place:
+Multipart and WebSocket parsing are implemented in Orbit rather than taken
+from a widely deployed library, which makes them the main attack surface.
+HTTP/1.1 requests are parsed by [llhttp](https://github.com/nodejs/llhttp),
+the parser Node.js uses. Mitigations in place:
 
-- the HTTP parser is fuzzed in CI (`.github/workflows/fuzz.yml`);
+- the parsers are fuzzed in CI (`.github/workflows/fuzz.yml`);
 - WebSocket handling is checked against the Autobahn TestSuite
   (`.github/workflows/autobahn.yml`);
 - the test suite runs under Valgrind in CI and under ASan/UBSan in local

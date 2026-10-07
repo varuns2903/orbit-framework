@@ -15,7 +15,9 @@
 
 namespace server {
 
-EventLoop::EventLoop(Listener& listener, const routing::Router& router, const config::ServerConfig& config, network::TlsContext* tls_context, network::UdpSocket* quic_socket, QuicConnectionManager* quic_manager)
+EventLoop::EventLoop(Listener& listener, const routing::Router& router, const config::ServerConfig& config,
+                     concurrency::ThreadPool& thread_pool, network::TlsContext* tls_context,
+                     network::UdpSocket* quic_socket, QuicConnectionManager* quic_manager)
 #if defined(__APPLE__) || defined(__FreeBSD__)
     : listener_(listener), 
       proactor_(std::make_unique<network::KqueueProactor>()),
@@ -28,7 +30,7 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
                static_cast<std::unique_ptr<network::Proactor>>(std::make_unique<network::EpollProactor>()) : 
                static_cast<std::unique_ptr<network::Proactor>>(std::make_unique<network::IoUringProactor>())),
 #endif
-      thread_pool_(config.worker_threads), 
+      thread_pool_(thread_pool),
       connection_manager_(*proactor_, router, thread_pool_, timer_manager_, config.max_body_size, tls_context),
       quic_socket_(quic_socket),
       quic_manager_(quic_manager),
@@ -186,7 +188,9 @@ void EventLoop::do_accept() {
 }
 
 bool EventLoop::at_connection_limit() const {
-    return max_connections_ != 0 && connection_manager_.get_connection_count() >= max_connections_;
+    if (max_connections_ == 0) return false;
+    const size_t open = total_connections_ ? total_connections_() : connection_manager_.get_connection_count();
+    return open >= max_connections_;
 }
 
 void EventLoop::pause_accepting(std::chrono::steady_clock::time_point until) {
