@@ -7,7 +7,7 @@
 
 #include <cctype>
 #include <chrono>
-#include <future>
+#include <atomic>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -156,7 +156,18 @@ TEST(AppControlTest, ShutdownBeforeListenStopsIt) {
     app.shutdown(std::chrono::seconds(1));
     EXPECT_TRUE(app.is_draining());
 
-    auto listening = std::async(std::launch::async, [&app] { app.listen(); });
-    ASSERT_EQ(listening.wait_for(std::chrono::seconds(10)), std::future_status::ready)
-        << "listen() kept running after shutdown()";
+    // Not std::async: on MSVC <future> declares a "concurrency" namespace
+    // that collides with Orbit's.
+    std::atomic<bool> returned{false};
+    std::thread listening([&] {
+        app.listen();
+        returned = true;
+    });
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!returned && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    if (!returned) app.stop(); // so the join below cannot hang
+    listening.join();
+    EXPECT_TRUE(returned) << "listen() kept running after shutdown()";
 }
