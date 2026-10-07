@@ -201,7 +201,10 @@ struct Http1Parser::Impl {
         Impl& self = of(p);
         self.message_done = true;
         self.upgrade = p->upgrade != 0;
-        self.request.body = self.body;
+        // Only a buffered body is attached. With a body handler the request
+        // may already be in a handler's hands on another thread, and the
+        // body went to the handler anyway.
+        if (!self.body_handler) self.request.body = self.body;
         return HPE_PAUSED;
     }
 
