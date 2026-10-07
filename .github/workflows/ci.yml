@@ -107,6 +107,10 @@ jobs:
     - name: Run Memory Leak Detection (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       working-directory: build
+      # Valgrind runs the suite many times slower; client timeouts in the
+      # tests are scaled to match (#150).
+      env:
+        ORBIT_TEST_TIMEOUT_SCALE: "10"
       run: valgrind --leak-check=full --error-exitcode=1 ./http_server_tests
 
     - name: Run Load Test (Ubuntu)
