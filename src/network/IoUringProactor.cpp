@@ -1,5 +1,6 @@
 #include <orbit/network/IoUringProactor.hpp>
 #include <stdexcept>
+#include <chrono>
 #include <iostream>
 #include <sys/socket.h>
 #include <sys/sendfile.h>
@@ -14,6 +15,33 @@ IoUringProactor::IoUringProactor(unsigned entries) {
 }
 
 IoUringProactor::~IoUringProactor() {
+    // Contexts still in flight hold callbacks that may own the last reference
+    // to a Connection, and the kernel may still write into that connection's
+    // buffers. Cancel every request and reap the completions, so the kernel is
+    // done with the buffers, and release the contexts while the ring still
+    // exists, since their destructors may call remove().
+    {
+        std::lock_guard<std::mutex> lock(sq_mutex_);
+        if (struct io_uring_sqe* sqe = get_sqe_safe()) {
+            io_uring_prep_cancel(sqe, nullptr, IORING_ASYNC_CANCEL_ANY);
+            io_uring_sqe_set_data(sqe, nullptr);
+            io_uring_submit(&ring_);
+        }
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (inflight_ > 0 && std::chrono::steady_clock::now() < deadline) {
+        struct __kernel_timespec ts{0, 50 * 1000000};
+        struct io_uring_cqe* cqe;
+        if (io_uring_wait_cqe_timeout(&ring_, &cqe, &ts) < 0) continue;
+        auto* ctx = static_cast<IoContext*>(io_uring_cqe_get_data(cqe));
+        io_uring_cqe_seen(&ring_, cqe);
+        if (ctx) {
+            delete ctx;
+            --inflight_;
+        }
+    }
+    // Anything left was not cancelled in time; leaking it is safer than
+    // freeing memory the kernel may still write to.
     io_uring_queue_exit(&ring_);
 }
 
@@ -37,6 +65,7 @@ void IoUringProactor::async_read(socket_t fd, void* buffer, size_t size, std::fu
     if (sqe) {
         io_uring_prep_recv(sqe, fd, buffer, size, 0);
         io_uring_sqe_set_data(sqe, ctx);
+        ++inflight_;
         io_uring_sqe_set_flags(sqe, IOSQE_ASYNC);
         io_uring_submit(&ring_);
     } else {
@@ -55,6 +84,7 @@ void IoUringProactor::async_write(socket_t fd, const void* buffer, size_t size, 
     if (sqe) {
         io_uring_prep_send(sqe, fd, buffer, size, 0);
         io_uring_sqe_set_data(sqe, ctx);
+        ++inflight_;
         io_uring_sqe_set_flags(sqe, IOSQE_ASYNC);
         io_uring_submit(&ring_);
     } else {
@@ -73,6 +103,7 @@ void IoUringProactor::async_wait_read(socket_t fd, std::function<void()> callbac
     if (sqe) {
         io_uring_prep_poll_add(sqe, fd, POLLIN);
         io_uring_sqe_set_data(sqe, ctx);
+        ++inflight_;
         io_uring_submit(&ring_);
     } else {
         delete ctx;
@@ -90,6 +121,7 @@ void IoUringProactor::async_wait_write(socket_t fd, std::function<void()> callba
     if (sqe) {
         io_uring_prep_poll_add(sqe, fd, POLLOUT);
         io_uring_sqe_set_data(sqe, ctx);
+        ++inflight_;
         io_uring_submit(&ring_);
     } else {
         delete ctx;
@@ -112,6 +144,7 @@ void IoUringProactor::async_sendfile(socket_t out_fd, int in_fd, off_t offset, s
         // Instead, we use POLLOUT to wait for socket writability, then call sendfile().
         io_uring_prep_poll_add(sqe, out_fd, POLLOUT);
         io_uring_sqe_set_data(sqe, ctx);
+        ++inflight_;
         io_uring_submit(&ring_);
     } else {
         delete ctx;
@@ -130,6 +163,7 @@ void IoUringProactor::async_accept(socket_t fd, std::function<void(socket_t, soc
     if (sqe) {
         io_uring_prep_accept(sqe, fd, (struct sockaddr*)&ctx->client_addr, &ctx->client_len, SOCK_CLOEXEC);
         io_uring_sqe_set_data(sqe, ctx);
+        ++inflight_;
         io_uring_sqe_set_flags(sqe, IOSQE_ASYNC);
         io_uring_submit(&ring_);
     } else {
@@ -150,6 +184,7 @@ void IoUringProactor::async_connect(socket_t fd, const sockaddr_in& addr, std::f
     if (sqe) {
         io_uring_prep_connect(sqe, fd, (struct sockaddr*)&ctx->client_addr, ctx->client_len);
         io_uring_sqe_set_data(sqe, ctx);
+        ++inflight_;
         io_uring_submit(&ring_);
     } else {
         delete ctx;
@@ -212,6 +247,7 @@ void IoUringProactor::run_once(int timeout_ms) {
                 }
             }
             delete ctx;
+            --inflight_;
         }
     }
 

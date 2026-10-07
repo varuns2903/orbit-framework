@@ -1,6 +1,7 @@
 #pragma once
 #include <orbit/network/Proactor.hpp>
 #include <liburing.h>
+#include <atomic>
 #include <mutex>
 #include <functional>
 
@@ -26,6 +27,8 @@ public:
 private:
     struct io_uring ring_;
     std::mutex sq_mutex_;
+    // Contexts submitted to the kernel and not yet completed.
+    std::atomic<long> inflight_{0};
 
     enum class OpType {
         READ,
