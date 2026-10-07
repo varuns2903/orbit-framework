@@ -343,18 +343,32 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
         response_writer->send(std::move(res));
         
     } catch (const std::exception& e) {
-        if (error_handler_) {
-            error_handler_(e, request, response_writer);
-        } else if (parent_ && parent_->error_handler_) {
-            parent_->error_handler_(e, request, response_writer);
+        const ErrorHandler* handler = error_handler_ ? &error_handler_
+                                    : (parent_ && parent_->error_handler_) ? &parent_->error_handler_
+                                    : nullptr;
+        if (handler) {
+            // An error handler that throws used to escape route(): the
+            // worker caught it, but the client never got a response and
+            // waited for a timeout.
+            try {
+                (*handler)(e, request, response_writer);
+                return;
+            } catch (const std::exception& inner) {
+                LOG_ERROR("Error handler failed for route " << request.uri << ": " << inner.what()
+                          << " (handling: " << e.what() << ")");
+            } catch (...) {
+                LOG_ERROR("Error handler failed for route " << request.uri << " (handling: " << e.what() << ")");
+            }
+            // Never a second response after part of one has gone out.
+            if (response_writer->has_responded()) return;
         } else {
             // The exception text can contain SQL, file paths or secrets; it
             // goes to the log, never to the client.
             LOG_ERROR("Unhandled exception in route " << request.uri << ": " << e.what());
-            http::HttpResponse res;
-            res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
-            response_writer->send(std::move(res));
         }
+        http::HttpResponse res;
+        res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
+        response_writer->send(std::move(res));
     } catch (...) {
         LOG_ERROR("Unknown unhandled exception in route " << request.uri);
         http::HttpResponse res;

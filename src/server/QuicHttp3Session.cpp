@@ -385,6 +385,7 @@ void Http3ResponseWriter::apply_response_hooks(http::HttpResponse& response) {
 }
 
 void Http3ResponseWriter::send(http::HttpResponse&& response) {
+    mark_responded();
     if (headers_sent_) return;
     headers_sent_ = true;
     apply_response_hooks(response);
@@ -396,6 +397,7 @@ void Http3ResponseWriter::send(http::HttpResponse&& response) {
 }
 
 void Http3ResponseWriter::send_headers(http::HttpResponse& response) {
+    mark_responded();
     if (headers_sent_) return;
     headers_sent_ = true;
     apply_response_hooks(response);
@@ -407,15 +409,18 @@ void Http3ResponseWriter::send_headers(http::HttpResponse& response) {
 }
 
 void Http3ResponseWriter::write_chunk(std::string_view chunk) {
+    mark_responded();
     if (chunk.empty()) return;
     with_session([&](QuicHttp3Session& s) { s.submit_data(stream_id_, chunk); });
 }
 
 void Http3ResponseWriter::end() {
+    mark_responded();
     with_session([&](QuicHttp3Session& s) { s.end_stream(stream_id_); });
 }
 
 void Http3ResponseWriter::send_sse_event(std::string_view data, std::string_view event, std::string_view id) {
+    mark_responded();
     std::string msg;
     if (!event.empty()) msg += "event: " + std::string(event) + "\n";
     if (!id.empty()) msg += "id: " + std::string(id) + "\n";
