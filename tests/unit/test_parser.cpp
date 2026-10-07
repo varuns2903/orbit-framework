@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <orbit/http/HttpParser.hpp>
+#include <optional>
+#include <string>
 
 using namespace http;
 
@@ -186,9 +188,48 @@ TEST(FormFieldsTest, MalformedBodyGivesNoFields) {
     EXPECT_TRUE(req.form_fields().empty());
 }
 
-TEST(ExpectContinueTest, FramingRecordsTheExpectation) {
-    EXPECT_TRUE(http::parse_framing("Host: x\r\nExpect: 100-continue\r\nContent-Length: 5\r\n").expect_continue);
-    EXPECT_TRUE(http::parse_framing("expect:  100-Continue \r\n").expect_continue);
-    EXPECT_FALSE(http::parse_framing("Host: x\r\nContent-Length: 5\r\n").expect_continue);
-    EXPECT_FALSE(http::parse_framing("Expect: something-else\r\n").expect_continue);
+// HttpParser::parse runs on Http1Parser: the same strict framing as a
+// connection, and a request that owns its data.
+
+TEST(HttpParserFramingTest, AmbiguousFramingIsRejected) {
+    EXPECT_FALSE(HttpParser::parse("POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: abc\r\n\r\nA").has_value());
+    EXPECT_FALSE(HttpParser::parse("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\n").has_value());
+}
+
+TEST(HttpParserFramingTest, BodyIsSlicedToContentLength) {
+    auto req = HttpParser::parse("POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcGET /next HTTP/1.1\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_EQ(req->body, "abc");
+}
+
+TEST(HttpParserFramingTest, NoFramingHeadersMeansNoBody) {
+    auto req = HttpParser::parse("GET / HTTP/1.1\r\nHost: a\r\n\r\nGET /next HTTP/1.1\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_TRUE(req->body.empty());
+}
+
+TEST(HttpParserFramingTest, ChunkedBodyIsDecoded) {
+    auto req = HttpParser::parse("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n");
+    ASSERT_TRUE(req.has_value());
+    EXPECT_EQ(req->body, "abcde");
+}
+
+TEST(HttpParserFramingTest, IncompleteRequestIsNotParsed) {
+    EXPECT_FALSE(HttpParser::parse("GET / HTTP/1.1\r\nHost: a\r\n").has_value());
+    EXPECT_FALSE(HttpParser::parse("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nab").has_value());
+}
+
+TEST(HttpParserFramingTest, RequestOutlivesTheInput) {
+    std::optional<http::HttpRequest> req;
+    {
+        std::string raw = "POST /p?x=1 HTTP/1.1\r\nHost: owned\r\nCookie: a=b\r\nContent-Length: 4\r\n\r\nbody";
+        req = HttpParser::parse(raw);
+        raw.assign(raw.size(), '#');
+    }
+    ASSERT_TRUE(req.has_value());
+    auto moved = std::move(*req); // moving keeps the owned storage in place
+    EXPECT_EQ(moved.headers.at("Host"), "owned");
+    EXPECT_EQ(moved.body, "body");
+    EXPECT_EQ(moved.query.at("x"), "1");
+    EXPECT_EQ(moved.cookies.at("a"), "b");
 }

@@ -493,7 +493,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         # the fuzzer cannot tell which inputs reach new code.
         target_compile_options(server_core PRIVATE -fsanitize=fuzzer-no-link,address -g -O1)
 
-        foreach(fuzz_target IN ITEMS fuzz_http_parser fuzz_http1_parser fuzz_websocket fuzz_multipart fuzz_http2)
+        foreach(fuzz_target IN ITEMS fuzz_http1_parser fuzz_websocket fuzz_multipart fuzz_http2)
             add_executable(${fuzz_target} tests/fuzz/${fuzz_target}.cpp)
             target_link_libraries(${fuzz_target} PRIVATE server_core)
             # Enable libFuzzer and AddressSanitizer

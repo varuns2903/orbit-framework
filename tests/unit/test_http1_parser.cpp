@@ -364,6 +364,66 @@ TEST(Http1ParserTest, BodyLimitCanBeChosenPerRequest) {
     EXPECT_EQ(p.error_status(), 413);
 }
 
+TEST(Http1ParserTest, ExpectContinueIsCaseInsensitiveAndTrimmed) {
+    auto expects = [](const std::string& headers) {
+        Http1Parser p;
+        size_t used = 0;
+        p.feed("POST / HTTP/1.1\r\nHost: x\r\n" + headers + "Content-Length: 5\r\n\r\n", used);
+        return p.expect_continue();
+    };
+    EXPECT_TRUE(expects("Expect: 100-continue\r\n"));
+    EXPECT_TRUE(expects("expect:  100-Continue \r\n"));
+    EXPECT_FALSE(expects(""));
+    EXPECT_FALSE(expects("Expect: something-else\r\n"));
+}
+
+// Framing is read from the framing headers only, however they are spelt.
+TEST(Http1ParserTest, FramingHeaderSpellings) {
+    const char* accepted[] = {
+        "POST / HTTP/1.1\r\nHost: h\r\ncontent-LENGTH:   3 \r\n\r\nabc",
+        "POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: CHUNKED\r\n\r\n3\r\nabc\r\n0\r\n\r\n",
+        // Text that looks like framing inside another header is just text.
+        "POST / HTTP/1.1\r\nHost: h\r\nX-Note: content-length: 999\r\nContent-Length: 3\r\n\r\nabc",
+    };
+    for (const char* req : accepted) {
+        ParseRun r = parse(req, 1000);
+        ASSERT_EQ(r.bodies.size(), 1u) << req << " -> " << r.error_reason;
+        EXPECT_EQ(r.bodies[0], "abc") << req;
+    }
+}
+
+TEST(Http1ParserTest, MalformedContentLengthAndTransferEncodingAre400) {
+    const char* bad[] = {
+        "POST / HTTP/1.1\r\nHost: h\r\nContent-Length: +5\r\n\r\nabcde",
+        "POST / HTTP/1.1\r\nHost: h\r\nContent-Length: \r\n\r\n",
+        "POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 99999999999999999999999\r\n\r\n",
+        "POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 1\r\nContent-Length: abc\r\n\r\nA",
+        "POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: identity\r\n\r\n",
+        "POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding\t: chunked\r\n\r\n",
+        // a chunk size that overflows
+        "POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\nfffffffffffffffff\r\n",
+        // an empty chunk-size line
+        "POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n\r\n",
+    };
+    for (const char* req : bad) {
+        for (const ParseRun& r : parse_all_ways(req)) {
+            EXPECT_EQ(r.error_status, 400) << "accepted: " << req << " -> " << events(r);
+        }
+    }
+}
+
+TEST(Http1ParserTest, IncompleteChunkedBodyWaitsForMore) {
+    for (const char* partial : {"5\r\nhel", "5\r\nhello\r\n", "0\r\n"}) {
+        Http1Parser p;
+        std::string req = std::string("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n") + partial;
+        size_t used = 0;
+        std::string_view rest = req;
+        ASSERT_EQ(p.feed(rest, used), Event::HeadersComplete);
+        rest.remove_prefix(used);
+        EXPECT_EQ(p.feed(rest, used), Event::NeedMore) << partial;
+    }
+}
+
 // --- Strict framing (request smuggling) ---
 
 TEST(Http1ParserTest, AmbiguousOrMalformedFramingIs400) {

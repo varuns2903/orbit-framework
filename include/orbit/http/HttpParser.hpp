@@ -49,58 +49,19 @@ bool parse_urlencoded(std::string_view data, std::unordered_map<std::string, std
 void parse_cookie_header(std::string_view cookie_header, std::unordered_map<std::string, std::string>& out);
 
 /**
- * @brief How the length of a request body is determined (RFC 9112 section 6).
- */
-struct MessageFraming {
-    bool valid{true};                 ///< False if the framing headers are malformed or ambiguous.
-    bool chunked{false};              ///< Transfer-Encoding ends in "chunked".
-    bool has_content_length{false};   ///< A Content-Length header is present.
-    size_t content_length{0};         ///< Its value, when has_content_length is true.
-    bool expect_continue{false};      ///< "Expect: 100-continue" (RFC 9110 section 10.1.1).
-};
-
-/**
- * @brief Determines body framing from a request's header section.
- *
- * The header section is everything between the request line's CRLF and the
- * blank line that ends the headers. The request is rejected (valid == false)
- * when a header line has no colon or whitespace before the colon, when
- * Content-Length is not a plain decimal number or appears more than once with
- * different values, when Transfer-Encoding does not end in "chunked", or when
- * both Transfer-Encoding and Content-Length are present. Accepting any of
- * these lets a front-end proxy and this server disagree about where a request
- * ends.
- *
- * @param header_section The raw header lines, each terminated by CRLF.
- * @return The framing, with valid == false if the request must be rejected.
- */
-MessageFraming parse_framing(std::string_view header_section);
-
-/**
- * @brief Result of decoding a chunked request body.
- */
-enum class ChunkedStatus { Incomplete, Complete, Invalid, TooLarge };
-
-/**
- * @brief Decodes a chunked transfer-coded body (RFC 9112 section 7.1).
- *
- * @param data Bytes following the request's header section.
- * @param out Receives the decoded body when the result is Complete.
- * @param consumed Receives the number of bytes of @p data the encoded body
- *        occupies, including the last chunk and trailer section.
- * @param max_size Largest decoded body accepted.
- */
-ChunkedStatus decode_chunked(std::string_view data, std::string& out, size_t& consumed, size_t max_size);
-
-/**
  * @brief Utility class for parsing HTTP requests and related components.
  */
 class HttpParser {
 public:
     /**
-     * @brief Parses a raw HTTP request string into a structured HttpRequest object.
-     * @param raw_request The raw string view of the HTTP request.
-     * @return std::optional<HttpRequest> containing the parsed request, or std::nullopt if the request is malformed.
+     * @brief Parses one complete HTTP/1.1 request held in memory.
+     *
+     * Uses Http1Parser (llhttp), with the same strict rules and default
+     * limits as a connection. The request owns its headers and body, so it
+     * outlives @p raw_request. Anything after the first request is ignored.
+     *
+     * @param raw_request The raw request, including any body.
+     * @return The request, or std::nullopt if it is malformed or incomplete.
      */
     static std::optional<HttpRequest> parse(std::string_view raw_request);
 
