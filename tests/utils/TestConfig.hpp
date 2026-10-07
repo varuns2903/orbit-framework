@@ -7,6 +7,16 @@
 
 namespace orbit::test {
 
+// Multiplier for client-side timeouts in tests. CI sets
+// ORBIT_TEST_TIMEOUT_SCALE for the run under valgrind, which is many times
+// slower (about 100 KB/s over QUIC); unset or invalid, it is 1.
+inline long timeout_scale() {
+    const char* value = std::getenv("ORBIT_TEST_TIMEOUT_SCALE");
+    if (value == nullptr) return 1;
+    const long scale = std::strtol(value, nullptr, 10);
+    return scale > 0 ? scale : 1;
+}
+
 // The event engine the integration tests serve on. Unset, it is the library's
 // default; ORBIT_TEST_ENGINE=iouring (or epoll) runs the same tests on another
 // engine, which is how CI covers IoUringProactor. An unknown name fails the

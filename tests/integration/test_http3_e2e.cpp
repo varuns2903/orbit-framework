@@ -95,7 +95,7 @@ Result h3(const Request& req) {
     curl_easy_setopt(c, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_3ONLY);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, req.timeout_ms);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, req.timeout_ms * orbit::test::timeout_scale());
     curl_easy_setopt(c, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(c, CURLOPT_DEBUGFUNCTION, trace);
     curl_easy_setopt(c, CURLOPT_DEBUGDATA, &r.trace);
