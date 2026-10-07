@@ -482,7 +482,10 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
             target_compile_definitions(http_server_tests PRIVATE ORBIT_ENABLE_ZSTD=1)
         endif()
         include(GoogleTest)
-        gtest_discover_tests(http_server_tests)
+        # Listing ~650 tests can take longer than the default 5 s on a busy
+        # CI runner (#151). PRE_TEST lists them when ctest runs rather than as
+        # a post-build step, so a slow listing cannot fail the build itself.
+        gtest_discover_tests(http_server_tests DISCOVERY_TIMEOUT 60 DISCOVERY_MODE PRE_TEST)
     endif()
 
     # Fuzz Testing
