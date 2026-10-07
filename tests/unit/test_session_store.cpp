@@ -162,8 +162,40 @@ TEST(SessionStoreTest, MemoryStoreIsBounded) {
     EXPECT_FALSE(store.load("id0").has_value());
 }
 
+TEST(SessionStoreTest, EraseRemovesAKeyAndPersists) {
+    auto store = std::make_shared<MemorySessionStore>();
+    SessionManager sm(store);
+    Outcome first = request(sm, "", [](middleware::Session& s) {
+        s.set("keep", "1");
+        s.set("drop", "2");
+    });
+    request(sm, first.id, [](middleware::Session& s) {
+        s.erase("drop");
+        s.erase("never-set"); // erasing nothing is fine
+    });
+    auto data = store->load(first.id);
+    ASSERT_TRUE(data.has_value());
+    EXPECT_EQ(data->count("keep"), 1u);
+    EXPECT_EQ(data->count("drop"), 0u);
+}
+
+// Expired sessions are dropped first; a live one is evicted only if the
+// store is still full afterwards.
+TEST(SessionStoreTest, MemoryStoreDropsExpiredSessionsBeforeEvicting) {
+    MemorySessionStore store(3);
+    store.save("short-a", {}, std::chrono::seconds(1));
+    store.save("short-b", {}, std::chrono::seconds(1));
+    store.save("long", {}, std::chrono::seconds(60));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    store.save("new", {}, std::chrono::seconds(60));
+    EXPECT_EQ(store.size(), 2u);
+    EXPECT_TRUE(store.load("long").has_value());
+    EXPECT_TRUE(store.load("new").has_value());
+}
+
 #if defined(ORBIT_ENABLE_REDIS) && !defined(_WIN32)
 #include <cstdlib>
+#include <orbit/database/RedisClient.hpp>
 
 TEST(SessionStoreTest, RedisStoreKeepsDataAndRetiresOldIds) {
     constexpr int kPort = 6398;
@@ -192,5 +224,62 @@ TEST(SessionStoreTest, RedisStoreKeepsDataAndRetiresOldIds) {
 
     std::string stop = "redis-cli -p " + std::to_string(kPort) + " shutdown nosave >/dev/null 2>&1";
     (void)std::system(stop.c_str());
+}
+namespace {
+
+constexpr int kSessionRedisPort = 6400;
+
+bool start_session_redis() {
+    if (std::system("command -v redis-server >/dev/null 2>&1") != 0) return false;
+    std::string start = "redis-server --port " + std::to_string(kSessionRedisPort) +
+                        " --save '' --appendonly no --daemonize yes >/dev/null 2>&1";
+    if (std::system(start.c_str()) != 0) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    return true;
+}
+
+void stop_session_redis() {
+    std::string stop = "redis-cli -p " + std::to_string(kSessionRedisPort) + " shutdown nosave >/dev/null 2>&1";
+    (void)std::system(stop.c_str());
+}
+
+} // namespace
+
+// Sessions written before data was stored hold the placeholder "1"; values
+// that are not strings are skipped rather than failing the load.
+TEST(SessionStoreTest, RedisStoreReadsLegacyAndMixedValues) {
+    if (!start_session_redis()) GTEST_SKIP() << "redis-server not available";
+    database::RedisClient raw("127.0.0.1", kSessionRedisPort);
+    ASSERT_TRUE(raw.set("orbit:session:legacy", "1"));
+    ASSERT_TRUE(raw.set("orbit:session:mixed", R"({"name": "ada", "visits": 3, "admin": true})"));
+
+    middleware::RedisSessionStore store("127.0.0.1", kSessionRedisPort);
+    auto legacy = store.load("legacy");
+    ASSERT_TRUE(legacy.has_value());
+    EXPECT_TRUE(legacy->empty());
+    auto mixed = store.load("mixed");
+    ASSERT_TRUE(mixed.has_value());
+    EXPECT_EQ(mixed->size(), 1u);
+    EXPECT_EQ(mixed->at("name"), "ada");
+    EXPECT_FALSE(store.load("absent").has_value());
+
+    // touch() restarts the TTL; a 1-second TTL then expires the session.
+    store.save("ttl", {{"k", "v"}}, std::chrono::seconds(60));
+    store.touch("ttl", std::chrono::seconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    EXPECT_FALSE(store.load("ttl").has_value());
+    stop_session_redis();
+}
+
+TEST(SessionStoreTest, RedisSessionManagerFromHostAndPort) {
+    if (!start_session_redis()) GTEST_SKIP() << "redis-server not available";
+    SessionManager sm("127.0.0.1", kSessionRedisPort);
+    Outcome first = request(sm, "", [](middleware::Session& s) { s.set("cart", "3 items"); });
+    ASSERT_TRUE(first.cookie);
+    std::string seen;
+    Outcome again = request(sm, first.id, [&](middleware::Session& s) { seen = s.get("cart").value_or(""); });
+    EXPECT_EQ(seen, "3 items");
+    EXPECT_EQ(again.id, first.id);
+    stop_session_redis();
 }
 #endif
