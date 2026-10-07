@@ -85,6 +85,14 @@ if(ORBIT_ENABLE_POSTGRES)
     find_package(PostgreSQL REQUIRED)
 endif()
 find_package(CURL REQUIRED)
+# HTTP/1.1 request parsing (src/http/Http1Parser.cpp). vcpkg installs only the
+# static library; system packages may provide only the shared one.
+find_package(llhttp CONFIG REQUIRED)
+if(TARGET llhttp::llhttp_static)
+    set(ORBIT_LLHTTP_TARGET llhttp::llhttp_static)
+else()
+    set(ORBIT_LLHTTP_TARGET llhttp::llhttp_shared)
+endif()
 find_package(PkgConfig REQUIRED)
 
 if(ORBIT_ENABLE_MARIADB)
@@ -174,6 +182,7 @@ set(SERVER_SOURCES
     src/network/UdpSocket.cpp
     src/concurrency/ThreadPool.cpp
     src/http/HttpParser.cpp
+    src/http/Http1Parser.cpp
     src/http/HttpResponse.cpp
     src/http/MultipartForm.cpp
     src/http/MultipartStreamParser.cpp
@@ -262,6 +271,9 @@ target_link_libraries(server_core
         PkgConfig::NGHTTP2
         CURL::libcurl
     PRIVATE
+        # llhttp appears in no public header (Http1Parser uses a pimpl); for a
+        # static build it is still part of the export's link interface.
+        ${ORBIT_LLHTTP_TARGET}
         # inja is a FetchContent target used only by src/http/HttpResponse.cpp
         # and appears in no public header. Linking it PUBLIC put pantor::inja in
         # the installed export, where consumers cannot resolve it; BUILD_INTERFACE
@@ -481,7 +493,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         # the fuzzer cannot tell which inputs reach new code.
         target_compile_options(server_core PRIVATE -fsanitize=fuzzer-no-link,address -g -O1)
 
-        foreach(fuzz_target IN ITEMS fuzz_http_parser fuzz_websocket fuzz_multipart fuzz_http2)
+        foreach(fuzz_target IN ITEMS fuzz_http_parser fuzz_http1_parser fuzz_websocket fuzz_multipart fuzz_http2)
             add_executable(${fuzz_target} tests/fuzz/${fuzz_target}.cpp)
             target_link_libraries(${fuzz_target} PRIVATE server_core)
             # Enable libFuzzer and AddressSanitizer

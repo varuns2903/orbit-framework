@@ -12,6 +12,7 @@
     "curl",
     "libmariadb",
     "mongo-c-driver",
+    "llhttp",
     "nghttp2",
     "nghttp3",
     "brotli",

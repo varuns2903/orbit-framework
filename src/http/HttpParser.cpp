@@ -258,6 +258,30 @@ bool percent_decode(std::string_view in, std::string& out, bool plus_as_space, b
     return true;
 }
 
+void parse_cookie_header(std::string_view cookie_str, std::unordered_map<std::string, std::string>& out) {
+    size_t pos = 0;
+    while (pos < cookie_str.length()) {
+        // Skip leading spaces
+        while (pos < cookie_str.length() && cookie_str[pos] == ' ') pos++;
+
+        size_t eq_pos = cookie_str.find('=', pos);
+        if (eq_pos == std::string_view::npos) break; // Malformed cookie
+
+        size_t semi_pos = cookie_str.find(';', eq_pos);
+        std::string_view key = cookie_str.substr(pos, eq_pos - pos);
+        std::string_view val;
+
+        if (semi_pos != std::string_view::npos) {
+            val = cookie_str.substr(eq_pos + 1, semi_pos - eq_pos - 1);
+            pos = semi_pos + 1;
+        } else {
+            val = cookie_str.substr(eq_pos + 1);
+            pos = cookie_str.length();
+        }
+        out[std::string(key)] = std::string(val);
+    }
+}
+
 HttpMethod HttpParser::parse_method(std::string_view method_str) {
     if (method_str == "GET") return HttpMethod::GET;
     if (method_str == "POST") return HttpMethod::POST;
@@ -359,31 +383,9 @@ std::optional<HttpRequest> HttpParser::parse(std::string_view raw_request) {
         }
     }
     
-    // Parse cookies
     auto cookie_it = request.headers.find("Cookie");
     if (cookie_it != request.headers.end()) {
-        std::string_view cookie_str = cookie_it->second;
-        size_t pos = 0;
-        while (pos < cookie_str.length()) {
-            // Skip leading spaces
-            while (pos < cookie_str.length() && cookie_str[pos] == ' ') pos++;
-            
-            size_t eq_pos = cookie_str.find('=', pos);
-            if (eq_pos == std::string_view::npos) break; // Malformed cookie
-            
-            size_t semi_pos = cookie_str.find(';', eq_pos);
-            std::string_view key = cookie_str.substr(pos, eq_pos - pos);
-            std::string_view val;
-            
-            if (semi_pos != std::string_view::npos) {
-                val = cookie_str.substr(eq_pos + 1, semi_pos - eq_pos - 1);
-                pos = semi_pos + 1;
-            } else {
-                val = cookie_str.substr(eq_pos + 1);
-                pos = cookie_str.length();
-            }
-            request.cookies[std::string(key)] = std::string(val);
-        }
+        parse_cookie_header(cookie_it->second, request.cookies);
     }
     
     return request;
