@@ -4,13 +4,22 @@
 
 namespace database {
 
-std::atomic<int> MongoClient::init_count_{0};
+namespace {
+
+// libmongoc is initialised once per process. Reference counting it, with
+// mongoc_cleanup() when the last client went away, broke the next client:
+// the library does not support mongoc_init() after mongoc_cleanup(), and the
+// first connection of a client created later crashed in the handshake.
+void init_mongoc_once() {
+    static std::once_flag once;
+    std::call_once(once, [] { mongoc_init(); });
+}
+
+} // namespace
 
 MongoClient::MongoClient(concurrency::ThreadPool& thread_pool, const Config& config)
     : thread_pool_(thread_pool), config_(config) {
-    if (init_count_.fetch_add(1) == 0) {
-        mongoc_init();
-    }
+    init_mongoc_once();
 
     bson_error_t error;
     uri_ = mongoc_uri_new_with_error(config_.uri.c_str(), &error);
@@ -33,10 +42,6 @@ MongoClient::~MongoClient() {
     }
     if (uri_) {
         mongoc_uri_destroy(uri_);
-    }
-    
-    if (init_count_.fetch_sub(1) == 1) {
-        mongoc_cleanup();
     }
 }
 
