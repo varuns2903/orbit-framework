@@ -1,10 +1,33 @@
 #include <orbit/config/Config.hpp>
+#include <charconv>
 #include <iostream>
 #include <cstdlib>
-#include <cstdlib>
+#include <limits>
 #include <string>
+#include <system_error>
 
 namespace config {
+
+namespace {
+
+// A whole number in [min, max] for a numeric flag. Anything else (not a
+// number, trailing junk, a sign on a count, out of range) is a usage error,
+// as an unknown engine name is, rather than an exception or a silent wrap.
+long long parse_integer(const std::string& flag, const std::string& value, long long min, long long max) {
+    long long n = 0;
+    const char* end = value.data() + value.size();
+    auto [ptr, ec] = std::from_chars(value.data(), end, n);
+    if (value.empty() || ec != std::errc() || ptr != end || n < min || n > max) {
+        std::cerr << "Invalid value for " << flag << ": '" << value << "'. Must be a whole number from "
+                  << min << " to " << max << "\n";
+        std::exit(1);
+    }
+    return n;
+}
+
+constexpr long long kNoLimit = std::numeric_limits<long long>::max();
+
+} // namespace
 
 ServerConfig ServerConfig::parse(int argc, char* argv[]) {
     ServerConfig cfg;
@@ -18,7 +41,7 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                       << "  -b, --bind <host>             Address to listen on, e.g. 127.0.0.1 or :: (default: 0.0.0.0)\n"
                       << "      --backlog <num>           Listen backlog (default: SOMAXCONN)\n"
                       << "      --max-connections <num>   Connections served at once, 0 = unlimited (default: 0)\n"
-                      << "  -t, --threads <num>           Number of worker threads (default: hardware concurrency)\n"
+                      << "  -t, --threads <num>           Number of worker threads (default: 4)\n"
                       << "  -l, --log-level <level>       Log level (DEBUG, INFO, WARN, ERROR) (default: INFO)\n"
                       << "      --log-format <format>     text or json (default: text)\n"
                       << "  -s, --static-dir <dir>        Directory for static files\n"
@@ -32,15 +55,15 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                       << "  -h, --help                    Show this help message\n";
             std::exit(0);
         } else if ((arg == "-p" || arg == "--port") && i + 1 < argc) {
-            cfg.port = static_cast<uint16_t>(std::stoi(argv[++i]));
+            cfg.port = static_cast<uint16_t>(parse_integer(arg, argv[++i], 0, 65535));
         } else if ((arg == "-b" || arg == "--bind") && i + 1 < argc) {
             cfg.host = argv[++i];
         } else if (arg == "--backlog" && i + 1 < argc) {
-            cfg.backlog = std::stoi(argv[++i]);
+            cfg.backlog = static_cast<int>(parse_integer(arg, argv[++i], 0, std::numeric_limits<int>::max()));
         } else if (arg == "--max-connections" && i + 1 < argc) {
-            cfg.max_connections = static_cast<size_t>(std::stoull(argv[++i]));
+            cfg.max_connections = static_cast<size_t>(parse_integer(arg, argv[++i], 0, kNoLimit));
         } else if ((arg == "-t" || arg == "--threads") && i + 1 < argc) {
-            cfg.worker_threads = static_cast<size_t>(std::stoull(argv[++i]));
+            cfg.worker_threads = static_cast<size_t>(parse_integer(arg, argv[++i], 1, kNoLimit));
         } else if (arg == "--log-format" && i + 1 < argc) {
             cfg.log_format = argv[++i];
         } else if ((arg == "-l" || arg == "--log-level") && i + 1 < argc) {
@@ -48,7 +71,7 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
         } else if ((arg == "-s" || arg == "--static-dir") && i + 1 < argc) {
             cfg.static_dir = argv[++i];
         } else if ((arg == "-m" || arg == "--max-body-size") && i + 1 < argc) {
-            cfg.max_body_size = static_cast<size_t>(std::stoull(argv[++i]));
+            cfg.max_body_size = static_cast<size_t>(parse_integer(arg, argv[++i], 0, kNoLimit));
         } else if ((arg == "-c" || arg == "--ssl-cert") && i + 1 < argc) {
             cfg.ssl_cert = argv[++i];
         } else if ((arg == "-k" || arg == "--ssl-key") && i + 1 < argc) {
@@ -58,7 +81,7 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             std::string key = argv[++i];
             cfg.sni_certificates.push_back({cert, key});
         } else if (arg == "--tls-reload-interval" && i + 1 < argc) {
-            cfg.tls_reload_interval = std::chrono::seconds(std::stoll(argv[++i]));
+            cfg.tls_reload_interval = std::chrono::seconds(parse_integer(arg, argv[++i], 0, kNoLimit));
         } else if ((arg == "-e" || arg == "--engine") && i + 1 < argc) {
             std::string engine_str = argv[++i];
             if (engine_str == "epoll") {
