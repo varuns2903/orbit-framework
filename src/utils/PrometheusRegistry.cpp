@@ -1,6 +1,10 @@
 #include <vector>
 #include <orbit/utils/PrometheusRegistry.hpp>
+#include <charconv>
+#include <cmath>
 #include <sstream>
+#include <system_error>
+#include <string>
 
 namespace utils {
 
@@ -8,6 +12,17 @@ namespace {
 // Default buckets, suited to request latencies in seconds (the Prometheus
 // client libraries' defaults).
 const std::vector<double> kHistogramBounds = {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10};
+
+// A sample value in the exposition format: the shortest text that reads back
+// as the same double. Streaming a double prints 6 significant digits, so a
+// counter past a million (1234567 bytes) came out as 1.23457e+06.
+std::string format_value(double v) {
+    if (std::isnan(v)) return "NaN";
+    if (std::isinf(v)) return v > 0 ? "+Inf" : "-Inf";
+    char buf[32];
+    auto [end, ec] = std::to_chars(buf, buf + sizeof(buf), v);
+    return ec == std::errc() ? std::string(buf, end) : std::to_string(v);
+}
 } // namespace
 
 void PrometheusRegistry::inc_counter(const std::string& name, const std::string& labels, double value) {
@@ -68,7 +83,7 @@ std::string PrometheusRegistry::expose() const {
         for (const auto& [labels, metric] : map.at(name)) {
             oss << name;
             if (!labels.empty()) oss << "{" << labels << "}";
-            oss << " " << metric.value << "\n";
+            oss << " " << format_value(metric.value) << "\n";
         }
     };
     
@@ -90,7 +105,7 @@ std::string PrometheusRegistry::expose() const {
             // Expose _sum and _count
             oss << name << "_sum";
             if (!labels.empty()) oss << "{" << labels << "}";
-            oss << " " << metric.sum << "\n";
+            oss << " " << format_value(metric.sum) << "\n";
             
             oss << name << "_count";
             if (!labels.empty()) oss << "{" << labels << "}";
