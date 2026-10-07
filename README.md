@@ -403,7 +403,7 @@ cmake --build build --parallel
 | `ORBIT_ENABLE_POSTGRES` | `ON` | PostgreSQL client |
 | `ORBIT_ENABLE_MARIADB` | `ON` | MySQL/MariaDB client |
 | `ORBIT_ENABLE_MONGODB` | `ON` | MongoDB client |
-| `ORBIT_ENABLE_GRPC` | `OFF` | gRPC server wrapper |
+| `ORBIT_ENABLE_GRPC` | `OFF` | gRPC server wrapper (**experimental**, see [#22](https://github.com/varuns2903/orbit-framework/issues/22)) |
 | `ORBIT_BUILD_TESTS` | `ON` | Test suite (downloads GoogleTest) |
 | `ORBIT_BUILD_EXAMPLES` | `ON` | Example servers |
 | `ENABLE_SANITIZERS` | `ON` | ASan + UBSan in Debug builds |
@@ -569,8 +569,10 @@ not yet reached a frozen public API. **Treat 1.x as pre-stable.**
 - **Pin your version.** Use an exact tag with `FetchContent` or your package
   manager, and upgrade deliberately after reading the changelog.
 - **Subsystem maturity varies.** HTTP/1.1, routing, middleware, and WebSockets
-  are the best exercised. HTTP/2, HTTP/3, the gRPC wrapper, and parts of the
-  ORM have thinner test coverage — see [docs/ROADMAP.md](docs/ROADMAP.md) for
+  are the best exercised. HTTP/2, HTTP/3 and parts of the ORM have thinner
+  test coverage, and the gRPC wrapper is experimental: a minimal pass-through
+  to `grpc::ServerBuilder` (insecure credentials only), checked by a smoke
+  test rather than the main CI matrix — see [docs/ROADMAP.md](docs/ROADMAP.md) for
   the honest state of each area and
   [docs/loopholes_and_drawbacks.md](docs/loopholes_and_drawbacks.md) for known
   architectural caveats.
