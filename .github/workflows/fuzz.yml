@@ -70,7 +70,7 @@ jobs:
     - name: Build Fuzz Targets
       run: |
         cd build_fuzz
-        make fuzz_http_parser fuzz_http1_parser fuzz_websocket fuzz_multipart fuzz_http2 -j$(nproc)
+        make fuzz_http1_parser fuzz_websocket fuzz_multipart fuzz_http2 -j$(nproc)
 
     - name: Run fuzz targets
       # Short runs on pushes and pull requests; longer nightly.
@@ -78,7 +78,7 @@ jobs:
         SECONDS_PER_TARGET=${{ github.event_name == 'schedule' && 300 || 30 }}
         mkdir -p crashes
         status=0
-        for target in fuzz_http_parser fuzz_http1_parser fuzz_websocket fuzz_multipart fuzz_http2; do
+        for target in fuzz_http1_parser fuzz_websocket fuzz_multipart fuzz_http2; do
           echo "::group::$target ($SECONDS_PER_TARGET s)"
           ./build_fuzz/$target -max_total_time=$SECONDS_PER_TARGET -rss_limit_mb=2048 \
             -artifact_prefix=crashes/$target- || status=1

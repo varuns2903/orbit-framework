@@ -156,11 +156,11 @@ valgrind --leak-check=full --error-exitcode=1 ./build/http_server_tests
 
 ### Fuzzing
 
-`tests/fuzz/` holds libFuzzer targets for every hand-written parser:
+`tests/fuzz/` holds libFuzzer targets for every parser that reads untrusted input:
 
 | Target | Covers |
 |---|---|
-| `fuzz_http_parser` | HTTP/1.1 request parsing |
+| `fuzz_http1_parser` | HTTP/1.1 request parsing (llhttp), fed in pieces |
 | `fuzz_websocket` | WebSocket frames, fragmentation, UTF-8, close handling, permessage-deflate |
 | `fuzz_multipart` | `multipart/form-data`, in-memory and streaming |
 | `fuzz_http2` | HTTP/2 frames and HPACK headers through `Http2Session` |

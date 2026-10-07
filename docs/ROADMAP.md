@@ -25,7 +25,7 @@ and [CONTRIBUTING.md](../CONTRIBUTING.md).
 ## 2. Platform & Modularity
 - [x] **8. Make features modular and optional** — both the library and the examples honour the `ORBIT_ENABLE_*` flags; disabling a subsystem builds fewer examples rather than failing to link.
 - [x] **19. Support Linux, Windows, and macOS** 
-- [x] **9. HTTP/1.1**
+- [x] **9. HTTP/1.1** — parsed incrementally by [llhttp](https://github.com/nodejs/llhttp), strictly (RFC 9112; request-smuggling framing is rejected).
 - [x] **10. HTTP/2**
 - [x] **11. HTTP/3** (QUIC)
 - [x] **12. REST** (Router & Middleware)
