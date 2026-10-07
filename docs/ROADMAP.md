@@ -33,7 +33,7 @@ and [CONTRIBUTING.md](../CONTRIBUTING.md).
 - [x] **13. WebSockets**
 - [x] **55. Strongly-Typed WebSocket EventRouter (Auto-JSON mapping, Rooms & Session State)**
 - [x] **14. GraphQL** (HTTP adapter middleware)
-- [x] **15. gRPC** (GrpcServer wrapper) — built only with `ORBIT_ENABLE_GRPC=ON`, which CI does not exercise; support level under discussion in [#22](https://github.com/varuns2903/orbit-framework/issues/22).
+- [x] **15. gRPC** (GrpcServer wrapper) — **experimental** ([#22](https://github.com/varuns2903/orbit-framework/issues/22)): a minimal pass-through to `grpc::ServerBuilder` with insecure credentials only, built with `ORBIT_ENABLE_GRPC=ON`. The main CI builds without it; a smoke test (`tests/grpc`, `.github/workflows/grpc.yml`) compiles it against the distribution's gRPC and runs real RPCs. Without gRPC support, `start()` throws instead of silently doing nothing.
 - [x] **16. TLS/SSL** (OpenSSL integration)
 
 ## 2.5 Database & ORM

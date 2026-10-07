@@ -1,0 +1,10 @@
+syntax = "proto3";
+package orbittest;
+
+service Echo {
+  rpc Say (Msg) returns (Msg);
+}
+
+message Msg {
+  string text = 1;
+}
