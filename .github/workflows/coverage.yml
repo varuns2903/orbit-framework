@@ -101,7 +101,35 @@ jobs:
           --html-details coverage.html \
           --xml coverage.xml \
           --txt coverage.txt \
+          --json-summary coverage-summary.json \
           --print-summary
+
+    # The 85% line-coverage goal (#133) is a notice, not a gate: below it the
+    # run gets a warning annotation and a line in the summary, and still
+    # passes. Raise TARGET as coverage grows.
+    - name: Compare with the coverage target
+      if: always()
+      working-directory: build_cov
+      env:
+        TARGET: "85"
+      run: |
+        python3 - <<'PY'
+        import json, os
+        target = float(os.environ["TARGET"])
+        try:
+            pct = json.load(open("coverage-summary.json"))["line_percent"]
+        except (OSError, KeyError, ValueError) as e:
+            print(f"::warning title=Coverage target::No coverage summary to compare ({e})")
+            raise SystemExit(0)
+        msg = f"Line coverage is {pct:.1f}%; the target is {target:g}%."
+        if pct < target:
+            print(f"::warning title=Line coverage below target::{msg}")
+        else:
+            print(f"::notice title=Line coverage::{msg}")
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            mark = "⚠️ below target" if pct < target else "✅ meets target"
+            f.write(f"**Line coverage {pct:.1f}%** (target {target:g}%): {mark}\n\n")
+        PY
 
     - name: Publish summary
       if: always()

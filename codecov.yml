@@ -5,6 +5,8 @@ coverage:
     # Reported on pull requests, but never blocks a merge.
     project:
       default:
+        # Shown against the 85% line-coverage goal (#133), never enforced.
+        target: 85%
         informational: true
     patch:
       default:
