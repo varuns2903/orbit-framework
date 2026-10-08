@@ -5,6 +5,114 @@ All notable changes to the Orbit Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.0] - 2026-10-08
+
+Major release: the public API moves under `namespace orbit`, HTTP/1.1
+requests are parsed by llhttp, and an `App` can run several event loops.
+**Code written for 1.x keeps compiling** (see the upgrade notes); everyone on
+v1.6.x or earlier should upgrade for the security fix below.
+
+### Upgrade notes
+
+See [docs/migration.md](docs/migration.md#16x--200) for details and examples.
+
+- **Namespace.** Everything lives under `orbit` (`orbit::server::App`,
+  `orbit::http::HttpRequest`, ...). The 1.x names (`server::`, `http::`, ...)
+  remain available as aliases; define `ORBIT_NO_LEGACY_NAMESPACES` to drop
+  them if your own code uses names like `server` or `http`. The aliases will
+  be removed in 3.0. (#157)
+- **HTTP/1.1 parsing** is done by [llhttp](https://github.com/nodejs/llhttp),
+  a new build dependency handled by vcpkg, Conan and system packages. It is
+  strict: an unknown method token gets `501`; a repeated `Content-Length` is
+  rejected with `400` even when the values match; a request to a stream
+  route without `Content-Length` or `Transfer-Encoding` has no body, so its
+  stream ends at once. (#147, #148)
+- **Removed:** `http::parse_framing()`, `http::MessageFraming`,
+  `http::decode_chunked()` and `http::ChunkedStatus`.
+  `http::HttpParser::parse()` returns `std::nullopt` for an incomplete
+  request. (#152)
+- **Command line.** Invalid numeric values (`--port 70000`, `--port abc`,
+  `--threads 0` or `-1`) print an error and exit with status 1 instead of
+  wrapping, throwing or being accepted. (#136)
+- **gRPC wrapper** is experimental. Built without gRPC (the default),
+  `GrpcServer::start()` and `add_service()` throw; `start()` throws when the
+  server cannot start. (#146)
+- **Graceful shutdown.** The first `SIGTERM`/`SIGINT` (or `app.shutdown()`)
+  drains in-flight requests up to `shutdown_timeout`; a second signal stops at
+  once. (#107)
+- **Compression** matches `Accept-Encoding` tokens exactly and honours
+  q-values. (#95)
+
+### Security
+
+- Multipart uploads are written to a private per-process directory (mode
+  0700) under random 128-bit names, opened exclusively with mode 0600,
+  rather than to predictable names in a shared directory. (#115)
+
+### Added
+
+- **Event loops:** `ServerConfig::event_loops` / `--event-loops N` runs N
+  loops, each with its own `SO_REUSEPORT` listening socket (Linux; default
+  1). `max_connections` stays one exact limit across them.
+  `App::connections_per_event_loop()` reports their load. (#156)
+- **HTTP:** asynchronous outbound HTTP client (#130); form fields,
+  `Expect: 100-continue`, multipart uploads streamed to disk (#121); brotli
+  and zstd compression (#122).
+- **HTTP/2 and HTTP/3:** h2c with prior knowledge (#123); HTTP/3 requests go
+  through the Router (#119).
+- **TLS:** SNI certificates, and reloading certificates without a restart
+  (#124).
+- **Middleware:** `security_headers()` and `trusted_proxies()` (#108); a
+  session store API with memory and Redis stores (#109); RS256 and ES256 for
+  `jwt_auth`, with PEM keys or a JWKS URL (#110).
+- **Server:** graceful shutdown with a deadline, and health endpoints (#107);
+  configurable request limits and WebSocket keep-alive pings (#111).
+- **Observability:** JSON logs, access log, request IDs, tracing and richer
+  metrics (#113).
+- **Database:** typed PostgreSQL rows, a prepared-statement cache,
+  transactions, timeouts and reconnect (#125); pool health checks and
+  reconnect with backoff (#126); ORM `update`, `remove`, `count`,
+  `order_by`, `limit`/`offset` and identifier quoting (#127).
+- **Build:** backend libraries are optional vcpkg features, all enabled by
+  default (#100).
+
+### Changed
+
+- **WebSocket:** RFC 6455 conformance and thread-safe sending (#94).
+- **OpenAPI docs page:** Swagger UI is pinned with Subresource Integrity, and
+  its assets can be self-hosted (#102).
+- **App:** start/stop data races fixed; each `App` has its own OpenAPI
+  registry; signals reach every `App` (#106).
+
+### Fixed
+
+- An `on_error` handler that throws no longer leaves the client without a
+  response (#145).
+- Keep-alive connections no longer hang after a streamed upload (#148).
+- Creating a `MongoClient` after another was destroyed no longer crashes
+  (#142).
+- Redis `get()` of a key holding `""` returns the empty value instead of
+  "missing" (#142).
+- `/swagger.json` is valid JSON for inline response schemas and control
+  characters (#143).
+- A pooled plain connection with unread data is no longer reused (#143).
+- `/metrics` values keep full precision past a million (#139).
+- io_uring releases requests still in flight at shutdown (#135).
+- HTTP/2 closes finished sessions and dispatches requests with trailers
+  (#116); QUIC transport fixes for acknowledged data, flow control, timers
+  and connection cleanup (#117); `Connection: close` is sent as soon as
+  shutdown is requested (#118); `Content-Length: 0` is sent for empty
+  response bodies (#129).
+
+### Testing and CI
+
+- Line coverage rose from 27% to 90%; the suite runs on both epoll and
+  io_uring, against real PostgreSQL, Redis, MariaDB and MongoDB servers
+  (#134–#144, #135, #142).
+- Fuzzing for WebSocket, multipart, HTTP/2 and the llhttp parser (#114,
+  #147); h2spec and Autobahn in CI (#116, #138); ASan/UBSan and TSan jobs
+  (#99).
+
 ## [v1.6.0] - 2026-10-03
 
 Security and robustness release. **Everyone on v1.5.1 or earlier should
@@ -372,6 +480,7 @@ project, so **upgrading from v1.4.0 or earlier is strongly recommended**.
 - CMake build system with install/export rules.
 - `nlohmann/json` integration for JSON request/response handling.
 
+[v2.0.0]: https://github.com/varuns2903/orbit-framework/compare/v1.6.0...v2.0.0
 [v1.6.0]: https://github.com/varuns2903/orbit-framework/compare/v1.5.1...v1.6.0
 [v1.5.1]: https://github.com/varuns2903/orbit-framework/compare/v1.5.0...v1.5.1
 [v1.5.0]: https://github.com/varuns2903/orbit-framework/compare/v1.4.0...v1.5.0

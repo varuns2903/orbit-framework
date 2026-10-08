@@ -26,10 +26,10 @@ def create_project(project_name, use_fetch):
 #include <iostream>
 
 int main() {
-    config::ServerConfig config;
+    orbit::config::ServerConfig config;
     config.port = 3000;
 
-    server::App app(config);
+    orbit::server::App app(config);
 
     app.get("/", []() -> std::string {
         return "Hello from Orbit Framework!";
@@ -61,7 +61,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 FetchContent_Declare(
   OrbitFramework
   GIT_REPOSITORY https://github.com/varuns2903/orbit-framework.git
-  GIT_TAG        v1.6.0
+  GIT_TAG        v2.0.0
 )
 FetchContent_MakeAvailable(OrbitFramework)
 """

@@ -35,7 +35,7 @@ $Version = $env:ORBIT_VERSION
 if (-not $Version) {
     $Version = (Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$Repo/releases/latest").tag_name
     if (-not $Version) {
-        throw "Could not determine the latest release. Set ORBIT_VERSION (e.g. `$env:ORBIT_VERSION = 'v1.6.0')."
+        throw "Could not determine the latest release. Set ORBIT_VERSION (e.g. `$env:ORBIT_VERSION = 'v2.0.0')."
     }
 }
 if ($Version -eq "main") {
