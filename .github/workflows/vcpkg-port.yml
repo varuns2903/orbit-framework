@@ -83,8 +83,10 @@ jobs:
         ./vcpkg/vcpkg format-manifest /tmp/port.json
         diff -u packaging/vcpkg-port/orbit-framework/vcpkg.json /tmp/port.json
 
+    # --classic: the repository's own vcpkg.json would otherwise put vcpkg
+    # in manifest mode, which refuses package names on the command line.
     - name: Install the port (default features)
-      run: ./vcpkg/vcpkg install orbit-framework --overlay-ports=overlay --triplet x64-linux --disable-metrics
+      run: ./vcpkg/vcpkg install orbit-framework --classic --overlay-ports=overlay --triplet x64-linux --disable-metrics
 
     - name: Print build logs on failure
       if: failure()
