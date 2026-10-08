@@ -94,14 +94,21 @@ struct Item {
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Item, name, qty)
 
 // Stands in for MysqlClient: escaping instead of binding marks the dialect.
+// Records the last SQL it was given and returns `next_result`.
 struct FakeMysql {
+    static inline std::string last_sql;
+    static inline orbit::database::ResultSet next_result;
     struct Awaiter {
+        orbit::database::ResultSet result;
         bool await_ready() const { return true; }
         void await_suspend(std::coroutine_handle<>) {}
-        orbit::database::ResultSet await_resume() { return {}; }
+        orbit::database::ResultSet await_resume() { return result; }
     };
     std::string escape(const std::string& s) { return s; }
-    Awaiter query_async(const std::string&) { return {}; }
+    Awaiter query_async(const std::string& sql) {
+        last_sql = sql;
+        return {next_result};
+    }
 };
 
 using PgItems = QueryBuilder<orbit::database::PostgresClient, Item>;
@@ -177,4 +184,127 @@ TEST(OrmBuilderTest, DeleteAndCount) {
     EXPECT_EQ(q.delete_statement().sql, "DELETE FROM items WHERE (qty <= ? OR name = ?)");
     EXPECT_EQ(q.count_statement().sql, "SELECT COUNT(*) AS n FROM items WHERE (qty <= ? OR name = ?)");
     EXPECT_EQ(q.count_statement().params, P({"0", "old"}));
+}
+
+
+// ---- primary keys, errors and typed rows (#187)
+
+namespace {
+
+struct Keyed {
+    int id = 0;
+    std::string name;
+    int qty = 0;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Keyed, id, name, qty)
+
+struct Coded {
+    std::string code;
+    std::string name;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Coded, code, name)
+
+struct Typed {
+    int id = 0;
+    std::string title;
+    bool done = false;
+    double score = 0;
+    int missing = 7;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Typed, id, title, done, score, missing)
+
+orbit::database::ResultSet make_rows(const std::vector<std::string>& cols,
+                                     const std::vector<std::vector<std::optional<std::string>>>& rows) {
+    auto map = std::make_shared<std::unordered_map<std::string, size_t>>();
+    for (size_t i = 0; i < cols.size(); ++i) (*map)[cols[i]] = i;
+    std::vector<orbit::database::Row> out;
+    for (const auto& r : rows) out.emplace_back(r, map);
+    return orbit::database::ResultSet(std::move(out));
+}
+
+} // namespace
+
+TEST(OrmKeyTest, InsertLeavesAnUnsetIdToTheDatabase) {
+    QueryBuilder<orbit::database::PostgresClient, Keyed> q(nullptr, "items");
+    Statement unset = q.insert_statement(Keyed{0, "a", 1});
+    EXPECT_EQ(unset.sql, "INSERT INTO items (name, qty) VALUES (?, ?)");
+    EXPECT_EQ(unset.params, P({"a", "1"}));
+
+    Statement set = q.insert_statement(Keyed{5, "b", 2});
+    EXPECT_EQ(set.sql, "INSERT INTO items (id, name, qty) VALUES (?, ?, ?)");
+
+    EXPECT_EQ(q.insert_statement(Keyed{0, "c", 3}, true).sql,
+              "INSERT INTO items (name, qty) VALUES (?, ?) RETURNING *");
+}
+
+TEST(OrmKeyTest, CustomPrimaryKey) {
+    QueryBuilder<orbit::database::PostgresClient, Coded> q(nullptr, "codes");
+    q.primary_key("code");
+    EXPECT_EQ(q.insert_statement(Coded{"", "x"}).sql, "INSERT INTO codes (name) VALUES (?)");
+    EXPECT_EQ(q.insert_statement(Coded{"AB", "x"}).sql, "INSERT INTO codes (code, name) VALUES (?, ?)");
+    EXPECT_THROW(q.primary_key("code; DROP TABLE codes"), std::invalid_argument);
+}
+
+TEST(OrmKeyTest, UpdateFromAModelNeverRewritesTheKey) {
+    auto db = std::make_shared<FakeMysql>();
+    FakeMysql::next_result = orbit::database::ResultSet({}, 1);
+    QueryBuilder<FakeMysql, Keyed> q(db, "items");
+    q.where(Col("id") == 9);
+    auto updating = q.update_async(Keyed{0, "renamed", 4});
+    EXPECT_EQ(updating.await_resume(), 1u);
+    const std::string& sql = FakeMysql::last_sql;
+    auto set = sql.find(" SET "), where = sql.find(" WHERE ");
+    ASSERT_NE(set, std::string::npos) << sql;
+    ASSERT_NE(where, std::string::npos) << sql;
+    std::string assignments = sql.substr(set, where - set);
+    EXPECT_EQ(assignments.find("id ="), std::string::npos) << sql;
+    EXPECT_NE(assignments.find("name = 'renamed'"), std::string::npos) << sql;
+}
+
+TEST(OrmErrorTest, FailedQueriesThrowInsteadOfReportingNothing) {
+    auto db = std::make_shared<FakeMysql>();
+    FakeMysql::next_result = orbit::database::ResultSet::failure("duplicate key value violates unique constraint");
+    QueryBuilder<FakeMysql, Keyed> q(db, "items");
+
+    auto inserting = q.insert_async(Keyed{0, "a", 1});
+    EXPECT_THROW(inserting.await_resume(), DatabaseError);
+    auto selecting = q.get_async();
+    EXPECT_THROW(selecting.await_resume(), DatabaseError);
+    auto counting = q.count_async();
+    EXPECT_THROW(counting.await_resume(), DatabaseError);
+    auto creating = q.create_async(Keyed{0, "a", 1});
+    try {
+        creating.await_resume();
+        ADD_FAILURE() << "create_async did not throw";
+    } catch (const DatabaseError& e) {
+        EXPECT_NE(std::string(e.what()).find("duplicate key"), std::string::npos);
+    }
+    FakeMysql::next_result = {};
+}
+
+TEST(OrmRowsTest, ColumnsFollowTheModelFieldTypes) {
+    // Text that looks like a number or a boolean stays text in a string field.
+    auto rs = make_rows({"id", "title", "done", "score", "extra"},
+                        {{"1", "42", "t", "1.5", "ignored"},
+                         {"2", "007", "false", "-0.25", "x"},
+                         {"3", "true", "1", "3", "y"}});
+    auto rows = detail::rows_to_models<Typed>(rs);
+    ASSERT_EQ(rows.size(), 3u);
+    EXPECT_EQ(rows[0].id, 1);
+    EXPECT_EQ(rows[0].title, "42");
+    EXPECT_TRUE(rows[0].done);
+    EXPECT_DOUBLE_EQ(rows[0].score, 1.5);
+    EXPECT_EQ(rows[0].missing, 7) << "a field without a column keeps its default";
+    EXPECT_EQ(rows[1].title, "007");
+    EXPECT_FALSE(rows[1].done);
+    EXPECT_DOUBLE_EQ(rows[1].score, -0.25);
+    EXPECT_EQ(rows[2].title, "true");
+    EXPECT_TRUE(rows[2].done);
+}
+
+TEST(OrmRowsTest, RowsThatDoNotFitTheModelThrowDatabaseError) {
+    auto null_id = make_rows({"id", "title"}, {{std::nullopt, "a"}});
+    EXPECT_THROW(detail::rows_to_models<Typed>(null_id), DatabaseError);
+    auto not_a_number = make_rows({"id", "title"}, {{"abc", "a"}});
+    EXPECT_THROW(detail::rows_to_models<Typed>(not_a_number), DatabaseError);
 }

@@ -22,6 +22,15 @@
  * 
  * @param Type The C++ struct/class name.
  */
+/// Like ORBIT_REGISTER_MODEL, for a model whose primary key column is not "id".
+#define ORBIT_REGISTER_MODEL_WITH_KEY(Type, TableName, KeyColumn) \
+    template <typename DBClient> \
+    inline ::orbit::orm::QueryBuilder<DBClient, Type> query_##Type(std::shared_ptr<DBClient> db) { \
+        ::orbit::orm::QueryBuilder<DBClient, Type> q(db, TableName); \
+        q.primary_key(KeyColumn); \
+        return q; \
+    }
+
 #define ORBIT_REGISTER_MONGO_MODEL(Type) \
     inline ::orbit::orm::MongoQueryBuilder<Type> query_mongo_##Type(std::shared_ptr<::orbit::database::MongoClient> db) { \
         return ::orbit::orm::MongoQueryBuilder<Type>(db); \

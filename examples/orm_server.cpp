@@ -34,21 +34,26 @@ int main() {
         auto pg_client = std::make_shared<PostgresClient>(&writer->proactor(), "dbname=postgres user=postgres");
         
         // C++20 Coroutine lambda
-        auto coro = [writer, pg_client]() -> orbit::concurrency::Task {
+        // The writer is a parameter, not a capture: that is how an exception in
+        // the coroutine reaches the error handler (see docs/database.md).
+        auto coro = [pg_client](std::shared_ptr<ResponseWriter> res_writer) -> orbit::concurrency::Task {
             bool connected = co_await connect_async(pg_client);
             if (!connected) {
                 HttpResponse out;
                 out.status(HttpStatus::InternalServerError).send("DB Connection Failed");
-                writer->send(std::move(out));
+                res_writer->send(std::move(out));
                 co_return;
             }
 
             // Create table (Raw query)
             co_await query_async(pg_client, "CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(50), age INT, is_active BOOLEAN);");
 
-            // ORM INSERT
+            // ORM INSERT: id 0 is "unset", so the database generates it, and
+            // create_async() returns the stored row with the new id.
             User new_user{0, "john_doe", 28, true};
-            co_await query_User(pg_client).insert_async(new_user);
+            auto create = query_User(pg_client).create_async(new_user);
+            User created = co_await create;
+            std::cout << "Created user " << created.id << "\n";
 
             // ORM SELECT with Expression Templates (C++ DSL)
             std::vector<User> active_users = co_await query_User(pg_client)
@@ -60,10 +65,10 @@ int main() {
             HttpResponse out;
             out.status(HttpStatus::OK).send(response.dump());
             out.headers["Content-Type"] = "application/json";
-            writer->send(std::move(out));
+            res_writer->send(std::move(out));
         };
         
-        coro(); // Execute
+        coro(writer); // Execute
     });
 
     std::cout << "Starting ORM Server on port 8082...\n";

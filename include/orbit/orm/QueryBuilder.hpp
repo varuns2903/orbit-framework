@@ -11,6 +11,7 @@
 #include <type_traits>
 #include <limits>
 #include <charconv>
+#include <cstdlib>
 #include <orbit/http/json.hpp>
 #include <orbit/database/ResultSet.hpp>
 
@@ -259,6 +260,112 @@ struct Statement {
 /// Sort direction for QueryBuilder::order_by().
 enum class Order { Asc, Desc };
 
+/**
+ * @brief A query run by the ORM failed, or its rows did not fit the model.
+ *
+ * Thrown from co_await on get_async(), count_async(), insert_async(),
+ * create_async(), update_async() and remove_async(). Inside a coroutine
+ * handler it reaches the router's error handling (on_error, else a 500).
+ */
+class DatabaseError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+namespace detail {
+
+inline void throw_if_failed(const database::ResultSet& rs) {
+    if (!rs.ok()) throw DatabaseError(rs.error());
+}
+
+/// A key that the database should generate: null, 0, or an empty string.
+inline bool is_unset_key(const nlohmann::json& v) {
+    return v.is_null() || (v.is_number_integer() && v.get<long long>() == 0) ||
+           (v.is_number_unsigned() && v.get<unsigned long long>() == 0) ||
+           (v.is_string() && v.get<std::string>().empty());
+}
+
+/// Converts a column's text to the JSON type of the model field @p proto.
+inline nlohmann::json typed_value(const std::string& text, const nlohmann::json& proto) {
+    switch (proto.type()) {
+        case nlohmann::json::value_t::string:
+            return text;
+        case nlohmann::json::value_t::boolean:
+            if (text == "t" || text == "true" || text == "TRUE" || text == "1") return true;
+            if (text == "f" || text == "false" || text == "FALSE" || text == "0") return false;
+            break;
+        case nlohmann::json::value_t::number_integer: {
+            long long v = 0;
+            auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), v);
+            if (ec == std::errc() && end == text.data() + text.size()) return v;
+            break;
+        }
+        case nlohmann::json::value_t::number_unsigned: {
+            unsigned long long v = 0;
+            auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), v);
+            if (ec == std::errc() && end == text.data() + text.size()) return v;
+            break;
+        }
+        case nlohmann::json::value_t::number_float: {
+            char* end = nullptr;
+            double v = std::strtod(text.c_str(), &end);
+            if (!text.empty() && end == text.c_str() + text.size()) return v;
+            break;
+        }
+        case nlohmann::json::value_t::object:
+        case nlohmann::json::value_t::array: {
+            auto parsed = nlohmann::json::parse(text, nullptr, false);
+            if (!parsed.is_discarded()) return parsed;
+            break;
+        }
+        default:
+            break;
+    }
+    return text; // leaves the mismatch to the model's from_json (reported below)
+}
+
+/**
+ * @brief Maps result rows to models, converting each column by the type of
+ *        the model's field rather than by guessing from its text.
+ *
+ * Every column arrives as text. Guessing turned a string column holding
+ * "42" or "007" into a number, which a std::string field then failed to
+ * read. Columns the model does not declare are ignored; fields with no
+ * column keep the value of a default-constructed model.
+ *
+ * @throws DatabaseError if a row cannot be read into ModelType (e.g. NULL in
+ *         a non-optional field).
+ */
+template <typename ModelType>
+std::vector<ModelType> rows_to_models(const database::ResultSet& rs) {
+    std::vector<ModelType> out;
+    out.reserve(rs.size());
+    nlohmann::json shape;
+    if constexpr (std::is_default_constructible_v<ModelType>) shape = ModelType{};
+    for (const auto& row : rs.rows()) {
+        nlohmann::json j = row.to_json();
+        if (shape.is_object()) {
+            for (const auto& [key, proto] : shape.items()) {
+                auto it = j.find(key);
+                if (it == j.end()) {
+                    j[key] = proto; // column not selected: the field's default
+                } else if (!it->is_null()) {
+                    auto text = row.get(key);
+                    if (text) *it = typed_value(*text, proto);
+                }
+            }
+        }
+        try {
+            out.push_back(j.get<ModelType>());
+        } catch (const nlohmann::json::exception& e) {
+            throw DatabaseError(std::string("row does not fit the model: ") + e.what());
+        }
+    }
+    return out;
+}
+
+} // namespace detail
+
 template <typename DBClient, typename ModelType>
 struct QueryGetAwaiter {
     using NativeAwaiter = decltype(do_query_async(std::declval<std::shared_ptr<DBClient>>(), std::declval<std::string>(), std::declval<Params>()));
@@ -269,7 +376,8 @@ struct QueryGetAwaiter {
 
     std::vector<ModelType> await_resume() {
         database::ResultSet rs = native_awaiter.await_resume();
-        return rs.to_json().get<std::vector<ModelType>>();
+        detail::throw_if_failed(rs);
+        return detail::rows_to_models<ModelType>(rs);
     }
 };
 
@@ -283,6 +391,7 @@ struct QueryInsertAwaiter {
 
     uint64_t await_resume() {
         database::ResultSet rs = native_awaiter.await_resume();
+        detail::throw_if_failed(rs); // a failed write is an error, not "0 rows"
         return rs.affected_rows();
     }
 };
@@ -297,11 +406,30 @@ struct QueryCountAwaiter {
 
     uint64_t await_resume() {
         database::ResultSet rs = native_awaiter.await_resume();
+        detail::throw_if_failed(rs);
         if (rs.size() == 0) return 0;
         std::string text = rs[0].get(0).value_or("0");
         uint64_t n = 0;
         std::from_chars(text.data(), text.data() + text.size(), n);
         return n;
+    }
+};
+
+/// Resumes with the row an INSERT ... RETURNING * stored.
+template <typename DBClient, typename ModelType>
+struct QueryCreateAwaiter {
+    using NativeAwaiter = decltype(do_query_async(std::declval<std::shared_ptr<DBClient>>(), std::declval<std::string>(), std::declval<Params>()));
+    NativeAwaiter native_awaiter;
+
+    bool await_ready() const { return native_awaiter.await_ready(); }
+    void await_suspend(std::coroutine_handle<> h) { native_awaiter.await_suspend(h); }
+
+    ModelType await_resume() {
+        database::ResultSet rs = native_awaiter.await_resume();
+        detail::throw_if_failed(rs);
+        auto rows = detail::rows_to_models<ModelType>(rs);
+        if (rows.empty()) throw DatabaseError("INSERT ... RETURNING returned no row");
+        return std::move(rows.front());
     }
 };
 
@@ -364,6 +492,48 @@ public:
     QueryBuilder& all() {
         all_rows_ = true;
         return *this;
+    }
+
+    /**
+     * @brief The model's primary key column (default "id").
+     *
+     * insert_async() and create_async() leave the key out when it is unset
+     * (null, 0 or an empty string) so the database generates it, and
+     * update_async(model) never rewrites it.
+     * @throws std::invalid_argument if @p column is not a plain identifier.
+     */
+    QueryBuilder& primary_key(const std::string& column) {
+        detail::ident(column); // validates
+        primary_key_ = column;
+        return *this;
+    }
+
+    /**
+     * @brief The INSERT that insert_async() runs (create_async() adds
+     *        `RETURNING *`). An unset primary key is left out.
+     * @throws std::invalid_argument if the model does not serialise to a
+     *         JSON object with at least one column to insert.
+     */
+    Statement insert_statement(const ModelType& model, bool returning = false) const {
+        nlohmann::json j = model;
+        if (!j.is_object()) throw std::invalid_argument("a model must serialise to a JSON object");
+        auto key = j.find(primary_key_);
+        if (key != j.end() && detail::is_unset_key(*key)) j.erase(key);
+        if (j.empty()) throw std::invalid_argument("insert needs at least one column besides an unset primary key");
+        std::string cols;
+        std::string vals;
+        Statement st;
+        bool first = true;
+        for (auto& el : j.items()) {
+            if (!first) { cols += ", "; vals += ", "; }
+            cols += detail::ident(el.key());
+            vals += "?";
+            st.params.push_back(detail::json_to_param(el.value()));
+            first = false;
+        }
+        st.sql = "INSERT INTO " + table_ + " (" + cols + ") VALUES (" + vals + ")";
+        if (returning) st.sql += " RETURNING *";
+        return finish(st);
     }
 
     /// The SELECT that get_async() runs (placeholders as `?`).
@@ -448,9 +618,12 @@ public:
         return QueryInsertAwaiter<DBClient, ModelType>{ do_query_async(db_, st.sql, st.params) };
     }
 
-    /// Updates the matching rows to the fields of @p model.
+    /// Updates the matching rows to the fields of @p model, except its
+    /// primary key (a default-valued id would otherwise overwrite the key).
     QueryInsertAwaiter<DBClient, ModelType> update_async(const ModelType& model) {
-        return update_async(nlohmann::json(model));
+        nlohmann::json changes = model;
+        if (changes.is_object()) changes.erase(primary_key_);
+        return update_async(changes);
     }
 
     /// Deletes the matching rows; resumes with the number affected.
@@ -463,23 +636,31 @@ public:
      * @brief Executes an INSERT query for a model, binding every value.
      * @throws std::invalid_argument if a field name is not a plain identifier.
      */
+    /**
+     * @brief Inserts @p model; resumes with the number of rows inserted (1).
+     * An unset primary key (see primary_key()) is left for the database.
+     * @throws DatabaseError (on co_await) if the INSERT fails.
+     */
     QueryInsertAwaiter<DBClient, ModelType> insert_async(const ModelType& model) {
-        nlohmann::json j = model;
-        std::string cols;
-        std::string vals;
-        Params params;
+        Statement st = insert_statement(model);
+        return QueryInsertAwaiter<DBClient, ModelType>{ do_query_async(db_, st.sql, st.params) };
+    }
 
-        bool first = true;
-        for (auto& el : j.items()) {
-            if (!first) { cols += ", "; vals += ", "; }
-            cols += detail::ident(el.key());
-            vals += "?";
-            params.push_back(detail::json_to_param(el.value()));
-            first = false;
-        }
-
-        std::string sql = "INSERT INTO " + table_ + " (" + cols + ") VALUES (" + vals + ");";
-        return QueryInsertAwaiter<DBClient, ModelType>{ do_query_async(db_, sql, params) };
+    /**
+     * @brief Inserts @p model and resumes with the row as stored, including
+     *        the generated primary key and column defaults.
+     *
+     * Uses `INSERT ... RETURNING *`: PostgreSQL, and MariaDB 10.5 or later
+     * (MySQL Server has no RETURNING and reports an error).
+     * @code
+     * Item created = co_await query_Item(db).create_async(Item{0, "widget", 3});
+     * // created.id is the new key
+     * @endcode
+     * @throws DatabaseError (on co_await) if the INSERT fails.
+     */
+    QueryCreateAwaiter<DBClient, ModelType> create_async(const ModelType& model) {
+        Statement st = insert_statement(model, true);
+        return QueryCreateAwaiter<DBClient, ModelType>{ do_query_async(db_, st.sql, st.params) };
     }
 
 private:
@@ -490,6 +671,7 @@ private:
     std::optional<uint64_t> limit_;
     std::optional<uint64_t> offset_;
     bool all_rows_ = false;
+    std::string primary_key_ = "id";
 
     void append_where(Statement& st) const {
         if (wheres_.empty()) return;

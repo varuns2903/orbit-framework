@@ -22,17 +22,19 @@ int main(int argc, char* argv[]) {
 
     // Run migrations on startup!
     app.get("/migrate", [](HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> res) {
-        auto coro = [res]() -> orbit::concurrency::Task {
-            auto db = std::make_shared<PostgresClient>(&res->proactor(), "dbname=postgres");
+        // The writer is a parameter, not a capture, so an exception in the
+        // coroutine reaches the error handler (see docs/database.md).
+        auto coro = [](std::shared_ptr<ResponseWriter> writer) -> orbit::concurrency::Task {
+            auto db = std::make_shared<PostgresClient>(&writer->proactor(), "dbname=postgres");
             bool connected = co_await connect_async(db);
             
             if (connected) {
-                MigrationRunner<PostgresClient>::run_migrations(db, "migrations", res);
+                MigrationRunner<PostgresClient>::run_migrations(db, "migrations", writer);
             } else {
-                res->send(HttpResponse().status(HttpStatus::InternalServerError).send("DB Connection Failed"));
+                writer->send(HttpResponse().status(HttpStatus::InternalServerError).send("DB Connection Failed"));
             }
         };
-        coro();
+        coro(res);
     });
 
     app.listen();

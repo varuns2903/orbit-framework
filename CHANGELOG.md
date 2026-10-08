@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **ORM `create_async(model)`** inserts with `RETURNING *` and resumes with the
+  stored row, generated key included; `insert_statement()` shows the SQL;
+  `primary_key(column)` / `ORBIT_REGISTER_MODEL_WITH_KEY` for keys other than
+  `id` (#187).
+
 ### Changed
 
+- **ORM queries that fail throw `orbit::orm::DatabaseError`** (#187). They used
+  to resume with 0 rows or an empty list, which looked like success. Catch
+  `DatabaseError` where a failure is expected (a duplicate key); elsewhere it
+  reaches `on_error` or becomes a 500.
 - **HTTP/3 is off by default.** It is experimental, so `ORBIT_ENABLE_HTTP3`
   now defaults to `OFF` and `http3` is no longer a default vcpkg feature;
   default builds no longer compile ngtcp2 and nghttp3. To keep HTTP/3, build
@@ -35,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first deadlines passed). Cancelling now frees the timer, and the queue is
   rebuilt when cancelled entries dominate it, so it stays proportional to
   the number of connections.
+- **ORM inserts leave an unset primary key to the database** (#187). Every
+  field was inserted, so a model with `id = 0` collided on the second insert
+  (`examples/orm_server.cpp` failed on its second request), and
+  `update_async(model)` rewrote the key. Rows are also read by the model's
+  field types, so a string column holding `"42"` no longer fails to load.
 
 ## [v2.0.0] - 2026-10-08
 

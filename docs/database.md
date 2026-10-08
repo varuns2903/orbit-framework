@@ -67,7 +67,45 @@ uint64_t changed = co_await query_Item(db).where(orbit::orm::Col("name") == "wid
 uint64_t removed = co_await query_Item(db).where(orbit::orm::Col("qty") <= 0).remove_async();
 ```
 
-`update_async()` and `remove_async()` refuse to run (`std::logic_error`) without a `where()` condition, so a forgotten filter cannot rewrite or empty a table; call `.all()` to really affect every row. Table and column names must be plain identifiers; SQL reserved words among them (`user`, `order`, `group`, ...) are quoted for the database (`"user"` on PostgreSQL, `` `user` `` on MySQL), while other names stay unquoted so PostgreSQL's usual lower-case folding still applies. `select_statement()`, `count_statement()`, `update_statement()` and `delete_statement()` return the generated SQL and parameters without running it.
+`update_async()` and `remove_async()` refuse to run (`std::logic_error`) without a `where()` condition, so a forgotten filter cannot rewrite or empty a table; call `.all()` to really affect every row. Table and column names must be plain identifiers; SQL reserved words among them (`user`, `order`, `group`, ...) are quoted for the database (`"user"` on PostgreSQL, `` `user` `` on MySQL), while other names stay unquoted so PostgreSQL's usual lower-case folding still applies. `select_statement()`, `count_statement()`, `insert_statement()`, `update_statement()` and `delete_statement()` return the generated SQL and parameters without running it.
+
+### Primary keys and generated ids
+
+A model's primary key is the `id` field unless it says otherwise. When the key
+is **unset** — `0`, `""` or null — `insert_async()` leaves it out so the
+database generates it, and `update_async(model)` never rewrites it:
+
+```cpp
+struct Ticket { int id = 0; std::string title; int qty = 0; };
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Ticket, id, title, qty)
+ORBIT_REGISTER_MODEL(Ticket, "tickets")      // key: "id"
+
+// INSERT ... RETURNING *: resumes with the stored row, generated id included
+Ticket created = co_await query_Ticket(db).create_async(Ticket{0, "write docs", 1});
+
+// Another key column:
+ORBIT_REGISTER_MODEL_WITH_KEY(Sku, "skus", "code")   // or .primary_key("code")
+```
+
+`create_async()` uses `RETURNING`, which PostgreSQL and MariaDB 10.5+ support;
+MySQL Server does not and reports an error.
+
+### Errors and types
+
+A query that fails throws `orbit::orm::DatabaseError` from the `co_await`
+(`get_async`, `count_async`, `insert_async`, `create_async`, `update_async`,
+`remove_async`), with the database's message. It no longer looks like "0 rows"
+or an empty result. In a coroutine handler an uncaught `DatabaseError` reaches
+the router's error handling (`on_error`, else a 500); catch it where a failure
+has a meaning of its own, such as a duplicate key.
+
+Rows are read by the model's field types: a `std::string` field receives the
+column's text even when it looks like a number (`"42"`, `"007"`), integers and
+floats are parsed exactly, booleans accept `t`/`f`, `true`/`false` and `1`/`0`,
+and JSON object or array fields parse JSON text. Columns the model does not
+declare are ignored, and a field with no column in the result keeps the value
+of a default-constructed model. A value that does not fit — `NULL` in a
+non-optional field, `"abc"` in an `int` — throws `DatabaseError`.
 
 ## Parameters and SQL Injection
 
@@ -159,6 +197,18 @@ Two cases are only logged:
 - the coroutine has no `ResponseWriter` parameter, e.g. a background helper.
 
 A coroutine exception never terminates the server.
+
+Pass the writer to the coroutine as a **parameter**, not a lambda capture: the
+coroutine finds its request through its parameters.
+
+```cpp
+app.get("/items", [](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
+    auto load = [](std::shared_ptr<ResponseWriter> writer) -> orbit::concurrency::Task {
+        // ... co_await ...; an exception here becomes a 500
+    };
+    load(w);            // not: [w]() -> Task { ... }()
+});
+```
 
 ## Connection Pools
 
