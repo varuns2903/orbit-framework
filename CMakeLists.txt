@@ -208,9 +208,11 @@ set(SERVER_SOURCES
     ${PROACTOR_SOURCES}
     src/network/UdpSocket.cpp
     src/concurrency/ThreadPool.cpp
+    src/concurrency/Task.cpp
     src/http/HttpParser.cpp
     src/http/Http1Parser.cpp
     src/http/HttpResponse.cpp
+    src/http/ResponseWriter.cpp
     src/http/MultipartForm.cpp
     src/http/MultipartStreamParser.cpp
     src/http/MultipartUpload.cpp

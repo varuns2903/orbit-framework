@@ -142,6 +142,24 @@ app.get("/db", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
 });
 ```
 
+## Errors in Coroutine Handlers
+
+An exception that escapes a coroutine handler — before or after a `co_await`,
+on whichever thread resumed it — is handled like one from a synchronous
+handler: the router's `on_error` handler runs, or else the client gets
+`500 Internal Server Error`. The exception text goes to the log, never to the
+client. This works for any `Task` coroutine that takes the request's
+`std::shared_ptr<ResponseWriter>` as a parameter (that is how the error is
+routed back to its request).
+
+Two cases are only logged:
+
+- the coroutine had already sent its response, or part of it (a second
+  response is impossible);
+- the coroutine has no `ResponseWriter` parameter, e.g. a background helper.
+
+A coroutine exception never terminates the server.
+
 ## Connection Pools
 
 `orbit::database::ConnectionPool` hands out connected clients and takes them back. Given a health check, it also drops clients that have stopped working (a database restart, a failover, an idle connection cut by a firewall) and connects replacements in the background, retrying failed attempts with exponential backoff:

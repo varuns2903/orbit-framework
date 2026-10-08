@@ -6,6 +6,7 @@
 #include <orbit/http/ResponseWriter.hpp>
 #include <orbit/openapi/OpenApi.hpp>
 #include <functional>
+#include <exception>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -136,6 +137,14 @@ public:
     void route(http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> response_writer) const;
 
     bool has_ws_route(const std::string& path) const;
+
+private:
+    // Error handling for an exception from a route, middleware or (later,
+    // through the writer's error sink) an asynchronous handler.
+    void handle_exception(std::exception_ptr error, http::HttpRequest& request,
+                          std::shared_ptr<http::ResponseWriter> response_writer) const;
+
+public:
     WsHandler get_ws_route(const std::string& path) const;
 
     // Check if a given path is registered as a streaming route
