@@ -392,4 +392,125 @@ TEST_F(OrmPostgresTest, UpdateDeleteOrderLimitCountAndQuoting) {
     EXPECT_EQ(r.nonzero_after_all, 0u);
 }
 
+// ---- primary keys, RETURNING and errors (#187)
+
+namespace {
+
+struct Ticket {
+    int id = 0;
+    std::string title;
+    int qty = 0;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Ticket, id, title, qty)
+
+struct KeyResults {
+    bool connected = false;
+    Ticket created;
+    uint64_t second_insert_rows = 0;
+    size_t rows_after = 0;
+    std::string title_after_update;
+    int id_after_update = -1;
+    bool insert_error_thrown = false;
+    std::string insert_error;
+    bool bad_row_thrown = false;
+};
+
+orbit::concurrency::Task key_scenario(std::shared_ptr<orbit::database::PostgresClient> db, KeyResults* r,
+                                      std::promise<void>* done) {
+    using Tickets = orbit::orm::QueryBuilder<orbit::database::PostgresClient, Ticket>;
+    r->connected = co_await orbit::database::connect_async(db);
+    if (r->connected) {
+        auto create_table = orbit::database::query_async(
+            db, "CREATE TABLE orm_tickets (id SERIAL PRIMARY KEY, title text NOT NULL, qty int NOT NULL DEFAULT 0);");
+        co_await create_table;
+
+        // id 0 is "unset": the database generates it, RETURNING gives it back.
+        Tickets t1(db, "orm_tickets");
+        auto creating = t1.create_async(Ticket{0, "42", 3});
+        r->created = co_await creating;
+
+        // A second id-0 insert used to collide with the first.
+        Tickets t2(db, "orm_tickets");
+        auto inserting = t2.insert_async(Ticket{0, "second", 1});
+        r->second_insert_rows = co_await inserting;
+
+        Tickets t3(db, "orm_tickets");
+        auto all = t3.get_async();
+        auto rows = co_await all;
+        r->rows_after = rows.size();
+
+        // Updating from a model with id 0 must not rewrite the key.
+        Tickets t4(db, "orm_tickets");
+        t4.where(orbit::orm::Col("id") == r->created.id);
+        auto updating = t4.update_async(Ticket{0, "renamed", 9});
+        co_await updating;
+        Tickets t5(db, "orm_tickets");
+        t5.where(orbit::orm::Col("title") == std::string("renamed"));
+        auto reread = t5.get_async();
+        auto renamed = co_await reread;
+        if (!renamed.empty()) {
+            r->title_after_update = renamed[0].title;
+            r->id_after_update = renamed[0].id;
+        }
+
+        // A failing INSERT throws instead of reporting 0 rows.
+        try {
+            Tickets missing(db, "orm_no_such_table");
+            auto failing = missing.insert_async(Ticket{0, "x", 1});
+            co_await failing;
+        } catch (const orbit::orm::DatabaseError& e) {
+            r->insert_error_thrown = true;
+            r->insert_error = e.what();
+        }
+
+        // NULL in a non-optional field is reported, not a crash.
+        auto nullable = orbit::database::query_async(db, "CREATE TABLE orm_nullable (id int, title text, qty int);");
+        co_await nullable;
+        auto add_null = orbit::database::query_async(db, "INSERT INTO orm_nullable VALUES (NULL, 't', 1);");
+        co_await add_null;
+        try {
+            Tickets n(db, "orm_nullable");
+            auto reading = n.get_async();
+            co_await reading;
+        } catch (const orbit::orm::DatabaseError&) {
+            r->bad_row_thrown = true;
+        }
+    }
+    done->set_value();
+}
+
+} // namespace
+
+TEST_F(OrmPostgresTest, CreateReturnsTheKeyAndErrorsThrow) {
+    orbit::network::EpollProactor proactor;
+    std::atomic<bool> running{true};
+    std::thread loop([&] {
+        while (running) proactor.run_once(50);
+    });
+    auto db = std::make_shared<orbit::database::PostgresClient>(
+        &proactor, "host=" + socket_dir + " port=" + std::to_string(kPgPort) + " user=postgres dbname=postgres");
+
+    KeyResults r;
+    std::promise<void> done;
+    auto finished = done.get_future();
+    key_scenario(db, &r, &done);
+    bool completed = finished.wait_for(std::chrono::seconds(20)) == std::future_status::ready;
+    running = false;
+    loop.join();
+
+    ASSERT_TRUE(completed);
+    ASSERT_TRUE(r.connected);
+    EXPECT_GT(r.created.id, 0) << "RETURNING should give the generated key";
+    EXPECT_EQ(r.created.title, "42") << "a numeric-looking string stays a string";
+    EXPECT_EQ(r.created.qty, 3);
+    EXPECT_EQ(r.second_insert_rows, 1u);
+    EXPECT_EQ(r.rows_after, 2u);
+    EXPECT_EQ(r.title_after_update, "renamed");
+    EXPECT_EQ(r.id_after_update, r.created.id) << "update_async(model) must keep the key";
+    EXPECT_TRUE(r.insert_error_thrown);
+    EXPECT_NE(r.insert_error.find("orm_no_such_table"), std::string::npos) << r.insert_error;
+    EXPECT_TRUE(r.bad_row_thrown);
+}
+
+
 #endif
