@@ -10,7 +10,7 @@
 #include <memory>
 #include <stdexcept>
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -55,15 +55,15 @@ public:
     void end() override {}
     void add_interceptor(std::function<void(HttpResponse&)>) override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
 };
 
 // Returns true if the middleware let the request through.
-bool check(const routing::Middleware& mw, const std::string& token, std::string* body = nullptr, HttpRequest* out = nullptr) {
+bool check(const orbit::routing::Middleware& mw, const std::string& token, std::string* body = nullptr, HttpRequest* out = nullptr) {
     HttpRequest req;
     std::string header = "Bearer " + token;
     req.headers["Authorization"] = header;
@@ -78,20 +78,20 @@ bool check(const routing::Middleware& mw, const std::string& token, std::string*
 } // namespace
 
 TEST(JwtAuthTest, AcceptsValidTokenAndExposesClaims) {
-    auto mw = middleware::jwt_auth(kSecret);
+    auto mw = orbit::middleware::jwt_auth(kSecret);
     HttpRequest req;
     ASSERT_TRUE(check(mw, hs256(R"({"sub":"alice","exp":)" + std::to_string(now() + 60) + "}"), nullptr, &req));
     EXPECT_EQ(req.user["sub"], "alice");
 }
 
 TEST(JwtAuthTest, RejectsWrongSignature) {
-    auto mw = middleware::jwt_auth(kSecret);
+    auto mw = orbit::middleware::jwt_auth(kSecret);
     std::string forged = sign(R"({"alg":"HS256"})", R"({"sub":"alice"})", "a-different-secret-of-some-length!!");
     EXPECT_FALSE(check(mw, forged));
 }
 
 TEST(JwtAuthTest, RejectsAlgorithmsOtherThanHs256) {
-    auto mw = middleware::jwt_auth(kSecret);
+    auto mw = orbit::middleware::jwt_auth(kSecret);
     std::string body;
     // Correct HMAC, but the header claims another algorithm.
     EXPECT_FALSE(check(mw, sign(R"({"alg":"none"})", R"({"sub":"alice"})"), &body));
@@ -102,34 +102,34 @@ TEST(JwtAuthTest, RejectsAlgorithmsOtherThanHs256) {
 }
 
 TEST(JwtAuthTest, EnforcesExpAndNbfWithLeeway) {
-    auto strict = middleware::jwt_auth(kSecret);
+    auto strict = orbit::middleware::jwt_auth(kSecret);
     EXPECT_FALSE(check(strict, hs256(R"({"exp":)" + std::to_string(now() - 30) + "}")));
     EXPECT_FALSE(check(strict, hs256(R"({"nbf":)" + std::to_string(now() + 30) + "}")));
     EXPECT_FALSE(check(strict, hs256(R"({"exp":"tomorrow"})")));
 
-    middleware::JwtOptions opts;
+    orbit::middleware::JwtOptions opts;
     opts.secret = kSecret;
     opts.leeway = std::chrono::seconds(60);
-    auto lenient = middleware::jwt_auth(opts);
+    auto lenient = orbit::middleware::jwt_auth(opts);
     EXPECT_TRUE(check(lenient, hs256(R"({"exp":)" + std::to_string(now() - 30) + "}")));
     EXPECT_TRUE(check(lenient, hs256(R"({"nbf":)" + std::to_string(now() + 30) + "}")));
 }
 
 TEST(JwtAuthTest, RequireExpRejectsNonExpiringTokens) {
-    middleware::JwtOptions opts;
+    orbit::middleware::JwtOptions opts;
     opts.secret = kSecret;
     opts.require_exp = true;
-    auto mw = middleware::jwt_auth(opts);
+    auto mw = orbit::middleware::jwt_auth(opts);
     EXPECT_FALSE(check(mw, hs256(R"({"sub":"alice"})")));
     EXPECT_TRUE(check(mw, hs256(R"({"exp":)" + std::to_string(now() + 60) + "}")));
 }
 
 TEST(JwtAuthTest, ChecksIssuerAndAudience) {
-    middleware::JwtOptions opts;
+    orbit::middleware::JwtOptions opts;
     opts.secret = kSecret;
     opts.issuer = "https://auth.example";
     opts.audience = "orders-api";
-    auto mw = middleware::jwt_auth(opts);
+    auto mw = orbit::middleware::jwt_auth(opts);
     EXPECT_TRUE(check(mw, hs256(R"({"iss":"https://auth.example","aud":"orders-api"})")));
     EXPECT_TRUE(check(mw, hs256(R"({"iss":"https://auth.example","aud":["x","orders-api"]})")));
     EXPECT_FALSE(check(mw, hs256(R"({"iss":"https://evil.example","aud":"orders-api"})")));
@@ -138,7 +138,7 @@ TEST(JwtAuthTest, ChecksIssuerAndAudience) {
 }
 
 TEST(JwtAuthTest, RejectsMalformedTokens) {
-    auto mw = middleware::jwt_auth(kSecret);
+    auto mw = orbit::middleware::jwt_auth(kSecret);
     EXPECT_FALSE(check(mw, "abc"));
     EXPECT_FALSE(check(mw, "a.b"));
     EXPECT_FALSE(check(mw, hs256(R"({"sub":"a"})") + ".extra"));
@@ -146,5 +146,5 @@ TEST(JwtAuthTest, RejectsMalformedTokens) {
 }
 
 TEST(JwtAuthTest, EmptySecretIsRefused) {
-    EXPECT_THROW(middleware::jwt_auth(std::string()), std::invalid_argument);
+    EXPECT_THROW(orbit::middleware::jwt_auth(std::string()), std::invalid_argument);
 }

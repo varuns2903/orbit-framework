@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <memory>
 #include <string>
 #include <vector>
@@ -8,7 +9,7 @@ namespace grpc {
     class Service;
 }
 
-namespace server {
+namespace orbit::server {
 
 /**
  * @brief A thin wrapper that runs gRPC services next to an Orbit App.

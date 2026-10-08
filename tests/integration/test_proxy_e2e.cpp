@@ -21,8 +21,8 @@ constexpr uint16_t kUpstreamPort = 8101;
 constexpr uint16_t kTlsUpstreamPort = 8102;
 constexpr uint16_t kProxyPort = 8103;
 
-network::socket_t connect_to(uint16_t port) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_to(uint16_t port) {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
@@ -42,24 +42,24 @@ network::socket_t connect_to(uint16_t port) {
 bool wait_until_listening(uint16_t port) {
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
-        network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         bool ok = ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
-        network::close_socket(fd);
+        orbit::network::close_socket(fd);
         if (ok) return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
     return false;
 }
 
-void send_all(network::socket_t fd, const std::string& data) {
+void send_all(orbit::network::socket_t fd, const std::string& data) {
     ::send(fd, data.data(), static_cast<int>(data.size()), 0);
 }
 
-std::string read_until(network::socket_t fd, const std::string& needle) {
+std::string read_until(orbit::network::socket_t fd, const std::string& needle) {
     std::string out;
     char buf[2048];
     while (out.find(needle) == std::string::npos) {
@@ -71,10 +71,10 @@ std::string read_until(network::socket_t fd, const std::string& needle) {
 }
 
 std::string through_proxy(const std::string& request, const std::string& until) {
-    network::socket_t fd = connect_to(kProxyPort);
+    orbit::network::socket_t fd = connect_to(kProxyPort);
     send_all(fd, request);
     std::string res = read_until(fd, until);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return res;
 }
 
@@ -111,24 +111,24 @@ bool make_self_signed(const std::string& cert_path, const std::string& key_path)
     return ok;
 }
 
-void add_upstream_routes(server::App& app) {
-    app.post("/echo", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
+void add_upstream_routes(orbit::server::App& app) {
+    app.post("/echo", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
         auto xff = req.headers.find("X-Forwarded-For");
-        http::HttpResponse res;
+        orbit::http::HttpResponse res;
         res.set_body("uri=" + req.uri + " page=" + (req.query.count("page") ? req.query["page"] : "") +
                      " xff=" + (xff == req.headers.end() ? "" : std::string(xff->second)) +
                      " body=" + std::string(req.body));
         w->send(std::move(res));
     });
-    app.get("/chunked", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-        http::HttpResponse res;
+    app.get("/chunked", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+        orbit::http::HttpResponse res;
         w->send_headers(res); // no Content-Length: chunked
         w->write_chunk("abc");
         w->write_chunk("def");
         w->end();
     });
-    app.get("/hello", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-        http::HttpResponse res;
+    app.get("/hello", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+        orbit::http::HttpResponse res;
         res.set_body("secure-hello");
         w->send(std::move(res));
     });
@@ -141,9 +141,9 @@ std::string g_key_path;
 
 class ProxyE2ETest : public ::testing::Test {
 protected:
-    static server::App* upstream;
-    static server::App* tls_upstream;
-    static server::App* proxy_app;
+    static orbit::server::App* upstream;
+    static orbit::server::App* tls_upstream;
+    static orbit::server::App* proxy_app;
     static std::thread t1, t2, t3;
 
     static void SetUpTestSuite() {
@@ -152,44 +152,44 @@ protected:
         g_key_path = (dir / "orbit_proxy_test_key.pem").string();
         ASSERT_TRUE(make_self_signed(g_cert_path, g_key_path));
 
-        config::ServerConfig ucfg = orbit::test::server_config();
+        orbit::config::ServerConfig ucfg = orbit::test::server_config();
         ucfg.port = kUpstreamPort;
-        upstream = new server::App(ucfg);
+        upstream = new orbit::server::App(ucfg);
         add_upstream_routes(*upstream);
 
-        config::ServerConfig tcfg = orbit::test::server_config();
+        orbit::config::ServerConfig tcfg = orbit::test::server_config();
         tcfg.port = kTlsUpstreamPort;
         tcfg.ssl_cert = g_cert_path;
         tcfg.ssl_key = g_key_path;
-        tls_upstream = new server::App(tcfg);
+        tls_upstream = new orbit::server::App(tcfg);
         add_upstream_routes(*tls_upstream);
 
-        config::ServerConfig pcfg = orbit::test::server_config();
+        orbit::config::ServerConfig pcfg = orbit::test::server_config();
         pcfg.port = kProxyPort;
-        proxy_app = new server::App(pcfg);
+        proxy_app = new orbit::server::App(pcfg);
 
-        middleware::ProxyOptions plain;
+        orbit::middleware::ProxyOptions plain;
         plain.target_host = "127.0.0.1";
         plain.target_port = kUpstreamPort;
         plain.strip_prefix = "/plain";
-        proxy_app->use([plain](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            static auto plain_mw = middleware::proxy(plain);
+        proxy_app->use([plain](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            static auto plain_mw = orbit::middleware::proxy(plain);
             static auto tls_unverified = [] {
-                middleware::ProxyOptions o;
+                orbit::middleware::ProxyOptions o;
                 o.target_host = "localhost";
                 o.target_port = kTlsUpstreamPort;
                 o.use_tls = true;
                 o.strip_prefix = "/tls-default";
-                return middleware::proxy(o);
+                return orbit::middleware::proxy(o);
             }();
             static auto tls_pinned = [] {
-                middleware::ProxyOptions o;
+                orbit::middleware::ProxyOptions o;
                 o.target_host = "localhost";
                 o.target_port = kTlsUpstreamPort;
                 o.use_tls = true;
                 o.ca_file = g_cert_path;
                 o.strip_prefix = "/tls-pinned";
-                return middleware::proxy(o);
+                return orbit::middleware::proxy(o);
             }();
             if (req.uri.rfind("/plain", 0) == 0) return plain_mw(req, w);
             if (req.uri.rfind("/tls-default", 0) == 0) return tls_unverified(req, w);
@@ -210,13 +210,13 @@ protected:
     static void TearDownTestSuite() {
         for (auto [app, port] : {std::pair{proxy_app, kProxyPort}, std::pair{upstream, kUpstreamPort}}) {
             app->stop();
-            network::socket_t fd = connect_to(port);
+            orbit::network::socket_t fd = connect_to(port);
             send_all(fd, "GET /nothing HTTP/1.1\r\nConnection: close\r\n\r\n");
             read_until(fd, "\r\n\r\n");
-            network::close_socket(fd);
+            orbit::network::close_socket(fd);
         }
         tls_upstream->stop();
-        { network::socket_t fd = connect_to(kTlsUpstreamPort); network::close_socket(fd); }
+        { orbit::network::socket_t fd = connect_to(kTlsUpstreamPort); orbit::network::close_socket(fd); }
         t1.join();
         t2.join();
         t3.join();
@@ -228,9 +228,9 @@ protected:
     }
 };
 
-server::App* ProxyE2ETest::upstream = nullptr;
-server::App* ProxyE2ETest::tls_upstream = nullptr;
-server::App* ProxyE2ETest::proxy_app = nullptr;
+orbit::server::App* ProxyE2ETest::upstream = nullptr;
+orbit::server::App* ProxyE2ETest::tls_upstream = nullptr;
+orbit::server::App* ProxyE2ETest::proxy_app = nullptr;
 std::thread ProxyE2ETest::t1;
 std::thread ProxyE2ETest::t2;
 std::thread ProxyE2ETest::t3;
@@ -245,7 +245,7 @@ TEST_F(ProxyE2ETest, ForwardsBodyQueryAndOwnForwardedFor) {
 }
 
 TEST_F(ProxyE2ETest, ChunkedUpstreamResponseIsNotDoubleEncoded) {
-    network::socket_t fd = connect_to(kProxyPort);
+    orbit::network::socket_t fd = connect_to(kProxyPort);
     send_all(fd, "GET /plain/chunked HTTP/1.1\r\nHost: x\r\n\r\n");
     std::string res = read_until(fd, "0\r\n\r\n");
     // The client sees the proxy's own chunking of "abc" and "def", not chunk
@@ -257,7 +257,7 @@ TEST_F(ProxyE2ETest, ChunkedUpstreamResponseIsNotDoubleEncoded) {
     // The client connection is still usable afterwards.
     send_all(fd, "POST /plain/echo HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
     EXPECT_NE(read_until(fd, "body=ok").find("body=ok"), std::string::npos);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }
 
 TEST_F(ProxyE2ETest, UntrustedUpstreamCertificateIsRejected) {

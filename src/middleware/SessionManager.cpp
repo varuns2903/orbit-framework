@@ -3,7 +3,7 @@
 #include <orbit/utils/Logger.hpp>
 #include <orbit/utils/Random.hpp>
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
 

@@ -2,7 +2,7 @@
 #include <orbit/database/PostgresCoro.hpp>
 #include <orbit/orm/QueryBuilder.hpp>
 
-using namespace orm;
+using namespace orbit::orm;
 
 namespace {
 Params P(std::initializer_list<const char*> values) {
@@ -98,13 +98,13 @@ struct FakeMysql {
     struct Awaiter {
         bool await_ready() const { return true; }
         void await_suspend(std::coroutine_handle<>) {}
-        database::ResultSet await_resume() { return {}; }
+        orbit::database::ResultSet await_resume() { return {}; }
     };
     std::string escape(const std::string& s) { return s; }
     Awaiter query_async(const std::string&) { return {}; }
 };
 
-using PgItems = QueryBuilder<database::PostgresClient, Item>;
+using PgItems = QueryBuilder<orbit::database::PostgresClient, Item>;
 using MyItems = QueryBuilder<FakeMysql, Item>;
 
 } // namespace

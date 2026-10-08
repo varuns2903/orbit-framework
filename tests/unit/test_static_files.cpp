@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <string>
 
-using namespace http;
+using namespace orbit::http;
 namespace fs = std::filesystem;
 
 namespace {
@@ -28,8 +28,8 @@ public:
     void end() override {}
     void add_interceptor(std::function<void(HttpResponse&)>) override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -67,8 +67,8 @@ protected:
     // Returns true if the middleware let the request continue down the pipeline.
     bool run(const std::string& uri, StaticMockWriter& writer, HttpMethod method = HttpMethod::GET,
              std::initializer_list<std::pair<std::string_view, std::string_view>> headers = {},
-             middleware::StaticFilesOptions options = {}) {
-        auto mw = middleware::static_files(pub.string(), options);
+             orbit::middleware::StaticFilesOptions options = {}) {
+        auto mw = orbit::middleware::static_files(pub.string(), options);
         HttpRequest req;
         req.method = method;
         req.uri = uri;
@@ -93,7 +93,7 @@ TEST_F(StaticFilesTest, ServesFileWithTypeAndValidators) {
 
 TEST_F(StaticFilesTest, MaxAgeSetsCacheControl) {
     StaticMockWriter w;
-    middleware::StaticFilesOptions opts;
+    orbit::middleware::StaticFilesOptions opts;
     opts.max_age = std::chrono::hours(1);
     EXPECT_FALSE(run("/digits.txt", w, HttpMethod::GET, {}, opts));
     EXPECT_EQ(w.last.headers["Cache-Control"], "public, max-age=3600");
@@ -123,7 +123,7 @@ TEST_F(StaticFilesTest, DirectoriesServeTheirIndex) {
     EXPECT_EQ(w2.last.headers["Content-Length"], "4");
 
     StaticMockWriter w3;
-    middleware::StaticFilesOptions no_index;
+    orbit::middleware::StaticFilesOptions no_index;
     no_index.index.clear();
     EXPECT_TRUE(run("/docs/", w3, HttpMethod::GET, {}, no_index));
 }
@@ -140,7 +140,7 @@ TEST_F(StaticFilesTest, DotfilesAreHiddenByDefault) {
     EXPECT_TRUE(run("/.git/config", w));
     EXPECT_EQ(w.sends, 0);
 
-    middleware::StaticFilesOptions opts;
+    orbit::middleware::StaticFilesOptions opts;
     opts.serve_dotfiles = true;
     EXPECT_FALSE(run("/.env", w, HttpMethod::GET, {}, opts));
     EXPECT_EQ(w.last.status_code, HttpStatus::OK);
@@ -250,10 +250,10 @@ TEST_F(StaticFilesTest, UnsupportedRangesSendTheWholeFile) {
 }
 
 TEST(StaticFilesMimeTest, KnowsCommonWebTypes) {
-    EXPECT_EQ(middleware::mime_type_for_extension(".woff2"), "font/woff2");
-    EXPECT_EQ(middleware::mime_type_for_extension(".wasm"), "application/wasm");
-    EXPECT_EQ(middleware::mime_type_for_extension(".mjs"), "text/javascript; charset=utf-8");
-    EXPECT_EQ(middleware::mime_type_for_extension(".ICO"), "image/x-icon");
-    EXPECT_EQ(middleware::mime_type_for_extension(".unknown"), "application/octet-stream");
-    EXPECT_EQ(middleware::mime_type_for_extension(""), "application/octet-stream");
+    EXPECT_EQ(orbit::middleware::mime_type_for_extension(".woff2"), "font/woff2");
+    EXPECT_EQ(orbit::middleware::mime_type_for_extension(".wasm"), "application/wasm");
+    EXPECT_EQ(orbit::middleware::mime_type_for_extension(".mjs"), "text/javascript; charset=utf-8");
+    EXPECT_EQ(orbit::middleware::mime_type_for_extension(".ICO"), "image/x-icon");
+    EXPECT_EQ(orbit::middleware::mime_type_for_extension(".unknown"), "application/octet-stream");
+    EXPECT_EQ(orbit::middleware::mime_type_for_extension(""), "application/octet-stream");
 }

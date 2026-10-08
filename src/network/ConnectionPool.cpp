@@ -11,7 +11,7 @@
 
 #include <openssl/ssl.h>
 
-namespace network {
+namespace orbit::network {
 
 std::pair<int, void*> ConnectionPool::acquire(const std::string& host, int port) {
     std::unique_lock<std::mutex> lock(mutex_);

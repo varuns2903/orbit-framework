@@ -10,10 +10,10 @@ You can proxy any path to an upstream server. Orbit automatically handles chunke
 #include "middleware/Proxy.hpp"
 
 // Proxy all /api requests to an upstream backend
-middleware::ProxyOptions proxy_opts;
+orbit::middleware::ProxyOptions proxy_opts;
 proxy_opts.strip_prefix = true; // strips "/api" before forwarding
 
-app.use("/api", middleware::Proxy::create("http://localhost:8081", proxy_opts));
+app.use("/api", orbit::middleware::Proxy::create("http://localhost:8081", proxy_opts));
 ```
 
 ### Proxy Options
@@ -44,10 +44,10 @@ through another proxy you control; the client address is then appended.
 For distributing traffic across multiple backend servers, use the `LoadBalancer` middleware. It supports connection pooling and TLS multiplexing out of the box.
 
 ```cpp
-middleware::LoadBalancerOptions lb_opts;
+orbit::middleware::LoadBalancerOptions lb_opts;
 lb_opts.strip_prefix = true;
 
-auto lb = middleware::LoadBalancer::create({
+auto lb = orbit::middleware::LoadBalancer::create({
     "http://localhost:8081",
     "http://localhost:8082",
     "https://api.secure-backend.com" // TLS Session Reuse is natively supported!

@@ -3,17 +3,17 @@
 #include <orbit/database/RedisClient.hpp>
 #include <iostream>
 
-using namespace server;
-using namespace http;
+using namespace orbit::server;
+using namespace orbit::http;
 
 int main(int argc, char* argv[]) {
-    auto config = config::ServerConfig::parse(argc, argv);
+    auto config = orbit::config::ServerConfig::parse(argc, argv);
     App app(config);
 
     // Redis example — RedisClient is synchronous, so we use it directly in handlers
     app.get("/redis/ping", [](HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> writer) {
 #ifdef ORBIT_ENABLE_REDIS
-        database::RedisClient redis("127.0.0.1", 6379);
+        orbit::database::RedisClient redis("127.0.0.1", 6379);
         if (!redis.connect()) {
             HttpResponse res;
             res.status(HttpStatus::InternalServerError);
@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
 
     app.get("/redis/test", [](HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> writer) {
 #ifdef ORBIT_ENABLE_REDIS
-        database::RedisClient redis("127.0.0.1", 6379);
+        orbit::database::RedisClient redis("127.0.0.1", 6379);
         if (!redis.connect()) {
             HttpResponse res;
             res.status(HttpStatus::InternalServerError);

@@ -11,8 +11,8 @@ namespace {
 
 constexpr uint16_t kPort = 8097;
 
-network::socket_t connect_client() {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_client() {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
@@ -28,11 +28,11 @@ network::socket_t connect_client() {
     return fd;
 }
 
-void send_all(network::socket_t fd, const std::string& data) {
+void send_all(orbit::network::socket_t fd, const std::string& data) {
     ::send(fd, data.data(), static_cast<int>(data.size()), 0);
 }
 
-std::string read_until(network::socket_t fd, const std::string& needle) {
+std::string read_until(orbit::network::socket_t fd, const std::string& needle) {
     std::string out;
     char buf[1024];
     while (out.find(needle) == std::string::npos) {
@@ -47,25 +47,25 @@ std::string read_until(network::socket_t fd, const std::string& needle) {
 
 class KeepAliveInterceptorTest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
-        app = new server::App(cfg);
+        app = new orbit::server::App(cfg);
 
         // Counts how many interceptors touch each response.
-        app->use([](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            w->add_interceptor([](http::HttpResponse& res) {
+        app->use([](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            w->add_interceptor([](orbit::http::HttpResponse& res) {
                 auto it = res.headers.find("X-Hits");
                 int hits = it == res.headers.end() ? 0 : std::stoi(it->second);
                 res.headers["X-Hits"] = std::to_string(hits + 1);
             });
             return true;
         });
-        app->get("/n", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/n", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("ok");
             w->send(std::move(res));
         });
@@ -76,24 +76,24 @@ protected:
 
     static void TearDownTestSuite() {
         app->stop();
-        network::socket_t wake = connect_client();
+        orbit::network::socket_t wake = connect_client();
         send_all(wake, "GET /n HTTP/1.1\r\nConnection: close\r\n\r\n");
         read_until(wake, "ok");
-        network::close_socket(wake);
+        orbit::network::close_socket(wake);
         if (server_thread.joinable()) server_thread.join();
         delete app;
     }
 };
 
-server::App* KeepAliveInterceptorTest::app = nullptr;
+orbit::server::App* KeepAliveInterceptorTest::app = nullptr;
 std::thread KeepAliveInterceptorTest::server_thread;
 
 TEST_F(KeepAliveInterceptorTest, InterceptorsApplyOnlyToTheirOwnRequest) {
-    network::socket_t fd = connect_client();
+    orbit::network::socket_t fd = connect_client();
     for (int i = 1; i <= 3; ++i) {
         send_all(fd, "GET /n HTTP/1.1\r\nHost: x\r\n\r\n");
         std::string res = read_until(fd, "ok");
         EXPECT_NE(res.find("X-Hits: 1\r\n"), std::string::npos) << "request " << i << ":\n" << res;
     }
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }

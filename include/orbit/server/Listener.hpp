@@ -1,10 +1,11 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/network/Socket.hpp>
 #include <cstdint>
 #include <optional>
 #include <string>
 
-namespace server {
+namespace orbit::server {
 
 /**
  * @brief Listens for incoming network connections.

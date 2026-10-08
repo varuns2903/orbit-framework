@@ -1,6 +1,6 @@
 name: gRPC wrapper (experimental)
 
-# server::GrpcServer is experimental (#22) and the main CI builds with
+# orbit::server::GrpcServer is experimental (#22) and the main CI builds with
 # ORBIT_ENABLE_GRPC=OFF. This job keeps it from rotting unnoticed: it builds
 # the wrapper against the distribution's gRPC and runs real RPCs through it.
 

@@ -4,8 +4,8 @@
 #include <orbit/http/json.hpp>
 #include <iostream>
 
-using namespace server;
-using namespace websocket;
+using namespace orbit::server;
+using namespace orbit::websocket;
 
 // 1. Define your Session State (attached to every connected socket)
 struct PlayerSession {
@@ -27,7 +27,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ChatMessage, text)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MoveEvent, position)
 
 int main() {
-    config::ServerConfig config;
+    orbit::config::ServerConfig config;
     config.port = 8084;
     App app(config);
 

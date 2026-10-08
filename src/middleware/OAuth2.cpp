@@ -10,7 +10,7 @@
 #include <mutex>
 #include <stdexcept>
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
 

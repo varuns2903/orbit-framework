@@ -10,8 +10,8 @@
 #include <stdexcept>
 #include <string>
 
-using namespace http;
-using middleware::IpNetwork;
+using namespace orbit::http;
+using orbit::middleware::IpNetwork;
 
 namespace {
 
@@ -24,17 +24,17 @@ public:
     void write_chunk(std::string_view) override {}
     void end() override {}
     void add_interceptor(std::function<void(HttpResponse&)>) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
 };
 
 // Runs trusted_proxies() on a request from `peer` carrying `value` in `header`.
-std::string client_ip_after(const middleware::TrustedProxyOptions& opts, const std::string& peer,
+std::string client_ip_after(const orbit::middleware::TrustedProxyOptions& opts, const std::string& peer,
                             const std::string& header, const std::string& value) {
-    auto mw = middleware::trusted_proxies(opts);
+    auto mw = orbit::middleware::trusted_proxies(opts);
     HttpRequest req;
     req.client_ip = peer;
     if (!header.empty()) req.headers[header] = value;
@@ -76,13 +76,13 @@ TEST(IpNetworkTest, MatchesAddressesAndCidrs) {
 }
 
 TEST(TrustedProxiesTest, UntrustedPeerCannotSpoofItsAddress) {
-    middleware::TrustedProxyOptions opts;
+    orbit::middleware::TrustedProxyOptions opts;
     opts.proxies = {"10.0.0.0/8"};
     EXPECT_EQ(client_ip_after(opts, "203.0.113.9", "X-Forwarded-For", "1.2.3.4"), "203.0.113.9");
 }
 
 TEST(TrustedProxiesTest, TrustedProxySuppliesTheClient) {
-    middleware::TrustedProxyOptions opts;
+    orbit::middleware::TrustedProxyOptions opts;
     opts.proxies = {"10.0.0.0/8"};
     EXPECT_EQ(client_ip_after(opts, "10.0.0.5", "X-Forwarded-For", "198.51.100.7"), "198.51.100.7");
     // No header: the proxy itself is all we know.
@@ -90,7 +90,7 @@ TEST(TrustedProxiesTest, TrustedProxySuppliesTheClient) {
 }
 
 TEST(TrustedProxiesTest, ChainIsReadRightToLeftSkippingTrustedHops) {
-    middleware::TrustedProxyOptions opts;
+    orbit::middleware::TrustedProxyOptions opts;
     opts.proxies = {"10.0.0.0/8", "192.168.0.1"};
     // A client-supplied fake entry on the left must not win over the real
     // client recorded by our first proxy.
@@ -105,7 +105,7 @@ TEST(TrustedProxiesTest, ChainIsReadRightToLeftSkippingTrustedHops) {
 }
 
 TEST(TrustedProxiesTest, Rfc7239ForwardedHeader) {
-    middleware::TrustedProxyOptions opts;
+    orbit::middleware::TrustedProxyOptions opts;
     opts.proxies = {"10.0.0.0/8"};
     opts.header = "Forwarded";
     EXPECT_EQ(client_ip_after(opts, "10.0.0.5", "Forwarded",
@@ -115,13 +115,13 @@ TEST(TrustedProxiesTest, Rfc7239ForwardedHeader) {
 }
 
 TEST(TrustedProxiesTest, MalformedConfigurationThrows) {
-    middleware::TrustedProxyOptions opts;
+    orbit::middleware::TrustedProxyOptions opts;
     opts.proxies = {"10.0.0.0/8", "localhost"};
-    EXPECT_THROW(middleware::trusted_proxies(opts), std::invalid_argument);
+    EXPECT_THROW(orbit::middleware::trusted_proxies(opts), std::invalid_argument);
 }
 
 TEST(SecurityHeadersTest, DefaultsAreSet) {
-    auto mw = middleware::security_headers();
+    auto mw = orbit::middleware::security_headers();
     HttpRequest req;
     auto w = std::make_shared<HeaderWriter>();
     EXPECT_TRUE(mw(req, w));
@@ -134,11 +134,11 @@ TEST(SecurityHeadersTest, DefaultsAreSet) {
 }
 
 TEST(SecurityHeadersTest, OptionsChangeOrRemoveHeaders) {
-    middleware::SecurityHeadersOptions opts;
+    orbit::middleware::SecurityHeadersOptions opts;
     opts.hsts = false;
     opts.frame_options = "";
     opts.content_security_policy = "default-src 'self'; frame-ancestors 'none'";
-    auto mw = middleware::security_headers(opts);
+    auto mw = orbit::middleware::security_headers(opts);
     HttpRequest req;
     auto w = std::make_shared<HeaderWriter>();
     mw(req, w);

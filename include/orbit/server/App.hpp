@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <vector>
 #include <thread>
 
@@ -12,13 +13,13 @@
 #ifdef ORBIT_ENABLE_HTTP3
 #include <orbit/server/QuicConnectionManager.hpp>
 #else
-namespace server { class QuicConnectionManager; }
+namespace orbit::server { class QuicConnectionManager; }
 #endif
 #include <atomic>
 #include <memory>
 #include <mutex>
 
-namespace server {
+namespace orbit::server {
 
 /**
  * @brief The main application class for the Orbit Framework.

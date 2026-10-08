@@ -1,10 +1,11 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <string_view>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 
-namespace http {
+namespace orbit::http {
 namespace websocket {
 
 /**

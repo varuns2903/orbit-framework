@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <chrono>
 #include <functional>
 #include <vector>
@@ -8,7 +9,7 @@
 #include <mutex>
 #include <cstdint>
 
-namespace server {
+namespace orbit::server {
 
 using TimePoint = std::chrono::steady_clock::time_point;
 

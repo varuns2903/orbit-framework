@@ -7,7 +7,7 @@
 #include <memory>
 #include <stdexcept>
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -26,15 +26,15 @@ public:
     void end() override {}
     void add_interceptor(std::function<void(HttpResponse&)>) override {}
     void set_header(const std::string& key, const std::string& value) override { default_headers[key] = value; }
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
 };
 
-middleware::CorsOptions allow_list() {
-    middleware::CorsOptions o;
+orbit::middleware::CorsOptions allow_list() {
+    orbit::middleware::CorsOptions o;
     o.allowed_origins = {"https://app.example"};
     o.allow_credentials = true;
     return o;
@@ -43,7 +43,7 @@ middleware::CorsOptions allow_list() {
 } // namespace
 
 TEST(CorsTest, DisallowedOriginGetsNoAllowOrigin) {
-    auto m = middleware::cors(allow_list());
+    auto m = orbit::middleware::cors(allow_list());
     HttpRequest req;
     req.method = HttpMethod::GET;
     req.headers["Origin"] = "https://evil.example";
@@ -55,7 +55,7 @@ TEST(CorsTest, DisallowedOriginGetsNoAllowOrigin) {
 }
 
 TEST(CorsTest, AllowedOriginIsReflectedWithCredentials) {
-    auto m = middleware::cors(allow_list());
+    auto m = orbit::middleware::cors(allow_list());
     HttpRequest req;
     req.method = HttpMethod::GET;
     req.headers["Origin"] = "https://app.example";
@@ -67,7 +67,7 @@ TEST(CorsTest, AllowedOriginIsReflectedWithCredentials) {
 }
 
 TEST(CorsTest, PreflightFromDisallowedOriginHasNoCorsHeaders) {
-    auto m = middleware::cors(allow_list());
+    auto m = orbit::middleware::cors(allow_list());
     HttpRequest req;
     req.method = HttpMethod::OPTIONS;
     req.headers["Origin"] = "https://evil.example";
@@ -80,7 +80,7 @@ TEST(CorsTest, PreflightFromDisallowedOriginHasNoCorsHeaders) {
 }
 
 TEST(CorsTest, PreflightFromAllowedOriginListsMethods) {
-    auto m = middleware::cors(allow_list());
+    auto m = orbit::middleware::cors(allow_list());
     HttpRequest req;
     req.method = HttpMethod::OPTIONS;
     req.headers["Origin"] = "https://app.example";
@@ -95,7 +95,7 @@ TEST(CorsTest, PreflightFromAllowedOriginListsMethods) {
 }
 
 TEST(CorsTest, PlainOptionsRequestReachesRoutes) {
-    auto m = middleware::cors(allow_list());
+    auto m = orbit::middleware::cors(allow_list());
     HttpRequest req;
     req.method = HttpMethod::OPTIONS;
     auto w = std::make_shared<CorsTestWriter>();
@@ -104,9 +104,9 @@ TEST(CorsTest, PlainOptionsRequestReachesRoutes) {
 }
 
 TEST(CorsTest, WildcardNeverGrantsCredentials) {
-    middleware::CorsOptions o;
+    orbit::middleware::CorsOptions o;
     o.allow_credentials = true; // allowed_origins defaults to {"*"}
-    auto m = middleware::cors(o);
+    auto m = orbit::middleware::cors(o);
     HttpRequest req;
     req.method = HttpMethod::GET;
     req.headers["Origin"] = "https://anyone.example";
@@ -118,7 +118,7 @@ TEST(CorsTest, WildcardNeverGrantsCredentials) {
 }
 
 TEST(CorsTest, NoOriginMeansNoCorsHeaders) {
-    auto m = middleware::cors(allow_list());
+    auto m = orbit::middleware::cors(allow_list());
     HttpRequest req;
     req.method = HttpMethod::GET;
     auto w = std::make_shared<CorsTestWriter>();

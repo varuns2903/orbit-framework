@@ -1,7 +1,8 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/network/PlatformSocket.hpp>
 
-namespace network {
+namespace orbit::network {
 
 class Socket {
 public:

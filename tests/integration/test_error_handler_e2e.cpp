@@ -15,7 +15,7 @@
 // promptly, on a real connection. Requests share one keep-alive connection,
 // so "a response was already sent" must be tracked per request.
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -51,14 +51,14 @@ Result get(CURL* curl, const std::string& path) {
 
 class ErrorHandlerE2ETest : public ::testing::Test {
 protected:
-    static std::unique_ptr<server::App> app;
+    static std::unique_ptr<orbit::server::App> app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.host = "127.0.0.1";
         cfg.port = kPort;
-        app = std::make_unique<server::App>(cfg);
+        app = std::make_unique<orbit::server::App>(cfg);
 
         app->on_error([](const std::exception& e, HttpRequest&, std::shared_ptr<ResponseWriter> w) {
             if (std::string(e.what()) == "handled") {
@@ -96,7 +96,7 @@ protected:
     }
 };
 
-std::unique_ptr<server::App> ErrorHandlerE2ETest::app;
+std::unique_ptr<orbit::server::App> ErrorHandlerE2ETest::app;
 std::thread ErrorHandlerE2ETest::server_thread;
 
 TEST_F(ErrorHandlerE2ETest, FailingErrorHandlerStillAnswersOnAKeepAliveConnection) {

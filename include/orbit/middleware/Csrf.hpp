@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <string_view>
 #include <memory>
@@ -6,7 +7,7 @@
 #include <orbit/http/ResponseWriter.hpp>
 #include <functional>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @ingroup middlewares

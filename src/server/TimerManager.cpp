@@ -1,6 +1,6 @@
 #include <orbit/server/TimerManager.hpp>
 
-namespace server {
+namespace orbit::server {
 
 TimerManager::TimerManager() = default;
 

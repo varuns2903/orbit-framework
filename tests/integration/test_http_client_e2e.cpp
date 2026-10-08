@@ -20,7 +20,7 @@
 #include <thread>
 #include "../utils/TestConfig.hpp"
 
-// http::Client against local Orbit servers (plain HTTP and TLS).
+// orbit::http::Client against local Orbit servers (plain HTTP and TLS).
 
 namespace {
 
@@ -59,73 +59,73 @@ bool make_self_signed(const std::string& cert_path, const std::string& key_path)
     return ok;
 }
 
-network::socket_t connect_to(uint16_t port) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_to(uint16_t port) {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
-        return network::INVALID_SOCKET_FD;
+        orbit::network::close_socket(fd);
+        return orbit::network::INVALID_SOCKET_FD;
     }
     return fd;
 }
 
 class Server {
 public:
-    explicit Server(config::ServerConfig cfg) : port_(cfg.port), app_(std::make_unique<server::App>(cfg)) {
-        app_->get("/hello", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+    explicit Server(orbit::config::ServerConfig cfg) : port_(cfg.port), app_(std::make_unique<orbit::server::App>(cfg)) {
+        app_->get("/hello", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.headers["X-Echo"] = std::string(req.headers["X-Test"]);
             res.set_body("hello " + req.query["name"]);
             w->send(std::move(res));
         });
-        app_->post("/echo", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app_->post("/echo", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body(std::string(req.body));
             w->send(std::move(res));
         });
-        app_->get("/missing", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::NotFound);
+        app_->get("/missing", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
+            res.status(orbit::http::HttpStatus::NotFound);
             res.set_body("nope");
             w->send(std::move(res));
         });
-        app_->get("/redirect/:n", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
+        app_->get("/redirect/:n", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
             int n = std::stoi(req.params["n"]);
-            http::HttpResponse res;
+            orbit::http::HttpResponse res;
             if (n <= 0) {
                 res.set_body("arrived");
             } else {
-                res.status(http::HttpStatus::Found);
+                res.status(orbit::http::HttpStatus::Found);
                 res.headers["Location"] = "/redirect/" + std::to_string(n - 1);
             }
             w->send(std::move(res));
         });
-        app_->get("/to-file", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::Found);
+        app_->get("/to-file", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
+            res.status(orbit::http::HttpStatus::Found);
             res.headers["Location"] = "file:///etc/passwd";
             w->send(std::move(res));
         });
-        app_->get("/slow", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
+        app_->get("/slow", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-            http::HttpResponse res;
+            orbit::http::HttpResponse res;
             res.set_body("late");
             w->send(std::move(res));
         });
-        app_->get("/big", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app_->get("/big", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body(std::string(200000, 'b'));
             w->send(std::move(res));
         });
-        server::App* app = app_.get();
+        orbit::server::App* app = app_.get();
         thread_ = std::thread([app] { app->listen(); });
         for (int i = 0; i < 200; ++i) {
-            network::socket_t fd = connect_to(port_);
-            if (fd != network::INVALID_SOCKET_FD) {
-                network::close_socket(fd);
+            orbit::network::socket_t fd = connect_to(port_);
+            if (fd != orbit::network::INVALID_SOCKET_FD) {
+                orbit::network::close_socket(fd);
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -133,19 +133,19 @@ public:
     }
     ~Server() {
         app_->stop();
-        network::socket_t fd = connect_to(port_);
-        if (fd != network::INVALID_SOCKET_FD) network::close_socket(fd);
+        orbit::network::socket_t fd = connect_to(port_);
+        if (fd != orbit::network::INVALID_SOCKET_FD) orbit::network::close_socket(fd);
         if (thread_.joinable()) thread_.join();
     }
 
 private:
     uint16_t port_;
-    std::unique_ptr<server::App> app_;
+    std::unique_ptr<orbit::server::App> app_;
     std::thread thread_;
 };
 
-http::ClientRequest get(const std::string& path) {
-    http::ClientRequest r;
+orbit::http::ClientRequest get(const std::string& path) {
+    orbit::http::ClientRequest r;
     r.url = base() + path;
     return r;
 }
@@ -166,7 +166,7 @@ struct Latch {
     }
 };
 
-concurrency::Task fetch_two(http::Client& client, std::string* out, Latch* done) {
+orbit::concurrency::Task fetch_two(orbit::http::Client& client, std::string* out, Latch* done) {
     auto first_req = get("/hello?name=co");
     auto first = co_await client.send_async(first_req);
     auto second_req = get("/redirect/1");
@@ -183,7 +183,7 @@ protected:
     static std::unique_ptr<Server> tls_server;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.worker_threads = 8;
         server = std::make_unique<Server>(cfg);
@@ -192,7 +192,7 @@ protected:
         g_cert = (dir / "orbit_client_cert.pem").string();
         g_key = (dir / "orbit_client_key.pem").string();
         if (make_self_signed(g_cert, g_key)) {
-            config::ServerConfig tls = orbit::test::server_config();
+            orbit::config::ServerConfig tls = orbit::test::server_config();
             tls.port = kTlsPort;
             tls.ssl_cert = g_cert;
             tls.ssl_key = g_key;
@@ -211,7 +211,7 @@ std::unique_ptr<Server> HttpClientTest::server;
 std::unique_ptr<Server> HttpClientTest::tls_server;
 
 TEST_F(HttpClientTest, GetWithHeadersAndQuery) {
-    http::Client client;
+    orbit::http::Client client;
     auto req = get("/hello?name=orbit");
     req.headers.push_back({"X-Test", "abc"});
     auto res = client.send_sync(req);
@@ -223,8 +223,8 @@ TEST_F(HttpClientTest, GetWithHeadersAndQuery) {
 }
 
 TEST_F(HttpClientTest, PostBody) {
-    http::Client client;
-    http::ClientRequest req = get("/echo");
+    orbit::http::Client client;
+    orbit::http::ClientRequest req = get("/echo");
     req.method = "POST";
     req.body = std::string(100000, 'p') + "end";
     auto res = client.send_sync(req);
@@ -233,7 +233,7 @@ TEST_F(HttpClientTest, PostBody) {
 }
 
 TEST_F(HttpClientTest, ErrorStatusIsAResponseNotAFailure) {
-    http::Client client;
+    orbit::http::Client client;
     auto res = client.send_sync(get("/missing"));
     ASSERT_TRUE(res.ok()) << res.error;
     EXPECT_EQ(res.status, 404);
@@ -241,7 +241,7 @@ TEST_F(HttpClientTest, ErrorStatusIsAResponseNotAFailure) {
 }
 
 TEST_F(HttpClientTest, RedirectsAreFollowedWithinTheLimit) {
-    http::Client client;
+    orbit::http::Client client;
     auto res = client.send_sync(get("/redirect/3"));
     ASSERT_TRUE(res.ok()) << res.error;
     EXPECT_EQ(res.status, 200);
@@ -261,15 +261,15 @@ TEST_F(HttpClientTest, RedirectsAreFollowedWithinTheLimit) {
 }
 
 TEST_F(HttpClientTest, RedirectToANonHttpUrlIsRefused) {
-    http::Client client;
+    orbit::http::Client client;
     auto res = client.send_sync(get("/to-file"));
     EXPECT_FALSE(res.ok());
     EXPECT_TRUE(res.body.empty());
 }
 
 TEST_F(HttpClientTest, OnlyHttpUrls) {
-    http::Client client;
-    http::ClientRequest req;
+    orbit::http::Client client;
+    orbit::http::ClientRequest req;
     req.url = "file:///etc/passwd";
     auto res = client.send_sync(req);
     EXPECT_FALSE(res.ok());
@@ -277,7 +277,7 @@ TEST_F(HttpClientTest, OnlyHttpUrls) {
 }
 
 TEST_F(HttpClientTest, TimeoutAndSizeLimit) {
-    http::Client client;
+    orbit::http::Client client;
     auto slow = get("/slow");
     slow.timeout = std::chrono::milliseconds(300);
     auto started = std::chrono::steady_clock::now();
@@ -295,8 +295,8 @@ TEST_F(HttpClientTest, TimeoutAndSizeLimit) {
 }
 
 TEST_F(HttpClientTest, ConnectionRefused) {
-    http::Client client;
-    http::ClientRequest req;
+    orbit::http::Client client;
+    orbit::http::ClientRequest req;
     req.url = "http://127.0.0.1:1/";
     auto res = client.send_sync(req);
     EXPECT_FALSE(res.ok());
@@ -304,12 +304,12 @@ TEST_F(HttpClientTest, ConnectionRefused) {
 }
 
 TEST_F(HttpClientTest, ManyConcurrentRequests) {
-    http::Client client;
+    orbit::http::Client client;
     constexpr size_t kRequests = 100;
     Latch latch;
     std::atomic<size_t> good{0};
     for (size_t i = 0; i < kRequests; ++i) {
-        client.send(get("/hello?name=" + std::to_string(i)), [&, i](http::ClientResponse res) {
+        client.send(get("/hello?name=" + std::to_string(i)), [&, i](orbit::http::ClientResponse res) {
             if (res.ok() && res.body == "hello " + std::to_string(i)) ++good;
             latch.arrive();
         });
@@ -319,7 +319,7 @@ TEST_F(HttpClientTest, ManyConcurrentRequests) {
 }
 
 TEST_F(HttpClientTest, CoroutinesAwaitResponses) {
-    http::Client client;
+    orbit::http::Client client;
     std::string out;
     Latch done;
     fetch_two(client, &out, &done);
@@ -328,10 +328,10 @@ TEST_F(HttpClientTest, CoroutinesAwaitResponses) {
 }
 
 TEST_F(HttpClientTest, SendSyncInsideACallbackFailsInsteadOfHanging) {
-    http::Client client;
+    orbit::http::Client client;
     Latch done;
     std::string error;
-    client.send(get("/hello"), [&](http::ClientResponse) {
+    client.send(get("/hello"), [&](orbit::http::ClientResponse) {
         error = client.send_sync(get("/hello")).error;
         done.arrive();
     });
@@ -343,9 +343,9 @@ TEST_F(HttpClientTest, DestroyingTheClientCompletesPendingRequests) {
     Latch done;
     std::string error;
     {
-        http::Client client;
+        orbit::http::Client client;
         auto slow = get("/slow");
-        client.send(slow, [&](http::ClientResponse res) {
+        client.send(slow, [&](orbit::http::ClientResponse res) {
             error = res.error;
             done.arrive();
         });
@@ -357,8 +357,8 @@ TEST_F(HttpClientTest, DestroyingTheClientCompletesPendingRequests) {
 
 TEST_F(HttpClientTest, TlsIsVerifiedUnlessTurnedOff) {
     ASSERT_TRUE(tls_server);
-    http::Client client;
-    http::ClientRequest req;
+    orbit::http::Client client;
+    orbit::http::ClientRequest req;
     req.url = "https://127.0.0.1:" + std::to_string(kTlsPort) + "/hello?name=tls";
 
     auto refused = client.send_sync(req); // self-signed: not trusted by default
@@ -378,7 +378,7 @@ TEST_F(HttpClientTest, TlsIsVerifiedUnlessTurnedOff) {
 }
 
 TEST_F(HttpClientTest, SharedClient) {
-    auto res = http::Client::shared().send_sync(get("/hello?name=shared"));
+    auto res = orbit::http::Client::shared().send_sync(get("/hello?name=shared"));
     ASSERT_TRUE(res.ok()) << res.error;
     EXPECT_EQ(res.body, "hello shared");
 }

@@ -3,7 +3,7 @@
 #include <utility>
 #include <vector>
 
-namespace middleware {
+namespace orbit::middleware {
 
 routing::Middleware security_headers(SecurityHeadersOptions options) {
     // Built once; every request gets the same set.

@@ -17,20 +17,20 @@ namespace {
 // Starts an App on a detached thread and reports when listen() returns.
 // Detached so that a hang fails the test instead of hanging the binary.
 struct RunningApp {
-    server::App* app;
+    orbit::server::App* app;
     std::shared_ptr<std::atomic<bool>> returned = std::make_shared<std::atomic<bool>>(false);
 
     explicit RunningApp(uint16_t port) {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = port;
-        app = new server::App(cfg);
-        app->get("/", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app = new orbit::server::App(cfg);
+        app->get("/", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("ok");
             w->send(std::move(res));
         });
         auto done = returned;
-        server::App* a = app;
+        orbit::server::App* a = app;
         std::thread([a, done] {
             a->listen();
             *done = true;

@@ -20,15 +20,15 @@ constexpr uint16_t kH1Port = 8143; // http_version = Http1_1: no h2c
 const std::string kPreface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const std::string kEmptySettings("\x00\x00\x00\x04\x00\x00\x00\x00\x00", 9);
 
-network::socket_t connect_to(uint16_t port, int timeout_ms = 3000) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_to(uint16_t port, int timeout_ms = 3000) {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
-        return network::INVALID_SOCKET_FD;
+        orbit::network::close_socket(fd);
+        return orbit::network::INVALID_SOCKET_FD;
     }
 #ifdef _WIN32
     DWORD t = static_cast<DWORD>(timeout_ms);
@@ -40,11 +40,11 @@ network::socket_t connect_to(uint16_t port, int timeout_ms = 3000) {
     return fd;
 }
 
-void send_str(network::socket_t fd, const std::string& s) {
+void send_str(orbit::network::socket_t fd, const std::string& s) {
     ::send(fd, s.data(), static_cast<int>(s.size()), 0);
 }
 
-std::string read_some(network::socket_t fd) {
+std::string read_some(orbit::network::socket_t fd) {
     char buf[4096];
     auto n = ::recv(fd, buf, sizeof(buf), 0);
     return n > 0 ? std::string(buf, static_cast<size_t>(n)) : std::string();
@@ -80,30 +80,30 @@ Result get(uint16_t port, const std::string& path, long http_version) {
 
 class Server {
 public:
-    Server(uint16_t port, config::HttpVersion version) {
-        config::ServerConfig cfg = orbit::test::server_config();
+    Server(uint16_t port, orbit::config::HttpVersion version) {
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = port;
         cfg.http_version = version;
-        app_ = std::make_unique<server::App>(cfg);
-        app_->get("/hello", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app_ = std::make_unique<orbit::server::App>(cfg);
+        app_->get("/hello", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("hello q=" + req.query["q"]);
             w->send(std::move(res));
         });
-        app_->get("/stream", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app_->get("/stream", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             w->send_headers(res);
             w->write_chunk("a,");
             w->write_chunk("b,");
             w->write_chunk("c");
             w->end();
         });
-        server::App* app = app_.get();
+        orbit::server::App* app = app_.get();
         thread_ = std::thread([app] { app->listen(); });
         for (int i = 0; i < 200; ++i) {
-            network::socket_t fd = connect_to(port);
-            if (fd != network::INVALID_SOCKET_FD) {
-                network::close_socket(fd);
+            orbit::network::socket_t fd = connect_to(port);
+            if (fd != orbit::network::INVALID_SOCKET_FD) {
+                orbit::network::close_socket(fd);
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -112,13 +112,13 @@ public:
     }
     ~Server() {
         app_->stop();
-        network::socket_t fd = connect_to(port_); // wake the loop
-        if (fd != network::INVALID_SOCKET_FD) network::close_socket(fd);
+        orbit::network::socket_t fd = connect_to(port_); // wake the loop
+        if (fd != orbit::network::INVALID_SOCKET_FD) orbit::network::close_socket(fd);
         if (thread_.joinable()) thread_.join();
     }
 
 private:
-    std::unique_ptr<server::App> app_;
+    std::unique_ptr<orbit::server::App> app_;
     std::thread thread_;
     uint16_t port_ = 0;
 };
@@ -131,7 +131,7 @@ bool curl_has_http2() {
 
 TEST(H2cTest, PriorKnowledgeClientGetsHttp2) {
     if (!curl_has_http2()) GTEST_SKIP() << "libcurl was built without HTTP/2 support";
-    Server server(kH2Port, config::HttpVersion::Http2);
+    Server server(kH2Port, orbit::config::HttpVersion::Http2);
     auto r = get(kH2Port, "/hello?q=h2c", CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE);
     ASSERT_EQ(r.code, CURLE_OK) << curl_easy_strerror(r.code);
     EXPECT_EQ(r.version, static_cast<long>(CURL_HTTP_VERSION_2_0));
@@ -151,26 +151,26 @@ TEST(H2cTest, PriorKnowledgeClientGetsHttp2) {
 }
 
 TEST(H2cTest, PrefaceSplitAcrossWritesIsRecognised) {
-    Server server(kH2Port, config::HttpVersion::Http2);
-    network::socket_t fd = connect_to(kH2Port);
-    ASSERT_NE(fd, network::INVALID_SOCKET_FD);
+    Server server(kH2Port, orbit::config::HttpVersion::Http2);
+    orbit::network::socket_t fd = connect_to(kH2Port);
+    ASSERT_NE(fd, orbit::network::INVALID_SOCKET_FD);
     send_str(fd, kPreface.substr(0, 5)); // "PRI *": also a valid HTTP/1.1 start
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     send_str(fd, kPreface.substr(5) + kEmptySettings);
     std::string reply;
     for (std::string chunk = read_some(fd); !chunk.empty() && reply.size() < 9; chunk = read_some(fd)) reply += chunk;
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     ASSERT_GE(reply.size(), 9u);
     EXPECT_EQ(static_cast<uint8_t>(reply[3]), 0x04) << "expected the server's SETTINGS frame";
     EXPECT_EQ(reply.rfind("HTTP/1.1", 0), std::string::npos) << reply;
 }
 
 TEST(H2cTest, Http1OnlyServerDoesNotSpeakHttp2) {
-    Server server(kH1Port, config::HttpVersion::Http1_1);
-    network::socket_t fd = connect_to(kH1Port);
-    ASSERT_NE(fd, network::INVALID_SOCKET_FD);
+    Server server(kH1Port, orbit::config::HttpVersion::Http1_1);
+    orbit::network::socket_t fd = connect_to(kH1Port);
+    ASSERT_NE(fd, orbit::network::INVALID_SOCKET_FD);
     send_str(fd, kPreface + kEmptySettings);
     std::string reply = read_some(fd);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     EXPECT_EQ(reply.rfind("HTTP/1.1 ", 0), 0u) << "got: " << reply;
 }

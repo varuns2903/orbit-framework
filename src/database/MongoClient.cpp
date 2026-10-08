@@ -2,7 +2,7 @@
 #include <iostream>
 #include <mutex>
 
-namespace database {
+namespace orbit::database {
 
 namespace {
 

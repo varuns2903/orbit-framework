@@ -25,7 +25,7 @@
 // one is served, max_connections stays one limit, and a graceful shutdown
 // drains them all.
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -83,13 +83,13 @@ public:
     Server(int port, size_t loops, size_t max_connections = 0,
            std::chrono::milliseconds slow = std::chrono::milliseconds(400))
         : port_(port) {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.host = "127.0.0.1";
         cfg.port = static_cast<uint16_t>(port);
         cfg.event_loops = loops;
         cfg.max_connections = max_connections;
         cfg.worker_threads = 8;
-        app_ = std::make_unique<server::App>(cfg);
+        app_ = std::make_unique<orbit::server::App>(cfg);
         app_->get("/ping", [](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
             HttpResponse res;
             res.set_body("pong", "text/plain");
@@ -118,7 +118,7 @@ public:
         app_->stop();
         if (thread_.joinable()) thread_.join();
     }
-    server::App& app() { return *app_; }
+    orbit::server::App& app() { return *app_; }
     bool returned_within(std::chrono::milliseconds limit) {
         auto deadline = std::chrono::steady_clock::now() + limit;
         while (!returned_ && std::chrono::steady_clock::now() < deadline) {
@@ -130,7 +130,7 @@ public:
 
 private:
     int port_;
-    std::unique_ptr<server::App> app_;
+    std::unique_ptr<orbit::server::App> app_;
     std::thread thread_;
     std::atomic<bool> returned_{false};
 };

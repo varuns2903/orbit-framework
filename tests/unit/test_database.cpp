@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstdint>
 
-using namespace database;
+using namespace orbit::database;
 
 TEST(ConnectionPoolTest, AcquireRelease) {
     auto factory = []() { return std::make_shared<int>(42); };
@@ -203,7 +203,7 @@ TEST(ConnectionPoolHealthTest, WithoutHealthCheckNothingIsReplaced) {
 
 namespace {
 
-database::Row typed_row() {
+orbit::database::Row typed_row() {
     auto cols = std::make_shared<std::unordered_map<std::string, size_t>>();
     std::vector<std::optional<std::string>> vals;
     auto add = [&](const std::string& name, std::optional<std::string> v) {
@@ -223,7 +223,7 @@ database::Row typed_row() {
     add("junk", "12abc");
     add("empty", "");
     add("nan", "NaN");
-    return database::Row(std::move(vals), cols);
+    return orbit::database::Row(std::move(vals), cols);
 }
 
 } // namespace

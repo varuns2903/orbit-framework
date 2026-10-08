@@ -1,11 +1,12 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include <functional>
 #include <string>
 #include <orbit/http/json.hpp>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @brief Signature for a GraphQL executor function.

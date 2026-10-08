@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <unordered_map>
 #include <mutex>
@@ -8,7 +9,7 @@
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/ResponseWriter.hpp>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @brief Settings for the in-memory rate limiter.

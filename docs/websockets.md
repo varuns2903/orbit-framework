@@ -7,7 +7,7 @@ Orbit has built-in support for RFC 6455 WebSockets. Because the core engine is a
 Instead of `app.get()`, use `app.ws()` and pass a handler that accepts a `WebSocketConnection&`.
 
 ```cpp
-app.ws("/chat", [](http::websocket::WebSocketConnection& ws) {
+app.ws("/chat", [](orbit::http::websocket::WebSocketConnection& ws) {
     
     // Register message callback
     ws.on_message([&ws](const std::string& msg) {
@@ -35,7 +35,7 @@ with status `1009` (Message Too Big). Malformed frames close it with `1002`.
 Lower the limit inside the route handler, before any message arrives:
 
 ```cpp
-app.ws("/chat", [](http::websocket::WebSocketConnection& ws) {
+app.ws("/chat", [](orbit::http::websocket::WebSocketConnection& ws) {
     ws.set_max_message_size(64 * 1024); // 64 KiB
     ws.on_message([&ws](const std::string& msg) { ws.send(msg); });
 });
@@ -48,7 +48,7 @@ messages go to `on_binary_message()` when it is set; otherwise `on_message()`
 receives both kinds, as it always has.
 
 ```cpp
-app.ws("/echo", [](http::websocket::WebSocketConnection& ws) {
+app.ws("/echo", [](orbit::http::websocket::WebSocketConnection& ws) {
     ws.on_message([&ws](const std::string& text) { ws.send(text); });
     ws.on_binary_message([&ws](const std::string& data) { ws.send_binary(data); });
 });
@@ -86,9 +86,9 @@ cross-site WebSocket hijacking:
 #include <orbit/middleware/JwtAuth.hpp>
 
 app.ws("/chat",
-       {middleware::require_origin({"https://app.example.com"}),
-        middleware::jwt_auth(secret)},
-       [](http::websocket::WebSocketConnection& ws) { /* ... */ });
+       {orbit::middleware::require_origin({"https://app.example.com"}),
+        orbit::middleware::jwt_auth(secret)},
+       [](orbit::http::websocket::WebSocketConnection& ws) { /* ... */ });
 ```
 
 Handshakes that are not `GET`, lack `Connection: Upgrade`, carry a malformed

@@ -17,7 +17,7 @@
 #include <optional>
 #include <unordered_map>
 
-namespace middleware {
+namespace orbit::middleware {
 
 static std::string base64url_encode(const unsigned char* input, int length) {
     int out_len = 4 * ((length + 2) / 3);

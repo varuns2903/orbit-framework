@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <memory>
 #include <functional>
@@ -10,7 +11,7 @@
 #include <orbit/network/Proactor.hpp>
 #include <orbit/database/ResultSet.hpp>
 
-namespace database {
+namespace orbit::database {
 
 /**
  * @brief An asynchronous PostgreSQL client using libpq and a network Proactor.

@@ -12,7 +12,7 @@
 #include <cstring>
 #include <string>
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
 

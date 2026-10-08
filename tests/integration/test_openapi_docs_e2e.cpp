@@ -12,13 +12,13 @@ namespace {
 constexpr uint16_t kPort = 8117;
 
 std::string get(const std::string& path) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
+        orbit::network::close_socket(fd);
         return "";
     }
 #ifdef _WIN32
@@ -37,7 +37,7 @@ std::string get(const std::string& path) {
         if (n <= 0) break;
         out.append(buf, static_cast<size_t>(n));
     }
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return out;
 }
 
@@ -45,15 +45,15 @@ std::string get(const std::string& path) {
 
 class OpenApiDocsTest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
-        app = new server::App(cfg);
-        app->get("/ping", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app = new orbit::server::App(cfg);
+        app->get("/ping", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("pong");
             w->send(std::move(res));
         });
@@ -75,7 +75,7 @@ protected:
     }
 };
 
-server::App* OpenApiDocsTest::app = nullptr;
+orbit::server::App* OpenApiDocsTest::app = nullptr;
 std::thread OpenApiDocsTest::server_thread;
 
 TEST_F(OpenApiDocsTest, CdnAssetsArePinnedWithSubresourceIntegrity) {

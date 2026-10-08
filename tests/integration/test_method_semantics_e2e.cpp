@@ -12,7 +12,7 @@ namespace {
 constexpr uint16_t kPort = 8109;
 
 std::string exchange(const std::string& request, const std::string& until) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
@@ -33,7 +33,7 @@ std::string exchange(const std::string& request, const std::string& until) {
         if (n <= 0) break;
         out.append(buf, static_cast<size_t>(n));
     }
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return out;
 }
 
@@ -41,31 +41,31 @@ std::string exchange(const std::string& request, const std::string& until) {
 
 class MethodSemanticsTest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
-        app = new server::App(cfg);
-        app->get("/thing", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app = new orbit::server::App(cfg);
+        app->get("/thing", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("hello");
             w->send(std::move(res));
         });
-        app->post("/thing", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->post("/thing", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("posted");
             w->send(std::move(res));
         });
-        app->get("/users/:id", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/users/:id", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("user " + req.params["id"]);
             w->send(std::move(res));
         });
-        app->del("/empty", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::NoContent);
+        app->del("/empty", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
+            res.status(orbit::http::HttpStatus::NoContent);
             res.body = "should not be sent";
             w->send(std::move(res));
         });
@@ -81,7 +81,7 @@ protected:
     }
 };
 
-server::App* MethodSemanticsTest::app = nullptr;
+orbit::server::App* MethodSemanticsTest::app = nullptr;
 std::thread MethodSemanticsTest::server_thread;
 
 TEST_F(MethodSemanticsTest, HeadUsesGetHandlerWithoutBody) {

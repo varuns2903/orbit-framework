@@ -3,7 +3,7 @@
 #include <orbit/utils/PrometheusRegistry.hpp>
 #include <chrono>
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
 

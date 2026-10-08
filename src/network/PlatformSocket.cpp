@@ -4,7 +4,7 @@
 
 #include <cstring>
 
-namespace network {
+namespace orbit::network {
 
 void initialize_platform_networking() {
 #ifdef _WIN32

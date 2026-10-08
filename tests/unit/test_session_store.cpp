@@ -7,10 +7,10 @@
 #include <stdexcept>
 #include <thread>
 
-using namespace http;
-using middleware::MemorySessionStore;
-using middleware::SessionManager;
-using middleware::SessionOptions;
+using namespace orbit::http;
+using orbit::middleware::MemorySessionStore;
+using orbit::middleware::SessionManager;
+using orbit::middleware::SessionOptions;
 
 namespace {
 
@@ -29,8 +29,8 @@ public:
     void write_chunk(std::string_view) override {}
     void end() override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -43,7 +43,7 @@ struct Outcome {
 
 // One request: optional cookie in, `handler` runs with the session, response out.
 Outcome request(SessionManager& sm, const std::string& cookie,
-                const std::function<void(middleware::Session&)>& handler = nullptr) {
+                const std::function<void(orbit::middleware::Session&)>& handler = nullptr) {
     HttpRequest req;
     if (!cookie.empty()) req.cookies["session_id"] = cookie;
     auto w = std::make_shared<SessionWriter>();
@@ -72,10 +72,10 @@ TEST(SessionStoreTest, NewVisitorGetsSessionAndCookie) {
 TEST(SessionStoreTest, DataPersistsAcrossRequests) {
     auto store = std::make_shared<MemorySessionStore>();
     SessionManager sm(store);
-    Outcome first = request(sm, "", [](middleware::Session& s) { s.set("user", "alice"); });
+    Outcome first = request(sm, "", [](orbit::middleware::Session& s) { s.set("user", "alice"); });
 
     std::string seen;
-    Outcome second = request(sm, first.id, [&](middleware::Session& s) { seen = s.get("user").value_or(""); });
+    Outcome second = request(sm, first.id, [&](orbit::middleware::Session& s) { seen = s.get("user").value_or(""); });
     EXPECT_EQ(second.id, first.id);
     EXPECT_FALSE(second.cookie) << "a known, unchanged session needs no new cookie";
     EXPECT_EQ(seen, "alice");
@@ -84,10 +84,10 @@ TEST(SessionStoreTest, DataPersistsAcrossRequests) {
 TEST(SessionStoreTest, RegenerateIssuesNewIdAndRetiresTheOld) {
     auto store = std::make_shared<MemorySessionStore>();
     SessionManager sm(store);
-    Outcome before = request(sm, "", [](middleware::Session& s) { s.set("cart", "3 items"); });
+    Outcome before = request(sm, "", [](orbit::middleware::Session& s) { s.set("cart", "3 items"); });
 
     // Login: same data, new id.
-    Outcome login = request(sm, before.id, [](middleware::Session& s) {
+    Outcome login = request(sm, before.id, [](orbit::middleware::Session& s) {
         s.regenerate();
         s.set("user", "alice");
     });
@@ -103,8 +103,8 @@ TEST(SessionStoreTest, RegenerateIssuesNewIdAndRetiresTheOld) {
 TEST(SessionStoreTest, DestroyLogsOut) {
     auto store = std::make_shared<MemorySessionStore>();
     SessionManager sm(store);
-    Outcome login = request(sm, "", [](middleware::Session& s) { s.set("user", "alice"); });
-    Outcome logout = request(sm, login.id, [](middleware::Session& s) { s.destroy(); });
+    Outcome login = request(sm, "", [](orbit::middleware::Session& s) { s.set("user", "alice"); });
+    Outcome logout = request(sm, login.id, [](orbit::middleware::Session& s) { s.destroy(); });
     ASSERT_TRUE(logout.cookie);
     EXPECT_EQ(logout.cookie->value, "");
     EXPECT_EQ(logout.cookie->max_age, 0);
@@ -112,7 +112,7 @@ TEST(SessionStoreTest, DestroyLogsOut) {
 
     // The old cookie now gets a brand-new, empty session.
     std::string user = "unset";
-    Outcome after = request(sm, login.id, [&](middleware::Session& s) { user = s.get("user").value_or(""); });
+    Outcome after = request(sm, login.id, [&](orbit::middleware::Session& s) { user = s.get("user").value_or(""); });
     EXPECT_NE(after.id, login.id);
     EXPECT_EQ(user, "");
 }
@@ -136,7 +136,7 @@ TEST(SessionStoreTest, SaveUninitializedFalseCreatesNothingUntilWritten) {
     EXPECT_FALSE(visitor.cookie);
     EXPECT_EQ(store->size(), 0u);
 
-    Outcome writer = request(sm, "", [](middleware::Session& s) { s.set("lang", "en"); });
+    Outcome writer = request(sm, "", [](orbit::middleware::Session& s) { s.set("lang", "en"); });
     ASSERT_TRUE(writer.cookie);
     EXPECT_EQ(store->size(), 1u);
 }
@@ -146,7 +146,7 @@ TEST(SessionStoreTest, IdleSessionsExpire) {
     SessionOptions opts;
     opts.ttl_seconds = 1;
     SessionManager sm(store, opts);
-    Outcome first = request(sm, "", [](middleware::Session& s) { s.set("k", "v"); });
+    Outcome first = request(sm, "", [](orbit::middleware::Session& s) { s.set("k", "v"); });
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     Outcome later = request(sm, first.id);
     EXPECT_NE(later.id, first.id);
@@ -165,11 +165,11 @@ TEST(SessionStoreTest, MemoryStoreIsBounded) {
 TEST(SessionStoreTest, EraseRemovesAKeyAndPersists) {
     auto store = std::make_shared<MemorySessionStore>();
     SessionManager sm(store);
-    Outcome first = request(sm, "", [](middleware::Session& s) {
+    Outcome first = request(sm, "", [](orbit::middleware::Session& s) {
         s.set("keep", "1");
         s.set("drop", "2");
     });
-    request(sm, first.id, [](middleware::Session& s) {
+    request(sm, first.id, [](orbit::middleware::Session& s) {
         s.erase("drop");
         s.erase("never-set"); // erasing nothing is fine
     });
@@ -205,21 +205,21 @@ TEST(SessionStoreTest, RedisStoreKeepsDataAndRetiresOldIds) {
     if (std::system(start.c_str()) != 0) GTEST_SKIP() << "could not start redis-server";
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
-    auto store = std::make_shared<middleware::RedisSessionStore>("127.0.0.1", kPort);
+    auto store = std::make_shared<orbit::middleware::RedisSessionStore>("127.0.0.1", kPort);
     SessionManager sm(store);
-    Outcome first = request(sm, "", [](middleware::Session& s) { s.set("user", "alice"); });
+    Outcome first = request(sm, "", [](orbit::middleware::Session& s) { s.set("user", "alice"); });
 
     std::string seen;
-    request(sm, first.id, [&](middleware::Session& s) { seen = s.get("user").value_or(""); });
+    request(sm, first.id, [&](orbit::middleware::Session& s) { seen = s.get("user").value_or(""); });
     EXPECT_EQ(seen, "alice");
 
-    Outcome regen = request(sm, first.id, [](middleware::Session& s) { s.regenerate(); });
+    Outcome regen = request(sm, first.id, [](orbit::middleware::Session& s) { s.regenerate(); });
     ASSERT_TRUE(regen.cookie);
     EXPECT_FALSE(store->load(first.id).has_value());
     ASSERT_TRUE(store->load(regen.cookie->value).has_value());
     EXPECT_EQ(store->load(regen.cookie->value)->at("user"), "alice");
 
-    request(sm, regen.cookie->value, [](middleware::Session& s) { s.destroy(); });
+    request(sm, regen.cookie->value, [](orbit::middleware::Session& s) { s.destroy(); });
     EXPECT_FALSE(store->load(regen.cookie->value).has_value());
 
     std::string stop = "redis-cli -p " + std::to_string(kPort) + " shutdown nosave >/dev/null 2>&1";
@@ -249,11 +249,11 @@ void stop_session_redis() {
 // that are not strings are skipped rather than failing the load.
 TEST(SessionStoreTest, RedisStoreReadsLegacyAndMixedValues) {
     if (!start_session_redis()) GTEST_SKIP() << "redis-server not available";
-    database::RedisClient raw("127.0.0.1", kSessionRedisPort);
+    orbit::database::RedisClient raw("127.0.0.1", kSessionRedisPort);
     ASSERT_TRUE(raw.set("orbit:session:legacy", "1"));
     ASSERT_TRUE(raw.set("orbit:session:mixed", R"({"name": "ada", "visits": 3, "admin": true})"));
 
-    middleware::RedisSessionStore store("127.0.0.1", kSessionRedisPort);
+    orbit::middleware::RedisSessionStore store("127.0.0.1", kSessionRedisPort);
     auto legacy = store.load("legacy");
     ASSERT_TRUE(legacy.has_value());
     EXPECT_TRUE(legacy->empty());
@@ -274,10 +274,10 @@ TEST(SessionStoreTest, RedisStoreReadsLegacyAndMixedValues) {
 TEST(SessionStoreTest, RedisSessionManagerFromHostAndPort) {
     if (!start_session_redis()) GTEST_SKIP() << "redis-server not available";
     SessionManager sm("127.0.0.1", kSessionRedisPort);
-    Outcome first = request(sm, "", [](middleware::Session& s) { s.set("cart", "3 items"); });
+    Outcome first = request(sm, "", [](orbit::middleware::Session& s) { s.set("cart", "3 items"); });
     ASSERT_TRUE(first.cookie);
     std::string seen;
-    Outcome again = request(sm, first.id, [&](middleware::Session& s) { seen = s.get("cart").value_or(""); });
+    Outcome again = request(sm, first.id, [&](orbit::middleware::Session& s) { seen = s.get("cart").value_or(""); });
     EXPECT_EQ(seen, "3 items");
     EXPECT_EQ(again.id, first.id);
     stop_session_redis();

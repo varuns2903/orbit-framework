@@ -16,7 +16,7 @@
 #include <orbit/utils/FileIO.hpp>
 
 
-namespace server {
+namespace orbit::server {
 
 Connection::Connection(network::Socket socket, const std::string& client_ip, network::Proactor& proactor, const routing::Router& router, ConnectionManager& manager, concurrency::ThreadPool& thread_pool, TimerManager& timer_manager, size_t max_body_size, network::TlsContext* tls_context)
     : socket_(std::move(socket)), client_ip_(client_ip), proactor_(proactor), router_(router), manager_(manager), thread_pool_(thread_pool), timer_manager_(timer_manager), max_body_size_(max_body_size) {

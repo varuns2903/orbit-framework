@@ -18,7 +18,7 @@
 #include <unistd.h>
 #endif
 
-namespace http {
+namespace orbit::http {
 
 std::string multipart_boundary(std::string_view content_type) {
     size_t pos = content_type.find(';');

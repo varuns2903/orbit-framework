@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <orbit/websocket/EventRouter.hpp>
 
-using namespace websocket;
+using namespace orbit::websocket;
 
 TEST(EventRouterTest, InstantiationAndRegistration) {
     EventRouter<EmptySession> router;

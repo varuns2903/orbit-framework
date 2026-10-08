@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <mysql.h>
 #include <string>
 #include <memory>
@@ -9,7 +10,7 @@
 #include <orbit/network/Proactor.hpp>
 #include <orbit/database/ResultSet.hpp>
 
-namespace database {
+namespace orbit::database {
 
 /**
  * @brief An asynchronous MySQL client using coroutines and a network Proactor.

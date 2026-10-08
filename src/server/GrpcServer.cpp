@@ -4,7 +4,7 @@
 #ifdef ORBIT_ENABLE_GRPC
 #include <grpcpp/grpcpp.h>
 
-namespace server {
+namespace orbit::server {
 
 GrpcServer::GrpcServer() = default;
 
@@ -47,7 +47,7 @@ void GrpcServer::stop() {
 } // namespace server
 #else
 // Built without gRPC: fail loudly instead of pretending to serve.
-namespace server {
+namespace orbit::server {
 
 namespace {
 [[noreturn]] void no_grpc() {

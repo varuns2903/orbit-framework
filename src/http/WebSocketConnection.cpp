@@ -3,7 +3,7 @@
 #include <orbit/network/PlatformSocket.hpp>
 #include <cstring>
 
-namespace http {
+namespace orbit::http {
 namespace websocket {
 
 namespace {

@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <iostream>
 
-namespace network {
+namespace orbit::network {
 
 static LPFN_ACCEPTEX pAcceptEx = nullptr;
 static LPFN_CONNECTEX pConnectEx = nullptr;

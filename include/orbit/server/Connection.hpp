@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/network/Socket.hpp>
 #include <orbit/network/Proactor.hpp>
 #include <orbit/routing/Router.hpp>
@@ -13,10 +14,10 @@
 #include <memory>
 #include <mutex>
 
-namespace http::websocket { class WebSocketConnection; }
-namespace http::h2 { class Http2Session; }
+namespace orbit::http::websocket { class WebSocketConnection; }
+namespace orbit::http::h2 { class Http2Session; }
 
-namespace server {
+namespace orbit::server {
 
 class ConnectionManager; // Forward declaration
 

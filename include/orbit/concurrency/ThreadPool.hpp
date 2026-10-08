@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <vector>
 #include <thread>
 #include <queue>
@@ -7,7 +8,7 @@
 #include <functional>
 #include <atomic>
 
-namespace concurrency {
+namespace orbit::concurrency {
 
 class ThreadPool {
 public:

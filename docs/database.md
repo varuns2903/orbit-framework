@@ -15,11 +15,11 @@ Include the necessary headers:
 
 ## Awaiting Database Queries
 
-Define a handler that returns `concurrency::Task` instead of `void`. You can then use the `co_await` keyword for database operations.
+Define a handler that returns `orbit::concurrency::Task` instead of `void`. You can then use the `co_await` keyword for database operations.
 
 ```cpp
-using namespace database;
-using namespace concurrency;
+using namespace orbit::database;
+using namespace orbit::concurrency;
 
 Task db_handler(HttpRequest& req, std::shared_ptr<ResponseWriter> writer) {
     // Initialize PostgresClient using the active Proactor event loop
@@ -52,19 +52,19 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Item, name, qty)
 ORBIT_REGISTER_MODEL(Item, "items")
 
 // SELECT with sorting and paging
-auto page = co_await query_Item(db).where(orm::Col("qty") > 0)
-                                   .order_by("qty", orm::Order::Desc)
+auto page = co_await query_Item(db).where(orbit::orm::Col("qty") > 0)
+                                   .order_by("qty", orbit::orm::Order::Desc)
                                    .limit(20).offset(40)
                                    .get_async();
 
-uint64_t n = co_await query_Item(db).where(orm::Col("qty") == 0).count_async();
+uint64_t n = co_await query_Item(db).where(orbit::orm::Col("qty") == 0).count_async();
 
 co_await query_Item(db).insert_async(Item{"widget", 3});
 
 // UPDATE / DELETE resume with the number of rows affected
-uint64_t changed = co_await query_Item(db).where(orm::Col("name") == "widget")
+uint64_t changed = co_await query_Item(db).where(orbit::orm::Col("name") == "widget")
                                           .update_async({{"qty", 5}});
-uint64_t removed = co_await query_Item(db).where(orm::Col("qty") <= 0).remove_async();
+uint64_t removed = co_await query_Item(db).where(orbit::orm::Col("qty") <= 0).remove_async();
 ```
 
 `update_async()` and `remove_async()` refuse to run (`std::logic_error`) without a `where()` condition, so a forgotten filter cannot rewrite or empty a table; call `.all()` to really affect every row. Table and column names must be plain identifiers; SQL reserved words among them (`user`, `order`, `group`, ...) are quoted for the database (`"user"` on PostgreSQL, `` `user` `` on MySQL), while other names stay unquoted so PostgreSQL's usual lower-case folding still applies. `select_statement()`, `count_statement()`, `update_statement()` and `delete_statement()` return the generated SQL and parameters without running it.
@@ -79,7 +79,7 @@ co_await query_async(pg_client, "SELECT * FROM users WHERE email = $1 AND age > 
                      {email, std::to_string(min_age)});
 ```
 
-The ORM does this for you. `orm::Col("name") == value`, `where(field, op, value)`
+The ORM does this for you. `orbit::orm::Col("name") == value`, `where(field, op, value)`
 and `insert_async(model)` bind every value (as `$n` parameters on PostgreSQL, or
 as literals escaped with `mysql_real_escape_string` on MariaDB/MySQL). Column and
 table names cannot be bound, so they must be plain identifiers (`name`,
@@ -144,24 +144,24 @@ app.get("/db", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
 
 ## Connection Pools
 
-`database::ConnectionPool` hands out connected clients and takes them back. Given a health check, it also drops clients that have stopped working (a database restart, a failover, an idle connection cut by a firewall) and connects replacements in the background, retrying failed attempts with exponential backoff:
+`orbit::database::ConnectionPool` hands out connected clients and takes them back. Given a health check, it also drops clients that have stopped working (a database restart, a failover, an idle connection cut by a firewall) and connects replacements in the background, retrying failed attempts with exponential backoff:
 
 ```cpp
 #include <orbit/database/ConnectionPool.hpp>
 
-database::PoolOptions<database::PostgresClient> opts;
-opts.health_check = [](database::PostgresClient& c) { return c.is_healthy(); };
+orbit::database::PoolOptions<orbit::database::PostgresClient> opts;
+opts.health_check = [](orbit::database::PostgresClient& c) { return c.is_healthy(); };
 opts.initial_backoff = std::chrono::milliseconds(100); // then 200, 400, ... up to max_backoff
 opts.max_backoff = std::chrono::seconds(30);
 
-auto pool = std::make_shared<database::ConnectionPool<database::PostgresClient>>(
-    8, [&] { return std::make_shared<database::PostgresClient>(&proactor, conninfo); }, opts);
+auto pool = std::make_shared<orbit::database::ConnectionPool<orbit::database::PostgresClient>>(
+    8, [&] { return std::make_shared<orbit::database::PostgresClient>(&proactor, conninfo); }, opts);
 
 pool->init([](auto client, auto done) { client->connect(done); },
            [](bool all_connected) { /* connections that failed are retried */ });
 
-pool->acquire([pool](std::shared_ptr<database::PostgresClient> db) {
-    db->execute("SELECT 1", {}, [pool, db](const database::ResultSet& res) {
+pool->acquire([pool](std::shared_ptr<orbit::database::PostgresClient> db) {
+    db->execute("SELECT 1", {}, [pool, db](const orbit::database::ResultSet& res) {
         pool->release(db); // an unhealthy client is replaced instead of reused
     });
 });

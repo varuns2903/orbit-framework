@@ -39,13 +39,13 @@ struct Results {
     bool bad_operator_threw = false;
 };
 
-concurrency::Task scenario(std::shared_ptr<database::PostgresClient> db, Results* r, std::promise<void>* done) {
-    r->connected = co_await database::connect_async(db);
+orbit::concurrency::Task scenario(std::shared_ptr<orbit::database::PostgresClient> db, Results* r, std::promise<void>* done) {
+    r->connected = co_await orbit::database::connect_async(db);
     if (r->connected) {
         // Awaiters are named locals: GCC 13 hits an internal compiler error on
         // co_await expressions holding braced lists or non-trivial temporaries.
-        using People = orm::QueryBuilder<database::PostgresClient, Person>;
-        auto create = database::query_async(db, "CREATE TABLE orm_people (name text, note text);");
+        using People = orbit::orm::QueryBuilder<orbit::database::PostgresClient, Person>;
+        auto create = orbit::database::query_async(db, "CREATE TABLE orm_people (name text, note text);");
         co_await create;
 
         People insert_evil(db, "orm_people");
@@ -59,7 +59,7 @@ concurrency::Task scenario(std::shared_ptr<database::PostgresClient> db, Results
         co_await insert2;
 
         People find_evil(db, "orm_people");
-        find_evil.where(orm::Col("name") == kEvilName);
+        find_evil.where(orbit::orm::Col("name") == kEvilName);
         auto get_evil = find_evil.get_async();
         std::vector<Person> evil = co_await get_evil;
         r->evil_matches = evil.size();
@@ -79,14 +79,14 @@ concurrency::Task scenario(std::shared_ptr<database::PostgresClient> db, Results
             r->bad_operator_threw = true;
         }
 
-        auto count_query = database::query_async(db, "SELECT count(*) AS n FROM orm_people;");
-        database::ResultSet count = co_await count_query;
+        auto count_query = orbit::database::query_async(db, "SELECT count(*) AS n FROM orm_people;");
+        orbit::database::ResultSet count = co_await count_query;
         if (count.size() == 1) r->row_count = count[0].get(0).value_or("");
 
-        orm::Params params;
+        orbit::orm::Params params;
         params.emplace_back(std::string("it's; fine"));
-        auto param_query = database::query_async(db, "SELECT $1::text AS v;", params);
-        database::ResultSet param = co_await param_query;
+        auto param_query = orbit::database::query_async(db, "SELECT $1::text AS v;", params);
+        orbit::database::ResultSet param = co_await param_query;
         if (param.size() == 1) r->param_query_value = param[0].get(0).value_or("");
     }
     done->set_value();
@@ -111,12 +111,12 @@ struct CrudResults {
     uint64_t nonzero_after_all = 99;
 };
 
-concurrency::Task crud_scenario(std::shared_ptr<database::PostgresClient> db, CrudResults* r, std::promise<void>* done) {
-    using Stocks = orm::QueryBuilder<database::PostgresClient, Stock>;
-    r->connected = co_await database::connect_async(db);
+orbit::concurrency::Task crud_scenario(std::shared_ptr<orbit::database::PostgresClient> db, CrudResults* r, std::promise<void>* done) {
+    using Stocks = orbit::orm::QueryBuilder<orbit::database::PostgresClient, Stock>;
+    r->connected = co_await orbit::database::connect_async(db);
     if (r->connected) {
         // "user" is a reserved word: only works because the ORM quotes it.
-        auto create = database::query_async(db, "CREATE TABLE \"user\" (name text, qty int);");
+        auto create = orbit::database::query_async(db, "CREATE TABLE \"user\" (name text, qty int);");
         co_await create;
         const char* names[] = {"a", "b", "c", "d", "e"};
         for (int i = 0; i < 5; ++i) {
@@ -127,29 +127,29 @@ concurrency::Task crud_scenario(std::shared_ptr<database::PostgresClient> db, Cr
         }
 
         Stocks page(db, "user");
-        page.order_by("qty", orm::Order::Desc).limit(2).offset(1);
+        page.order_by("qty", orbit::orm::Order::Desc).limit(2).offset(1);
         auto get_page = page.get_async();
         std::vector<Stock> rows = co_await get_page;
         for (const auto& s : rows) r->page.push_back(s.name);
 
         Stocks over2(db, "user");
-        over2.where(orm::Col("qty") > 2);
+        over2.where(orbit::orm::Col("qty") > 2);
         auto count = over2.count_async();
         r->count_over_2 = co_await count;
 
         Stocks upd(db, "user");
-        upd.where(orm::Col("name") == "c");
+        upd.where(orbit::orm::Col("name") == "c");
         nlohmann::json changes = {{"qty", 100}};
         auto update = upd.update_async(changes);
         r->updated = co_await update;
         Stocks find_c(db, "user");
-        find_c.where(orm::Col("name") == "c");
+        find_c.where(orbit::orm::Col("name") == "c");
         auto get_c = find_c.get_async();
         std::vector<Stock> c = co_await get_c;
         if (c.size() == 1) r->c_qty_after_update = c[0].qty;
 
         Stocks del(db, "user");
-        del.where(orm::Col("qty") < 2);
+        del.where(orbit::orm::Col("qty") < 2);
         auto remove = del.remove_async();
         r->removed = co_await remove;
         Stocks left(db, "user");
@@ -169,7 +169,7 @@ concurrency::Task crud_scenario(std::shared_ptr<database::PostgresClient> db, Cr
         auto update_all = everything.update_async(zero);
         r->updated_all = co_await update_all;
         Stocks nonzero(db, "user");
-        nonzero.where(orm::Col("qty") != 0);
+        nonzero.where(orbit::orm::Col("qty") != 0);
         auto count_nonzero = nonzero.count_async();
         r->nonzero_after_all = co_await count_nonzero;
     }
@@ -220,13 +220,13 @@ std::string OrmPostgresTest::socket_dir;
 bool OrmPostgresTest::available = false;
 
 TEST_F(OrmPostgresTest, ValuesAreBoundNotSpliced) {
-    network::EpollProactor proactor;
+    orbit::network::EpollProactor proactor;
     std::atomic<bool> running{true};
     std::thread loop([&] {
         while (running) proactor.run_once(50);
     });
 
-    auto db = std::make_shared<database::PostgresClient>(
+    auto db = std::make_shared<orbit::database::PostgresClient>(
         &proactor, "host=" + socket_dir + " port=" + std::to_string(kPgPort) + " user=postgres dbname=postgres");
     Results r;
     std::promise<void> done;
@@ -249,17 +249,17 @@ TEST_F(OrmPostgresTest, ValuesAreBoundNotSpliced) {
 
 namespace {
 
-class MigrationWriter : public http::ResponseWriter {
+class MigrationWriter : public orbit::http::ResponseWriter {
 public:
     std::promise<std::pair<int, std::string>> result;
-    void send(http::HttpResponse&& r) override { result.set_value({static_cast<int>(r.status_code), r.body}); }
-    void send_headers(http::HttpResponse&) override {}
+    void send(orbit::http::HttpResponse&& r) override { result.set_value({static_cast<int>(r.status_code), r.body}); }
+    void send_headers(orbit::http::HttpResponse&) override {}
     void write_chunk(std::string_view) override {}
     void end() override {}
     void add_interceptor(Interceptor) override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -276,14 +276,14 @@ struct ErrorResults {
     bool mig_b_exists = true;
 };
 
-concurrency::Task error_scenario(std::shared_ptr<database::PostgresClient> db, ErrorResults* r, std::promise<void>* done) {
-    r->connected = co_await database::connect_async(db);
+orbit::concurrency::Task error_scenario(std::shared_ptr<orbit::database::PostgresClient> db, ErrorResults* r, std::promise<void>* done) {
+    r->connected = co_await orbit::database::connect_async(db);
     if (r->connected) {
-        auto missing = co_await database::query_async(db, "SELECT * FROM no_such_table;");
+        auto missing = co_await orbit::database::query_async(db, "SELECT * FROM no_such_table;");
         r->missing_ok = missing.ok();
         r->missing_error = missing.error();
 
-        auto nulls = co_await database::query_async(db, "SELECT NULL::text AS a, ''::text AS b;");
+        auto nulls = co_await orbit::database::query_async(db, "SELECT NULL::text AS a, ''::text AS b;");
         if (nulls.ok() && nulls.size() == 1) {
             r->null_is_nullopt = !nulls[0].get(0).has_value();
             r->empty_value = nulls[0].get(1).value_or("nullopt");
@@ -293,10 +293,10 @@ concurrency::Task error_scenario(std::shared_ptr<database::PostgresClient> db, E
     done->set_value();
 }
 
-concurrency::Task inspect_migrations(std::shared_ptr<database::PostgresClient> db, ErrorResults* r, std::promise<void>* done) {
-    auto tracked = co_await database::query_async(db, "SELECT string_agg(version, ',' ORDER BY version) FROM orbit_migrations;");
+orbit::concurrency::Task inspect_migrations(std::shared_ptr<orbit::database::PostgresClient> db, ErrorResults* r, std::promise<void>* done) {
+    auto tracked = co_await orbit::database::query_async(db, "SELECT string_agg(version, ',' ORDER BY version) FROM orbit_migrations;");
     if (tracked.ok() && tracked.size() == 1) r->tracked = tracked[0].get(0).value_or("");
-    auto exists = co_await database::query_async(db, "SELECT to_regclass('mig_b') IS NOT NULL;");
+    auto exists = co_await orbit::database::query_async(db, "SELECT to_regclass('mig_b') IS NOT NULL;");
     if (exists.ok() && exists.size() == 1) r->mig_b_exists = exists[0].get(0).value_or("") == "t";
     done->set_value();
 }
@@ -304,12 +304,12 @@ concurrency::Task inspect_migrations(std::shared_ptr<database::PostgresClient> d
 } // namespace
 
 TEST_F(OrmPostgresTest, ErrorsNullsAndTransactionalMigrations) {
-    network::EpollProactor proactor;
+    orbit::network::EpollProactor proactor;
     std::atomic<bool> running{true};
     std::thread loop([&] {
         while (running) proactor.run_once(50);
     });
-    auto db = std::make_shared<database::PostgresClient>(
+    auto db = std::make_shared<orbit::database::PostgresClient>(
         &proactor, "host=" + socket_dir + " port=" + std::to_string(kPgPort) + " user=postgres dbname=postgres");
 
     ErrorResults r;
@@ -336,7 +336,7 @@ TEST_F(OrmPostgresTest, ErrorsNullsAndTransactionalMigrations) {
     auto run = [&]() {
         auto writer = std::make_shared<MigrationWriter>();
         auto f = writer->result.get_future();
-        orm::MigrationRunner<database::PostgresClient>::run_migrations(db, dir.string(), writer);
+        orbit::orm::MigrationRunner<orbit::database::PostgresClient>::run_migrations(db, dir.string(), writer);
         EXPECT_EQ(f.wait_for(std::chrono::seconds(20)), std::future_status::ready);
         return f.get();
     };
@@ -362,13 +362,13 @@ TEST_F(OrmPostgresTest, ErrorsNullsAndTransactionalMigrations) {
     loop.join();
 }
 TEST_F(OrmPostgresTest, UpdateDeleteOrderLimitCountAndQuoting) {
-    network::EpollProactor proactor;
+    orbit::network::EpollProactor proactor;
     std::atomic<bool> running{true};
     std::thread loop([&] {
         while (running) proactor.run_once(50);
     });
 
-    auto db = std::make_shared<database::PostgresClient>(
+    auto db = std::make_shared<orbit::database::PostgresClient>(
         &proactor, "host=" + socket_dir + " port=" + std::to_string(kPgPort) + " user=postgres dbname=postgres");
     CrudResults r;
     std::promise<void> done;

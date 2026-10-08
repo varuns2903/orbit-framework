@@ -1,11 +1,12 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/routing/Router.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <chrono>
 #include <functional>
 #include <string>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @brief Options for request_id().

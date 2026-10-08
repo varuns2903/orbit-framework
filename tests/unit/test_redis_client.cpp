@@ -70,17 +70,17 @@ bool finishes_within(std::chrono::milliseconds limit, Fn fn) {
 }
 
 // Records the last response; everything else is unused by the rate limiter.
-class CaptureWriter : public http::ResponseWriter {
+class CaptureWriter : public orbit::http::ResponseWriter {
 public:
-    http::HttpResponse last;
-    void send(http::HttpResponse&& response) override { last = std::move(response); }
-    void send_headers(http::HttpResponse&) override {}
+    orbit::http::HttpResponse last;
+    void send(orbit::http::HttpResponse&& response) override { last = std::move(response); }
+    void send_headers(orbit::http::HttpResponse&) override {}
     void write_chunk(std::string_view) override {}
     void end() override {}
-    void add_interceptor(std::function<void(http::HttpResponse&)>) override {}
+    void add_interceptor(std::function<void(orbit::http::HttpResponse&)>) override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -92,7 +92,7 @@ TEST(RedisClientTest, ReconnectsAfterServerRestart) {
     ORBIT_START_REDIS_OR_SKIP();
 
     // Leaked on purpose: if the fix regresses, a deadlocked thread may still hold it.
-    auto* client = new database::RedisClient("127.0.0.1", kPort);
+    auto* client = new orbit::database::RedisClient("127.0.0.1", kPort);
     EXPECT_EQ(client->incr("orbit:test:counter"), 1);
 
     stop_redis();
@@ -117,7 +117,7 @@ TEST(RedisClientTest, ReconnectsAfterServerRestart) {
 }
 
 TEST(RedisClientTest, FailsFastWhenNothingListens) {
-    database::RedisClient client("127.0.0.1", 1); // port 1: connection refused
+    orbit::database::RedisClient client("127.0.0.1", 1); // port 1: connection refused
     bool done = finishes_within(std::chrono::seconds(5), [&client] { EXPECT_EQ(client.incr("k"), 0); });
     EXPECT_TRUE(done);
 }
@@ -127,7 +127,7 @@ constexpr int kLimiterPort = 6397;
 
 TEST(RedisClientTest, IncrWithExpirySetsTtl) {
     ORBIT_START_REDIS_OR_SKIP(kLimiterPort);
-    database::RedisClient client("127.0.0.1", kLimiterPort);
+    orbit::database::RedisClient client("127.0.0.1", kLimiterPort);
 
     EXPECT_EQ(client.incr_with_expiry("orbit:test:window", 1), 1);
     EXPECT_EQ(client.incr_with_expiry("orbit:test:window", 1), 2);
@@ -140,15 +140,15 @@ TEST(RedisClientTest, IncrWithExpirySetsTtl) {
 
 TEST(DistributedRateLimiterTest, RejectsOverLimitWithRetryAfter) {
     ORBIT_START_REDIS_OR_SKIP(kLimiterPort);
-    auto m = middleware::distributed_rate_limit("127.0.0.1", kLimiterPort, 2, std::chrono::seconds(30));
-    http::HttpRequest req;
+    auto m = orbit::middleware::distributed_rate_limit("127.0.0.1", kLimiterPort, 2, std::chrono::seconds(30));
+    orbit::http::HttpRequest req;
     req.client_ip = "192.0.2.10";
     auto writer = std::make_shared<CaptureWriter>();
 
     EXPECT_TRUE(m(req, writer));
     EXPECT_TRUE(m(req, writer));
     EXPECT_FALSE(m(req, writer));
-    EXPECT_EQ(writer->last.status_code, http::HttpStatus::TooManyRequests);
+    EXPECT_EQ(writer->last.status_code, orbit::http::HttpStatus::TooManyRequests);
     EXPECT_EQ(writer->last.headers["Retry-After"], "30");
     EXPECT_EQ(writer->last.headers.count("Connection"), 0u);
 
@@ -156,15 +156,15 @@ TEST(DistributedRateLimiterTest, RejectsOverLimitWithRetryAfter) {
 }
 
 TEST(DistributedRateLimiterTest, RedisDownFailsClosedByDefault) {
-    http::HttpRequest req;
+    orbit::http::HttpRequest req;
     req.client_ip = "192.0.2.11";
     auto writer = std::make_shared<CaptureWriter>();
 
-    auto closed = middleware::distributed_rate_limit("127.0.0.1", 1, 10, std::chrono::seconds(30));
+    auto closed = orbit::middleware::distributed_rate_limit("127.0.0.1", 1, 10, std::chrono::seconds(30));
     EXPECT_FALSE(closed(req, writer));
-    EXPECT_EQ(writer->last.status_code, http::HttpStatus::ServiceUnavailable);
+    EXPECT_EQ(writer->last.status_code, orbit::http::HttpStatus::ServiceUnavailable);
 
-    auto open = middleware::distributed_rate_limit("127.0.0.1", 1, 10, std::chrono::seconds(30), nullptr, true);
+    auto open = orbit::middleware::distributed_rate_limit("127.0.0.1", 1, 10, std::chrono::seconds(30), nullptr, true);
     EXPECT_TRUE(open(req, writer));
 }
 
@@ -174,7 +174,7 @@ constexpr int kCommandsPort = 6399;
 
 TEST(RedisClientTest, PingSetGetDelAndExpire) {
     ORBIT_START_REDIS_OR_SKIP(kCommandsPort);
-    database::RedisClient client("127.0.0.1", kCommandsPort);
+    orbit::database::RedisClient client("127.0.0.1", kCommandsPort);
     ASSERT_TRUE(client.connect());
     EXPECT_EQ(client.ping(), "PONG");
 
@@ -198,7 +198,7 @@ TEST(RedisClientTest, PingSetGetDelAndExpire) {
 // GET of a key holding "" is a value, not a missing key.
 TEST(RedisClientTest, EmptyValueIsNotMissing) {
     ORBIT_START_REDIS_OR_SKIP(kCommandsPort);
-    database::RedisClient client("127.0.0.1", kCommandsPort);
+    orbit::database::RedisClient client("127.0.0.1", kCommandsPort);
     ASSERT_TRUE(client.set("orbit:test:empty", ""));
     auto got = client.get("orbit:test:empty");
     ASSERT_TRUE(got.has_value());
@@ -209,7 +209,7 @@ TEST(RedisClientTest, EmptyValueIsNotMissing) {
 
 TEST(RedisClientTest, ValuesAreBinarySafe) {
     ORBIT_START_REDIS_OR_SKIP(kCommandsPort);
-    database::RedisClient client("127.0.0.1", kCommandsPort);
+    orbit::database::RedisClient client("127.0.0.1", kCommandsPort);
     using namespace std::string_literals;
     const std::string framing = "line\r\n$5\r\n*1\r\nNUL\0end"s;
     ASSERT_TRUE(client.set("orbit:test:framing", framing));
@@ -227,7 +227,7 @@ TEST(RedisClientTest, ValuesAreBinarySafe) {
 // step for the next command.
 TEST(RedisClientTest, ErrorRepliesKeepTheConnectionInSync) {
     ORBIT_START_REDIS_OR_SKIP(kCommandsPort);
-    database::RedisClient client("127.0.0.1", kCommandsPort);
+    orbit::database::RedisClient client("127.0.0.1", kCommandsPort);
     ASSERT_TRUE(client.set("orbit:test:text", "not a number"));
     EXPECT_EQ(client.incr("orbit:test:text"), 0);
     EXPECT_EQ(client.get("orbit:test:text"), "not a number");
@@ -237,7 +237,7 @@ TEST(RedisClientTest, ErrorRepliesKeepTheConnectionInSync) {
 
 TEST(RedisClientTest, DisconnectThenReconnectsOnTheNextCommand) {
     ORBIT_START_REDIS_OR_SKIP(kCommandsPort);
-    database::RedisClient client("127.0.0.1", kCommandsPort);
+    orbit::database::RedisClient client("127.0.0.1", kCommandsPort);
     ASSERT_TRUE(client.connect());
     EXPECT_EQ(client.incr("orbit:test:c"), 1);
     client.disconnect();
@@ -247,7 +247,7 @@ TEST(RedisClientTest, DisconnectThenReconnectsOnTheNextCommand) {
 }
 
 TEST(RedisClientTest, CommandsFailCleanlyWithoutAServer) {
-    database::RedisClient client("127.0.0.1", 1);
+    orbit::database::RedisClient client("127.0.0.1", 1);
     EXPECT_FALSE(client.connect());
     EXPECT_EQ(client.ping(), "");
     EXPECT_FALSE(client.set("k", "v"));
@@ -258,7 +258,7 @@ TEST(RedisClientTest, CommandsFailCleanlyWithoutAServer) {
 }
 
 TEST(RedisClientTest, UnresolvableHostFailsToConnect) {
-    database::RedisClient client("orbit-no-such-host.invalid", 6379);
+    orbit::database::RedisClient client("orbit-no-such-host.invalid", 6379);
     EXPECT_FALSE(client.connect());
     EXPECT_EQ(client.get("k"), std::nullopt);
 }

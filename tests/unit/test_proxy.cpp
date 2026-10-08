@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <orbit/middleware/Proxy.hpp>
 
-using namespace middleware;
+using namespace orbit::middleware;
 
 TEST(ProxyTest, MiddlewareCreation) {
     ProxyOptions opts;

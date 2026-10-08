@@ -11,7 +11,7 @@
 #endif
 #endif
 
-namespace network {
+namespace orbit::network {
 
 UdpSocket::UdpSocket() : Socket(::socket(AF_INET, SOCK_DGRAM, 0)) {
     if (!is_valid()) {

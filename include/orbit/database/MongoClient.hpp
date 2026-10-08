@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <memory>
 #include <coroutine>
@@ -9,7 +10,7 @@
 #include <bson/bson.h>
 #include <orbit/concurrency/ThreadPool.hpp>
 
-namespace database {
+namespace orbit::database {
 
 /**
  * @brief An asynchronous MongoDB client using coroutines.

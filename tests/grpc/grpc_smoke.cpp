@@ -1,4 +1,4 @@
-// Smoke test for the experimental gRPC wrapper (server::GrpcServer), run by
+// Smoke test for the experimental gRPC wrapper (orbit::server::GrpcServer), run by
 // .github/workflows/grpc.yml against the distribution's gRPC. It is not part
 // of the main test binary, which is built without gRPC.
 
@@ -38,7 +38,7 @@ std::string say(int port, const std::string& text) {
     return stub->Say(&ctx, req, &res).ok() ? res.text() : "";
 }
 
-bool start_throws(server::GrpcServer& s, const std::string& address) {
+bool start_throws(orbit::server::GrpcServer& s, const std::string& address) {
     try {
         s.start(address);
     } catch (const std::runtime_error&) {
@@ -52,7 +52,7 @@ bool start_throws(server::GrpcServer& s, const std::string& address) {
 int main() {
     EchoImpl service;
 
-    server::GrpcServer s;
+    orbit::server::GrpcServer s;
     s.add_service(&service);
     s.start("127.0.0.1:0");
     const int port = s.port();
@@ -67,7 +67,7 @@ int main() {
     check(say(s.port(), "again") == "echo: again", "the server can be started again after stop()");
     s.stop();
 
-    server::GrpcServer bad;
+    orbit::server::GrpcServer bad;
     bad.add_service(&service);
     check(start_throws(bad, "256.256.256.256:1"), "an address that cannot be bound throws");
     check(bad.port() == 0, "a failed start leaves no port");

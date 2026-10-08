@@ -3,10 +3,10 @@
 
 #include <vector>
 
-using http::websocket::detail::FrameHeader;
-using http::websocket::detail::FrameStatus;
-using http::websocket::detail::inspect_frame;
-using http::websocket::detail::parse_frame_header;
+using orbit::http::websocket::detail::FrameHeader;
+using orbit::http::websocket::detail::FrameStatus;
+using orbit::http::websocket::detail::inspect_frame;
+using orbit::http::websocket::detail::parse_frame_header;
 
 namespace {
 

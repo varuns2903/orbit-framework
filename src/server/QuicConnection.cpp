@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace server {
+namespace orbit::server {
 
 namespace quic::detail {
 

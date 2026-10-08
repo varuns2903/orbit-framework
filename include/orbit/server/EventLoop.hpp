@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <chrono>
 #include <functional>
 #include <orbit/network/Proactor.hpp>
@@ -13,11 +14,11 @@
 #ifdef ORBIT_ENABLE_HTTP3
 #include <orbit/server/QuicConnectionManager.hpp>
 #else
-namespace server { class QuicConnectionManager; }
+namespace orbit::server { class QuicConnectionManager; }
 #endif
 #include <atomic>
 
-namespace server {
+namespace orbit::server {
 
 /**
  * @brief Manages the server's event loop, handling I/O operations and dispatching tasks.

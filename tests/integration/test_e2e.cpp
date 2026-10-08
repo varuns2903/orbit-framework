@@ -17,22 +17,22 @@
 #include "../utils/TestConfig.hpp"
 
 using namespace orbit;
-using namespace http;
+using namespace orbit::http;
 
 class E2EServerTest : public ::testing::Test {
 protected:
-    static server::App* app_ptr;
+    static orbit::server::App* app_ptr;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = 8089; // Use unique port
-        app_ptr = new server::App(cfg);
+        app_ptr = new orbit::server::App(cfg);
 
         // 1. Global Middlewares
-        app_ptr->use(middleware::cors());
-        app_ptr->use(middleware::compress());
-        app_ptr->use(middleware::rate_limit(1000, std::chrono::seconds(60)));
+        app_ptr->use(orbit::middleware::cors());
+        app_ptr->use(orbit::middleware::compress());
+        app_ptr->use(orbit::middleware::rate_limit(1000, std::chrono::seconds(60)));
         
         // 2. Simple GET
         app_ptr->get("/api/hello", [](const HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> writer) {
@@ -56,8 +56,8 @@ protected:
         });
 
         // 5. JWT Auth group
-        app_ptr->group("/secure", [](routing::Router& r) {
-            r.use(middleware::jwt_auth("secret_key"));
+        app_ptr->group("/secure", [](orbit::routing::Router& r) {
+            r.use(orbit::middleware::jwt_auth("secret_key"));
             r.get("/data", [](const HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> writer) {
                 HttpResponse res;
                 res.body = "Secure Data";
@@ -86,7 +86,7 @@ protected:
     }
 };
 
-server::App* E2EServerTest::app_ptr = nullptr;
+orbit::server::App* E2EServerTest::app_ptr = nullptr;
 std::thread E2EServerTest::server_thread;
 
 TEST_F(E2EServerTest, SimpleGetRequest) {

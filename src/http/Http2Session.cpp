@@ -17,7 +17,7 @@
 #include <cctype>
 #include <stdexcept>
 
-namespace http {
+namespace orbit::http {
 namespace h2 {
 
 namespace detail {

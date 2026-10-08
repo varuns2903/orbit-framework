@@ -128,13 +128,13 @@ bool curl_has_http3() {
 
 // Wakes the event loop so a stop request is seen at once.
 void poke_server() {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }
 
 std::string pattern(size_t n) {
@@ -147,7 +147,7 @@ std::string pattern(size_t n) {
 
 class Http3Test : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
     // Set when the server could not be started. Reported by each test:
     // gtest turns a SetUpTestSuite failure into skipped tests, which ctest
@@ -170,33 +170,33 @@ protected:
             f.write(data.data(), static_cast<std::streamsize>(data.size()));
         }
 
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.ssl_cert = g_cert;
         cfg.ssl_key = g_key;
-        cfg.http_version = config::HttpVersion::Http3;
+        cfg.http_version = orbit::config::HttpVersion::Http3;
         cfg.max_body_size = kMaxBody;
-        app = new server::App(cfg);
+        app = new orbit::server::App(cfg);
 
-        app->use([](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            w->add_interceptor([](http::HttpResponse& res) { res.headers["X-Intercepted"] = "yes"; });
+        app->use([](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            w->add_interceptor([](orbit::http::HttpResponse& res) { res.headers["X-Intercepted"] = "yes"; });
             w->set_header("X-Default", "d");
             return true;
         });
-        app->get("/whoami", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/whoami", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("uri=" + req.uri + " q=" + req.query["q"] + " session=" + req.cookies["session"] +
                          " theme=" + req.cookies["theme"] + " host=" + std::string(req.headers["Host"]) +
                          " ip=" + req.client_ip + " v=" + req.http_version);
             w->send(std::move(res));
         });
-        app->get("/users/:id", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/users/:id", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("user " + req.params["id"]);
             w->send(std::move(res));
         });
-        app->get("/stream", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/stream", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             w->send_headers(res);
             w->write_chunk("one,");
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -205,31 +205,31 @@ protected:
             w->write_chunk("three");
             w->end();
         });
-        app->get("/sse", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/sse", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.headers["Content-Type"] = "text/event-stream";
             w->send_headers(res);
             w->send_sse_event("hello\nworld", "greet", "1");
             w->end();
         });
-        app->get("/file", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/file", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.send_file(g_file, "application/octet-stream");
             w->send(std::move(res));
         });
-        app->get("/blob", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/blob", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body(pattern(64 * 1024));
             w->send(std::move(res));
         });
-        app->get("/empty", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
-            res.status(http::HttpStatus::NoContent);
+        app->get("/empty", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
+            res.status(orbit::http::HttpStatus::NoContent);
             w->send(std::move(res));
         });
-        app->post("/upload", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
+        app->post("/upload", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
             std::string body(req.body);
-            http::HttpResponse res;
+            orbit::http::HttpResponse res;
             res.set_body("got " + std::to_string(body.size()) + " ok=" + (body == pattern(body.size()) ? "1" : "0"));
             w->send(std::move(res));
         });
@@ -271,7 +271,7 @@ protected:
     }
 };
 
-server::App* Http3Test::app = nullptr;
+orbit::server::App* Http3Test::app = nullptr;
 std::thread Http3Test::server_thread;
 std::string Http3Test::setup_error;
 

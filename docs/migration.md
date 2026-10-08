@@ -27,6 +27,70 @@ server::App app(config::ServerConfig::parse(argc, argv));
 
 ---
 
+## 1.6.x → 2.0.0
+
+### The public API is under `namespace orbit` ([#39](https://github.com/varuns2903/orbit-framework/issues/39))
+
+Every type and function moved from generic top-level namespaces into
+`orbit`: `server::App` is now `orbit::server::App`, `http::HttpRequest` is
+`orbit::http::HttpRequest`, and so on for `concurrency`, `config`,
+`database`, `http`, `middleware`, `network`, `openapi`, `orm`, `routing`,
+`server`, `utils` and `websocket`.
+
+**Existing code keeps compiling.** The old names are defined as aliases of
+the new ones (`namespace server = orbit::server;`), so 1.x code builds
+unchanged:
+
+```cpp
+// 1.x — still compiles in 2.0
+server::App app(config);
+
+// 2.0
+orbit::server::App app(config);
+```
+
+The aliases put names like `server`, `http` and `config` in the global
+namespace, which is what #39 set out to stop. If your own code uses any of
+those names, define `ORBIT_NO_LEGACY_NAMESPACES` (before the first Orbit
+include, or on the command line: `-DORBIT_NO_LEGACY_NAMESPACES`, or
+`target_compile_definitions(app PRIVATE ORBIT_NO_LEGACY_NAMESPACES)`) and
+use the `orbit::` names. The aliases will be removed in 3.0.
+
+Code that refers to Orbit with a leading `::` (`::server::App`) needs the
+new name; so does code that forward-declares Orbit types in the old
+namespaces.
+
+### HTTP/1.1 requests are parsed by llhttp
+
+Request parsing moved to [llhttp](https://github.com/nodejs/llhttp)
+([#43](https://github.com/varuns2903/orbit-framework/issues/43)), which is a
+new build dependency (vcpkg, Conan and system packages are all supported).
+It is strict, and a few requests are now answered differently:
+
+- an unknown method token (`BREW / HTTP/1.1`) gets `501 Not Implemented`
+  instead of being routed;
+- a repeated `Content-Length` header is rejected with `400`, even when both
+  values match;
+- a request to a stream route without `Content-Length` or
+  `Transfer-Encoding` has no body (RFC 9112): its stream ends at once
+  instead of running until the client closes.
+
+`http::parse_framing()`, `http::MessageFraming`, `http::decode_chunked()` and
+`http::ChunkedStatus` were removed. `http::HttpParser::parse()` stays; it
+now returns `std::nullopt` for an incomplete request instead of a partial
+body.
+
+### The gRPC wrapper is experimental
+
+Built without gRPC (`ORBIT_ENABLE_GRPC=OFF`, the default),
+`server::GrpcServer::start()` and `add_service()` now throw instead of doing
+nothing, and `start()` throws when the server cannot start.
+
+### New, opt-in
+
+`ServerConfig::event_loops` (`--event-loops N`, Linux) runs several event
+loops; the default of 1 keeps the previous behaviour.
+
 ## 1.5.x → 1.6.0
 
 1.6.0 is a security release. Most changes are fixes, but several

@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/http/WebSocketConnection.hpp>
@@ -11,7 +12,7 @@
 #include <string>
 #include <memory>
 
-namespace routing {
+namespace orbit::routing {
 
 using RouteHandler = std::function<void(http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)>;
 using Middleware = std::function<bool(http::HttpRequest&, std::shared_ptr<http::ResponseWriter>)>;

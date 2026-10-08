@@ -1,8 +1,9 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/network/Socket.hpp>
 #include <string>
 
-namespace network {
+namespace orbit::network {
 
 class UdpSocket : public Socket {
 public:

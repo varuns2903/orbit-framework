@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/server/QuicConnection.hpp>
 #include <unordered_map>
 #include <memory>
@@ -9,11 +10,11 @@
 #include <orbit/network/PlatformSocket.hpp>
 #include <orbit/network/UdpSocket.hpp>
 
-namespace routing { class Router; }
-namespace concurrency { class ThreadPool; }
-namespace network { class Proactor; }
+namespace orbit::routing { class Router; }
+namespace orbit::concurrency { class ThreadPool; }
+namespace orbit::network { class Proactor; }
 
-namespace server {
+namespace orbit::server {
 
 /// What HTTP/3 requests are dispatched with; set by the event loop before
 /// it runs.

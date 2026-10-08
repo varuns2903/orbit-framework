@@ -13,13 +13,13 @@
 namespace {
 
 bool can_connect(uint16_t port) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     bool ok = ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0;
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return ok;
 }
 
@@ -33,7 +33,7 @@ void wait_until_listening(uint16_t port) {
 // the PPL, whose `concurrency` namespace clashes with Orbit's.)
 class Running {
 public:
-    explicit Running(server::App& app) : done_(std::make_shared<std::atomic<bool>>(false)) {
+    explicit Running(orbit::server::App& app) : done_(std::make_shared<std::atomic<bool>>(false)) {
         auto done = done_;
         thread_ = std::thread([&app, done] {
             app.listen();
@@ -58,8 +58,8 @@ private:
 };
 
 // A lambda, not a function: route handlers are deduced from operator().
-const auto noop = [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-    http::HttpResponse res;
+const auto noop = [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+    orbit::http::HttpResponse res;
     res.set_body("ok");
     w->send(std::move(res));
 };
@@ -67,14 +67,14 @@ const auto noop = [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w
 } // namespace
 
 TEST(AppLifecycleTest, EachAppPublishesItsOwnOpenApiSpec) {
-    config::ServerConfig cfg = orbit::test::server_config();
-    server::App a(cfg);
-    server::App b(cfg);
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
+    orbit::server::App a(cfg);
+    orbit::server::App b(cfg);
     a.get("/only-in-a", noop);
     b.get("/only-in-b", noop);
     a.openapi().register_schema("SchemaA", "{\"type\":\"object\"}");
     // Registered the old way: shared by every App, as before.
-    openapi::OpenApiRegistry::instance().register_schema("SharedSchema", "{\"type\":\"string\"}");
+    orbit::openapi::OpenApiRegistry::instance().register_schema("SharedSchema", "{\"type\":\"string\"}");
 
     std::string spec_a = a.openapi().generate_swagger_json("A", "1");
     std::string spec_b = b.openapi().generate_swagger_json("B", "1");
@@ -91,18 +91,18 @@ TEST(AppLifecycleTest, EachAppPublishesItsOwnOpenApiSpec) {
 }
 
 TEST(AppLifecycleTest, GroupsShareTheirAppsRegistry) {
-    config::ServerConfig cfg = orbit::test::server_config();
-    server::App app(cfg);
-    app.group("/api", [](routing::Router& api) {
-        api.group("/v1", [](routing::Router& v1) { v1.get("/items/:id", noop); });
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
+    orbit::server::App app(cfg);
+    app.group("/api", [](orbit::routing::Router& api) {
+        api.group("/v1", [](orbit::routing::Router& v1) { v1.get("/items/:id", noop); });
     });
     EXPECT_NE(app.openapi().generate_swagger_json("T", "1").find("/api/v1/items/{id}"), std::string::npos);
 }
 
 TEST(AppLifecycleTest, StopBeforeTheLoopExistsStillStopsIt) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8118;
-    server::App app(cfg);
+    orbit::server::App app(cfg);
     app.stop(); // before listen(): must not be lost
     Running running(app);
     EXPECT_TRUE(running.returned_within(std::chrono::seconds(5))) << "listen() kept running after an earlier stop()";
@@ -113,9 +113,9 @@ TEST(AppLifecycleTest, StopRightAfterStartingIsSafe) {
     // stop() races with listen() creating the event loop; under TSan this
     // used to report a data race, and a lost stop could hang the test.
     for (int i = 0; i < 20; ++i) {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = 8119;
-        server::App app(cfg);
+        orbit::server::App app(cfg);
         Running running(app);
         app.stop();
         ASSERT_TRUE(running.returned_within(std::chrono::seconds(5))) << "iteration " << i;
@@ -124,12 +124,12 @@ TEST(AppLifecycleTest, StopRightAfterStartingIsSafe) {
 
 #ifndef _WIN32
 TEST(AppLifecycleTest, SignalStopsEveryApp) {
-    config::ServerConfig cfg_a = orbit::test::server_config();
+    orbit::config::ServerConfig cfg_a = orbit::test::server_config();
     cfg_a.port = 8120;
-    config::ServerConfig cfg_b = orbit::test::server_config();
+    orbit::config::ServerConfig cfg_b = orbit::test::server_config();
     cfg_b.port = 8121;
-    server::App a(cfg_a);
-    server::App b(cfg_b);
+    orbit::server::App a(cfg_a);
+    orbit::server::App b(cfg_b);
     Running running_a(a);
     Running running_b(b);
     wait_until_listening(8120);

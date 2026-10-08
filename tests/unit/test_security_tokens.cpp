@@ -15,7 +15,7 @@
 #include <thread>
 #include <vector>
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -43,8 +43,8 @@ public:
     void end() override {}
     void add_interceptor(std::function<void(HttpResponse&)> interceptor) override { interceptors.push_back(std::move(interceptor)); }
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -53,27 +53,27 @@ public:
 } // namespace
 
 TEST(SecureRandomTest, ProducesHexOfRequestedLength) {
-    std::string token = utils::secure_random_hex(32);
+    std::string token = orbit::utils::secure_random_hex(32);
     EXPECT_EQ(token.size(), 64u);
     EXPECT_TRUE(is_lower_hex(token));
 }
 
 TEST(SecureRandomTest, DoesNotRepeat) {
     std::set<std::string> seen;
-    for (int i = 0; i < 2000; ++i) seen.insert(utils::secure_random_hex(16));
+    for (int i = 0; i < 2000; ++i) seen.insert(orbit::utils::secure_random_hex(16));
     EXPECT_EQ(seen.size(), 2000u);
 }
 
 TEST(SecureRandomTest, ConstantTimeEquals) {
-    EXPECT_TRUE(utils::constant_time_equals("abc", "abc"));
-    EXPECT_FALSE(utils::constant_time_equals("abc", "abd"));
-    EXPECT_FALSE(utils::constant_time_equals("abc", "abcd"));
-    EXPECT_TRUE(utils::constant_time_equals("", ""));
+    EXPECT_TRUE(orbit::utils::constant_time_equals("abc", "abc"));
+    EXPECT_FALSE(orbit::utils::constant_time_equals("abc", "abd"));
+    EXPECT_FALSE(orbit::utils::constant_time_equals("abc", "abcd"));
+    EXPECT_TRUE(orbit::utils::constant_time_equals("", ""));
 }
 
 TEST(SecureRandomTest, CsrfTokensAre256Bit) {
-    std::string a = middleware::Csrf::generate_random_token();
-    std::string b = middleware::Csrf::generate_random_token();
+    std::string a = orbit::middleware::Csrf::generate_random_token();
+    std::string b = orbit::middleware::Csrf::generate_random_token();
     EXPECT_EQ(a.size(), 64u);
     EXPECT_TRUE(is_lower_hex(a));
     EXPECT_NE(a, b);
@@ -111,7 +111,7 @@ protected:
     }
 
     // Runs the middleware and returns (req.session_id, Set-Cookie value or "").
-    static std::pair<std::string, std::string> run(middleware::SessionManager& sm, const std::string& cookie) {
+    static std::pair<std::string, std::string> run(orbit::middleware::SessionManager& sm, const std::string& cookie) {
         HttpRequest req;
         if (!cookie.empty()) req.cookies["session_id"] = cookie;
         auto w = std::make_shared<InterceptingWriter>();
@@ -124,7 +124,7 @@ protected:
 bool SessionManagerRedisTest::redis_available = false;
 
 TEST_F(SessionManagerRedisTest, IssuesRandomSessionAndCookie) {
-    middleware::SessionManager sm("127.0.0.1", kRedisPort);
+    orbit::middleware::SessionManager sm("127.0.0.1", kRedisPort);
     auto [id, cookie] = run(sm, "");
     EXPECT_EQ(id.size(), 64u);
     EXPECT_TRUE(is_lower_hex(id));
@@ -132,7 +132,7 @@ TEST_F(SessionManagerRedisTest, IssuesRandomSessionAndCookie) {
 }
 
 TEST_F(SessionManagerRedisTest, KeepsKnownSession) {
-    middleware::SessionManager sm("127.0.0.1", kRedisPort);
+    orbit::middleware::SessionManager sm("127.0.0.1", kRedisPort);
     auto [id, cookie] = run(sm, "");
     auto [id2, cookie2] = run(sm, id);
     EXPECT_EQ(id2, id);
@@ -140,7 +140,7 @@ TEST_F(SessionManagerRedisTest, KeepsKnownSession) {
 }
 
 TEST_F(SessionManagerRedisTest, RejectsClientChosenSessionId) {
-    middleware::SessionManager sm("127.0.0.1", kRedisPort);
+    orbit::middleware::SessionManager sm("127.0.0.1", kRedisPort);
     std::string planted(64, 'a'); // well-formed, but never issued
     auto [id, cookie] = run(sm, planted);
     EXPECT_NE(id, planted);
@@ -148,18 +148,18 @@ TEST_F(SessionManagerRedisTest, RejectsClientChosenSessionId) {
 }
 
 TEST_F(SessionManagerRedisTest, RejectsMalformedSessionId) {
-    middleware::SessionManager sm("127.0.0.1", kRedisPort);
+    orbit::middleware::SessionManager sm("127.0.0.1", kRedisPort);
     auto [id, cookie] = run(sm, "attacker-chosen");
     EXPECT_NE(id, "attacker-chosen");
     EXPECT_EQ(id.size(), 64u);
 }
 
 TEST_F(SessionManagerRedisTest, CookieAttributesFollowOptions) {
-    middleware::SessionOptions opts;
+    orbit::middleware::SessionOptions opts;
     opts.secure = true;
     opts.same_site = "Strict";
     opts.ttl_seconds = 600;
-    middleware::SessionManager sm("127.0.0.1", kRedisPort, opts);
+    orbit::middleware::SessionManager sm("127.0.0.1", kRedisPort, opts);
     HttpRequest req;
     auto w = std::make_shared<InterceptingWriter>();
     sm(req, w);

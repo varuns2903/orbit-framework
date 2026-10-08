@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #ifdef _WIN32
 #undef ERROR
 #endif
@@ -10,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace utils {
+namespace orbit::utils {
 
 enum class LogLevel {
     DEBUG = 0,
@@ -57,15 +58,15 @@ private:
 // constants, which are declared here where ERROR has been #undef'd. The
 // stream variable has an unusual name so it cannot shadow a local variable
 // (MSVC treats that warning as an error).
-namespace utils::log_levels {
+namespace orbit::utils::log_levels {
 inline constexpr LogLevel kDebug = LogLevel::DEBUG;
 inline constexpr LogLevel kInfo = LogLevel::INFO;
 inline constexpr LogLevel kWarn = LogLevel::WARN;
 inline constexpr LogLevel kError = LogLevel::ERROR;
 } // namespace utils::log_levels
 
-#define ORBIT_LOG_AT(level, msg) do { if (utils::Logger::current_level <= (level)) { std::ostringstream orbit_log_stream_; orbit_log_stream_ << msg; utils::Logger::log((level), __FILE__, __LINE__, orbit_log_stream_.str()); } } while(0)
-#define LOG_DEBUG(msg) ORBIT_LOG_AT(utils::log_levels::kDebug, msg)
-#define LOG_INFO(msg)  ORBIT_LOG_AT(utils::log_levels::kInfo, msg)
-#define LOG_WARN(msg)  ORBIT_LOG_AT(utils::log_levels::kWarn, msg)
-#define LOG_ERROR(msg) ORBIT_LOG_AT(utils::log_levels::kError, msg)
+#define ORBIT_LOG_AT(level, msg) do { if (::orbit::utils::Logger::current_level <= (level)) { std::ostringstream orbit_log_stream_; orbit_log_stream_ << msg; ::orbit::utils::Logger::log((level), __FILE__, __LINE__, orbit_log_stream_.str()); } } while(0)
+#define LOG_DEBUG(msg) ORBIT_LOG_AT(::orbit::utils::log_levels::kDebug, msg)
+#define LOG_INFO(msg)  ORBIT_LOG_AT(::orbit::utils::log_levels::kInfo, msg)
+#define LOG_WARN(msg)  ORBIT_LOG_AT(::orbit::utils::log_levels::kWarn, msg)
+#define LOG_ERROR(msg) ORBIT_LOG_AT(::orbit::utils::log_levels::kError, msg)

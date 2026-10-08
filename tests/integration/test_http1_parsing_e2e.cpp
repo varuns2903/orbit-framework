@@ -20,7 +20,7 @@
 // requests split across writes, keep-alive after a streamed upload, stream
 // routes with and without a body, body limits, and timeouts.
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -99,16 +99,16 @@ size_t count(const std::string& haystack, const std::string& needle) {
 
 class Http1ParsingE2ETest : public ::testing::Test {
 protected:
-    static std::unique_ptr<server::App> app;
+    static std::unique_ptr<orbit::server::App> app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.host = "127.0.0.1";
         cfg.port = kPort;
         cfg.max_body_size = kMaxBody;
         cfg.header_timeout = std::chrono::seconds(1);
-        app = std::make_unique<server::App>(cfg);
+        app = std::make_unique<orbit::server::App>(cfg);
 
         app->post("/echo", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
             HttpResponse res;
@@ -120,7 +120,7 @@ protected:
             res.set_body("hello " + req.uri, "text/plain");
             w->send(std::move(res));
         });
-        app->group("/s", [](routing::Router& r) {
+        app->group("/s", [](orbit::routing::Router& r) {
             // Counts the streamed body and answers when it ends.
             r.add_stream_route(HttpMethod::POST, "/count", [](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
                 auto total = std::make_shared<size_t>(0);
@@ -158,7 +158,7 @@ protected:
     }
 };
 
-std::unique_ptr<server::App> Http1ParsingE2ETest::app;
+std::unique_ptr<orbit::server::App> Http1ParsingE2ETest::app;
 std::thread Http1ParsingE2ETest::server_thread;
 
 TEST_F(Http1ParsingE2ETest, RequestSentOneByteAtATime) {

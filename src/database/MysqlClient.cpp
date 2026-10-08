@@ -2,7 +2,7 @@
 #include <orbit/database/MysqlClient.hpp>
 #include <iostream>
 
-namespace database {
+namespace orbit::database {
 
 MysqlClient::MysqlClient(network::Proactor& proactor, const Config& config)
     : proactor_(proactor), config_(config) {

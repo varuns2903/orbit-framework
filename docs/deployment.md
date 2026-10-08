@@ -84,7 +84,7 @@ Behind a reverse proxy on the same host, bind to `127.0.0.1` so the app port is
 not reachable from outside:
 
 ```cpp
-config::ServerConfig cfg;
+orbit::config::ServerConfig cfg;
 cfg.host = "127.0.0.1";
 cfg.max_connections = 10000;
 ```
@@ -132,9 +132,9 @@ dropping connections:
 A second signal stops immediately. `app.stop()` also stops immediately.
 
 ```cpp
-config::ServerConfig cfg;
+orbit::config::ServerConfig cfg;
 cfg.shutdown_timeout = std::chrono::seconds(20); // keep below Kubernetes' terminationGracePeriodSeconds
-server::App app(cfg);
+orbit::server::App app(cfg);
 app.enable_health_checks(); // GET /healthz (liveness), GET /readyz (readiness)
 ```
 
@@ -167,7 +167,7 @@ quiet; to drop dead peers, set `websocket_idle_timeout` and have clients send
 pings.
 
 ```cpp
-config::ServerConfig cfg;
+orbit::config::ServerConfig cfg;
 cfg.header_timeout = std::chrono::seconds(5);
 cfg.keep_alive_timeout = std::chrono::seconds(60);
 cfg.websocket_idle_timeout = std::chrono::seconds(120);
@@ -178,7 +178,7 @@ cfg.websocket_idle_timeout = std::chrono::seconds(120);
 `ssl_cert` / `ssl_key` (`-c` / `-k`) set the default certificate. More certificates can be served from the same port, chosen by the name the client asks for (SNI):
 
 ```cpp
-config::ServerConfig cfg;
+orbit::config::ServerConfig cfg;
 cfg.ssl_cert = "/etc/orbit/default.pem";
 cfg.ssl_key  = "/etc/orbit/default.key";
 cfg.sni_certificates = {

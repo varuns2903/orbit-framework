@@ -3,9 +3,9 @@
 #include <orbit/http/json.hpp>
 #include <string>
 
-using openapi::OpenApiRegistry;
-using openapi::RouteMetadata;
-using http::HttpMethod;
+using orbit::openapi::OpenApiRegistry;
+using orbit::openapi::RouteMetadata;
+using orbit::http::HttpMethod;
 
 namespace {
 

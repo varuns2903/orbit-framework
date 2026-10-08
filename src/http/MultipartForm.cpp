@@ -1,7 +1,7 @@
 #include <orbit/http/MultipartForm.hpp>
 #include <orbit/http/MultipartStreamParser.hpp>
 
-namespace http {
+namespace orbit::http {
 
 MultipartForm MultipartForm::parse(std::string_view content_type_header, std::string_view body) {
     MultipartForm form;

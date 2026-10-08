@@ -15,12 +15,12 @@
 #include <string>
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    static network::EpollProactor proactor;
-    static routing::Router router; // no routes: every request ends in a 404
-    static concurrency::ThreadPool pool(1);
+    static orbit::network::EpollProactor proactor;
+    static orbit::routing::Router router; // no routes: every request ends in a 404
+    static orbit::concurrency::ThreadPool pool(1);
 
     // No connection: whatever the session writes back is dropped.
-    auto session = std::make_shared<http::h2::Http2Session>(std::weak_ptr<server::Connection>(), proactor, router,
+    auto session = std::make_shared<orbit::http::h2::Http2Session>(std::weak_ptr<orbit::server::Connection>(), proactor, router,
                                                             pool, "127.0.0.1", 64 * 1024);
     static const std::string preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     std::string input = preface;

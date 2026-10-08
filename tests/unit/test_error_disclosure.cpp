@@ -8,7 +8,7 @@
 #include <memory>
 #include <stdexcept>
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -21,8 +21,8 @@ public:
     void end() override {}
     void add_interceptor(std::function<void(HttpResponse&)>) override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -33,7 +33,7 @@ const char* kSecret = "password=hunter2 at /srv/app/db.cpp:42";
 } // namespace
 
 TEST(ErrorDisclosureTest, RouteExceptionTextIsNotSentToClient) {
-    routing::Router router;
+    orbit::routing::Router router;
     router.get("/boom", [](HttpRequest&, std::shared_ptr<ResponseWriter>) {
         throw std::runtime_error(kSecret);
     });
@@ -47,8 +47,8 @@ TEST(ErrorDisclosureTest, RouteExceptionTextIsNotSentToClient) {
 }
 
 TEST(ErrorDisclosureTest, MagicHandlerExceptionsReachTheErrorHandler) {
-    routing::Router router;
-    router.get("/magic", routing::wrap_handler([]() -> std::string {
+    orbit::routing::Router router;
+    router.get("/magic", orbit::routing::wrap_handler([]() -> std::string {
         throw std::runtime_error(kSecret);
     }));
     bool handler_called = false;

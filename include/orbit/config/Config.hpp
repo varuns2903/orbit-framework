@@ -1,10 +1,11 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <vector>
 #include <cstdint>
 #include <chrono>
 
-namespace config {
+namespace orbit::config {
 
 enum class EventEngine {
     Epoll,

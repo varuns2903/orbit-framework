@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <orbit/network/Proactor.hpp>
 #include <sys/event.h>
@@ -6,7 +7,7 @@
 #include <mutex>
 #include <vector>
 
-namespace network {
+namespace orbit::network {
 
 class KqueueProactor : public Proactor {
 public:

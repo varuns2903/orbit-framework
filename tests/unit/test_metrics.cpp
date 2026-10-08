@@ -13,8 +13,8 @@
 #include <string>
 #include <vector>
 
-using namespace middleware;
-using namespace http;
+using namespace orbit::middleware;
+using namespace orbit::http;
 
 namespace {
 
@@ -35,8 +35,8 @@ public:
         interceptors.push_back(std::move(interceptor));
     }
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("Not implemented"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("Not implemented"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("Not implemented"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("Not implemented"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -46,7 +46,7 @@ public:
 // exposition, or 0 if it is not there yet. The registry is process-wide, so
 // tests compare values before and after rather than absolute numbers.
 double sample(const std::string& series) {
-    std::istringstream in(utils::PrometheusRegistry::get_instance().expose());
+    std::istringstream in(orbit::utils::PrometheusRegistry::get_instance().expose());
     std::string line;
     while (std::getline(in, line)) {
         if (line.size() > series.size() && line.compare(0, series.size(), series) == 0 &&
@@ -201,7 +201,7 @@ TEST(MetricsTest, UpgradeRequestsAreNotTracked) {
 // --- Exposition format ---
 
 TEST(PrometheusRegistryTest, LargeValuesKeepEveryDigit) {
-    auto& reg = utils::PrometheusRegistry::get_instance();
+    auto& reg = orbit::utils::PrometheusRegistry::get_instance();
     reg.set_gauge("orbit_test_large_gauge", "", 1234567.0);
     EXPECT_EQ(sample("orbit_test_large_gauge"), 1234567.0);
 
@@ -213,7 +213,7 @@ TEST(PrometheusRegistryTest, LargeValuesKeepEveryDigit) {
 }
 
 TEST(PrometheusRegistryTest, FractionsReadBackExactly) {
-    auto& reg = utils::PrometheusRegistry::get_instance();
+    auto& reg = orbit::utils::PrometheusRegistry::get_instance();
     reg.set_gauge("orbit_test_fraction_gauge", "", 0.1);
     EXPECT_EQ(sample("orbit_test_fraction_gauge"), 0.1);
     reg.set_gauge("orbit_test_fraction_gauge", "", 123456.789012345);
@@ -221,7 +221,7 @@ TEST(PrometheusRegistryTest, FractionsReadBackExactly) {
 }
 
 TEST(PrometheusRegistryTest, NonFiniteValuesUseThePrometheusSpelling) {
-    auto& reg = utils::PrometheusRegistry::get_instance();
+    auto& reg = orbit::utils::PrometheusRegistry::get_instance();
     reg.set_gauge("orbit_test_nonfinite", "kind=\"pos\"", std::numeric_limits<double>::infinity());
     reg.set_gauge("orbit_test_nonfinite", "kind=\"neg\"", -std::numeric_limits<double>::infinity());
     reg.set_gauge("orbit_test_nonfinite", "kind=\"nan\"", std::numeric_limits<double>::quiet_NaN());

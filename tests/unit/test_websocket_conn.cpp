@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-using http::websocket::detail::FrameHeader;
-using http::websocket::detail::parse_frame_header;
-using http::websocket::detail::unmask_payload;
+using orbit::http::websocket::detail::FrameHeader;
+using orbit::http::websocket::detail::parse_frame_header;
+using orbit::http::websocket::detail::unmask_payload;
 
 namespace {
 

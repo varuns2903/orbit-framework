@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -8,7 +9,7 @@
 #include <openssl/err.h>
 #include <orbit/config/Config.hpp>
 
-namespace network {
+namespace orbit::network {
 
 /**
  * @brief Server TLS settings: certificates (with SNI) and ALPN.

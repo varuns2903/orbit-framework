@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <vector>
 #include <map>
@@ -6,7 +7,7 @@
 #include <mutex>
 #include <orbit/http/HttpRequest.hpp>
 
-namespace openapi {
+namespace orbit::openapi {
 
 struct RouteMetadata {
     std::string summary;

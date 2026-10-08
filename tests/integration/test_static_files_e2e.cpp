@@ -10,7 +10,7 @@
 #include <thread>
 #include "../utils/TestConfig.hpp"
 
-using namespace http;
+using namespace orbit::http;
 namespace fs = std::filesystem;
 
 namespace {
@@ -20,13 +20,13 @@ constexpr uint16_t kPort = 8111;
 // Sends raw bytes and returns everything the server writes back until it
 // closes the connection or goes quiet.
 std::string raw_exchange(const std::string& bytes) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
+        orbit::network::close_socket(fd);
         return "<connect failed>";
     }
 #ifdef _WIN32
@@ -45,7 +45,7 @@ std::string raw_exchange(const std::string& bytes) {
         if (n <= 0) break;
         out.append(buf, static_cast<size_t>(n));
     }
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return out;
 }
 
@@ -58,7 +58,7 @@ std::string body_of(const std::string& response) {
 
 class StaticFilesE2ETest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
     static fs::path dir;
 
@@ -68,10 +68,10 @@ protected:
         fs::create_directories(dir);
         std::ofstream(dir / "alphabet.txt", std::ios::binary) << "abcdefghijklmnopqrstuvwxyz";
 
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
-        app = new server::App(cfg);
-        app->use(middleware::static_files(dir.string()));
+        app = new orbit::server::App(cfg);
+        app->use(orbit::middleware::static_files(dir.string()));
 
         server_thread = std::thread([] { app->listen(); });
         // Wait until the listener accepts connections.
@@ -92,7 +92,7 @@ protected:
     }
 };
 
-server::App* StaticFilesE2ETest::app = nullptr;
+orbit::server::App* StaticFilesE2ETest::app = nullptr;
 std::thread StaticFilesE2ETest::server_thread;
 fs::path StaticFilesE2ETest::dir;
 

@@ -8,8 +8,8 @@
 #include <thread>
 #include <vector>
 
-using http::websocket::WebSocketConnection;
-namespace detail = http::websocket::detail;
+using orbit::http::websocket::WebSocketConnection;
+namespace detail = orbit::http::websocket::detail;
 
 namespace {
 

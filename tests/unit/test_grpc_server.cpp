@@ -9,7 +9,7 @@
 
 #ifndef ORBIT_ENABLE_GRPC
 TEST(GrpcServerTest, WithoutGrpcSupportStartAndAddServiceThrow) {
-    server::GrpcServer s;
+    orbit::server::GrpcServer s;
     try {
         s.start("127.0.0.1:0");
         FAIL() << "start() succeeded in a build without gRPC";

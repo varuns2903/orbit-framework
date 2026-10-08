@@ -53,7 +53,7 @@ size_t collect(void* data, size_t size, size_t n, void* out) {
 
 class TlsConcurrencyTest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
@@ -62,15 +62,15 @@ protected:
         g_key = (dir / "orbit_tls_conc_key.pem").string();
         ASSERT_TRUE(make_self_signed(g_cert, g_key));
 
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.ssl_cert = g_cert;
         cfg.ssl_key = g_key;
-        cfg.http_version = config::HttpVersion::Http2;
+        cfg.http_version = orbit::config::HttpVersion::Http2;
         cfg.worker_threads = 8;
-        app = new server::App(cfg);
-        app->post("/echo", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app = new orbit::server::App(cfg);
+        app->post("/echo", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body(std::string(req.body.size() * 16, 'r'));
             w->send(std::move(res));
         });
@@ -95,7 +95,7 @@ protected:
     }
 };
 
-server::App* TlsConcurrencyTest::app = nullptr;
+orbit::server::App* TlsConcurrencyTest::app = nullptr;
 std::thread TlsConcurrencyTest::server_thread;
 
 // Many multiplexed streams on one TLS connection: the event loop encrypts

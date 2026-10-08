@@ -3,7 +3,7 @@
 #include <orbit/utils/PrometheusRegistry.hpp>
 #include <iostream>
 
-namespace server {
+namespace orbit::server {
 
 ConnectionManager::ConnectionManager(network::Proactor& proactor, const routing::Router& router, concurrency::ThreadPool& thread_pool, TimerManager& timer_manager, size_t max_body_size, network::TlsContext* tls_context)
     : proactor_(proactor), router_(router), thread_pool_(thread_pool), timer_manager_(timer_manager), max_body_size_(max_body_size), tls_context_(tls_context) {}

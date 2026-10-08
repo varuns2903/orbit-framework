@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <functional>
 #include <vector>
@@ -9,11 +10,11 @@
 
 #include <zlib.h>
 
-namespace server {
+namespace orbit::server {
     class Connection; // Forward declaration
 }
 
-namespace http {
+namespace orbit::http {
 namespace websocket {
 
 namespace detail {

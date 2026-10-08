@@ -4,7 +4,7 @@
 
 #include <cstdio>
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
 

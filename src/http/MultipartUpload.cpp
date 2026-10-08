@@ -3,7 +3,7 @@
 #include <cctype>
 #include <cstdio>
 
-namespace http {
+namespace orbit::http {
 
 void MultipartUpload::discard() {
     for (const auto& file : files) std::remove(file.path.c_str());

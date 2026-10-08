@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -6,7 +7,7 @@
 #include <memory>
 #include <chrono>
 
-namespace network {
+namespace orbit::network {
 
 struct PooledConnection {
     int fd{-1};

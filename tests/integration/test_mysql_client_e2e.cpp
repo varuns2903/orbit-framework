@@ -33,8 +33,8 @@ std::string env_or(const char* name, const std::string& fallback) {
     return v && *v ? v : fallback;
 }
 
-database::MysqlClient::Config server_config() {
-    database::MysqlClient::Config c;
+orbit::database::MysqlClient::Config server_config() {
+    orbit::database::MysqlClient::Config c;
     c.host = env_or("ORBIT_TEST_MYSQL_HOST", "127.0.0.1");
     c.port = std::stoi(env_or("ORBIT_TEST_MYSQL_PORT", "3306"));
     c.user = env_or("ORBIT_TEST_MYSQL_USER", "root");
@@ -51,7 +51,7 @@ public:
         running_ = false;
         thread_.join();
     }
-    network::EpollProactor proactor;
+    orbit::network::EpollProactor proactor;
 
 private:
     std::atomic<bool> running_{true};
@@ -93,11 +93,11 @@ struct TypedResults {
     std::string by_index;
 };
 
-concurrency::Task typed_scenario(database::MysqlClient* db, TypedResults* r, std::promise<void>* done) {
+orbit::concurrency::Task typed_scenario(orbit::database::MysqlClient* db, TypedResults* r, std::promise<void>* done) {
     try {
         co_await db->connect_async();
         r->connected = true;
-        database::ResultSet rs = co_await db->query_async(
+        orbit::database::ResultSet rs = co_await db->query_async(
             "SELECT 42 AS i, 3.5 AS d, 'x' AS s, NULL AS n, 9223372036854775807 AS big");
         r->rows = rs.size();
         if (rs.size() == 1) {
@@ -118,7 +118,7 @@ concurrency::Task typed_scenario(database::MysqlClient* db, TypedResults* r, std
 
 TEST_F(MysqlClientTest, ConnectsAndReadsTypedValues) {
     Loop loop;
-    database::MysqlClient db(loop.proactor, server_config());
+    orbit::database::MysqlClient db(loop.proactor, server_config());
     TypedResults r;
     ASSERT_TRUE(run_scenario([&](std::promise<void>* done) { typed_scenario(&db, &r, done); }));
 
@@ -146,7 +146,7 @@ struct WriteResults {
     std::string roundtrip;
 };
 
-concurrency::Task write_scenario(database::MysqlClient* db, std::string tricky, WriteResults* r, std::promise<void>* done) {
+orbit::concurrency::Task write_scenario(orbit::database::MysqlClient* db, std::string tricky, WriteResults* r, std::promise<void>* done) {
     try {
         co_await db->connect_async();
         co_await db->query_async("DROP TABLE IF EXISTS orbit_people");
@@ -185,7 +185,7 @@ concurrency::Task write_scenario(database::MysqlClient* db, std::string tricky, 
 
 TEST_F(MysqlClientTest, WritesReportAffectedRowsAndEscapeRoundTrips) {
     Loop loop;
-    database::MysqlClient db(loop.proactor, server_config());
+    orbit::database::MysqlClient db(loop.proactor, server_config());
     using namespace std::string_literals;
     const std::string tricky = "it's a \"quote\", a back\\slash, a NUL \0 and '; DROP TABLE x; --"s;
     WriteResults r;
@@ -211,7 +211,7 @@ struct LargeResults {
 
 // Results bigger than a socket read, so the non-blocking calls have to
 // wait for the socket and continue more than once.
-concurrency::Task large_scenario(database::MysqlClient* db, LargeResults* r, std::promise<void>* done) {
+orbit::concurrency::Task large_scenario(orbit::database::MysqlClient* db, LargeResults* r, std::promise<void>* done) {
     try {
         co_await db->connect_async();
         auto big = co_await db->query_async("SELECT REPEAT('x', 4000000) AS big_text");
@@ -235,7 +235,7 @@ concurrency::Task large_scenario(database::MysqlClient* db, LargeResults* r, std
 
 TEST_F(MysqlClientTest, LargeResultsArriveWhole) {
     Loop loop;
-    database::MysqlClient db(loop.proactor, server_config());
+    orbit::database::MysqlClient db(loop.proactor, server_config());
     LargeResults r;
     ASSERT_TRUE(run_scenario([&](std::promise<void>* done) { large_scenario(&db, &r, done); }));
     ASSERT_EQ(r.error, "");
@@ -251,7 +251,7 @@ struct ErrorResults {
     std::string after_errors;
 };
 
-concurrency::Task error_scenario(database::MysqlClient* db, ErrorResults* r, std::promise<void>* done) {
+orbit::concurrency::Task error_scenario(orbit::database::MysqlClient* db, ErrorResults* r, std::promise<void>* done) {
     try {
         co_await db->connect_async();
     } catch (const std::exception& e) {
@@ -283,7 +283,7 @@ concurrency::Task error_scenario(database::MysqlClient* db, ErrorResults* r, std
 
 TEST_F(MysqlClientTest, QueryErrorsThrowAndTheConnectionSurvives) {
     Loop loop;
-    database::MysqlClient db(loop.proactor, server_config());
+    orbit::database::MysqlClient db(loop.proactor, server_config());
     ErrorResults r;
     ASSERT_TRUE(run_scenario([&](std::promise<void>* done) { error_scenario(&db, &r, done); }));
     EXPECT_EQ(r.syntax_error.rfind("MySQL Query Error: ", 0), 0u) << r.syntax_error;
@@ -295,7 +295,7 @@ TEST_F(MysqlClientTest, QueryErrorsThrowAndTheConnectionSurvives) {
 
 namespace {
 
-concurrency::Task connect_scenario(database::MysqlClient* db, std::string* error, std::promise<void>* done) {
+orbit::concurrency::Task connect_scenario(orbit::database::MysqlClient* db, std::string* error, std::promise<void>* done) {
     try {
         co_await db->connect_async();
     } catch (const std::exception& e) {
@@ -310,7 +310,7 @@ TEST_F(MysqlClientTest, WrongPasswordFailsToConnect) {
     Loop loop;
     auto config = server_config();
     config.password += "-wrong";
-    database::MysqlClient db(loop.proactor, config);
+    orbit::database::MysqlClient db(loop.proactor, config);
     std::string error;
     ASSERT_TRUE(run_scenario([&](std::promise<void>* done) { connect_scenario(&db, &error, done); }));
     EXPECT_EQ(error.rfind("MySQL Connect Error: ", 0), 0u) << error;
@@ -321,7 +321,7 @@ TEST_F(MysqlClientTest, UnknownDatabaseFailsToConnect) {
     Loop loop;
     auto config = server_config();
     config.dbname = "orbit_no_such_database";
-    database::MysqlClient db(loop.proactor, config);
+    orbit::database::MysqlClient db(loop.proactor, config);
     std::string error;
     ASSERT_TRUE(run_scenario([&](std::promise<void>* done) { connect_scenario(&db, &error, done); }));
     EXPECT_EQ(error.rfind("MySQL Connect Error: ", 0), 0u) << error;
@@ -330,7 +330,7 @@ TEST_F(MysqlClientTest, UnknownDatabaseFailsToConnect) {
 
 TEST_F(MysqlClientTest, CloseIsIdempotent) {
     Loop loop;
-    database::MysqlClient db(loop.proactor, server_config());
+    orbit::database::MysqlClient db(loop.proactor, server_config());
     std::string error;
     ASSERT_TRUE(run_scenario([&](std::promise<void>* done) { connect_scenario(&db, &error, done); }));
     ASSERT_EQ(error, "");

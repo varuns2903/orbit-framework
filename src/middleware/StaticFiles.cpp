@@ -11,7 +11,7 @@
 #include <optional>
 #include <unordered_map>
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
 

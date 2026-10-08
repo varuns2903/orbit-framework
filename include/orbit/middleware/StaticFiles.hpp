@@ -1,10 +1,11 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/routing/Router.hpp>
 #include <chrono>
 #include <string>
 #include <string_view>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @brief Options for static_files().

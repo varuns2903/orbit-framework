@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <sstream>
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
     std::string join(const std::vector<std::string>& vec, const std::string& delimiter) {

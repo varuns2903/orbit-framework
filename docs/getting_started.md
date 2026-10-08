@@ -81,10 +81,10 @@ Create a `main.cpp` file:
 #include <iostream>
 
 int main() {
-    config::ServerConfig config;
+    orbit::config::ServerConfig config;
     config.port = 8080;
 
-    server::App app(config);
+    orbit::server::App app(config);
 
     // Return a string — Orbit builds the HTTP response for you
     app.get("/", []() -> std::string {

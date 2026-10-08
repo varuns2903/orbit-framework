@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 // Portable wrappers for the few file calls used to serve file responses.
 // These are functions rather than `#define close _close`-style macros, which
 // also rewrote every member named close()/open() in the including file.
@@ -12,7 +13,7 @@
 #include <unistd.h>
 #endif
 
-namespace utils::file {
+namespace orbit::utils::file {
 
 /// Opens a file for reading (binary, close-on-exec); -1 on failure.
 inline int open_read_only(const char* path) {

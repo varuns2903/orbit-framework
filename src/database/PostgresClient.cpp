@@ -1,7 +1,7 @@
 #include <orbit/database/PostgresClient.hpp>
 #include <iostream>
 
-namespace database {
+namespace orbit::database {
 
 PostgresClient::PostgresClient(network::Proactor* proactor, const std::string& conninfo)
     : proactor_(proactor), conninfo_(conninfo) {}

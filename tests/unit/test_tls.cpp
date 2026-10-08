@@ -3,16 +3,16 @@
 #include <fstream>
 #include <filesystem>
 
-using namespace network;
+using namespace orbit::network;
 
 TEST(TlsContextTest, InvalidCertsThrow) {
     EXPECT_THROW({
-        TlsContext ctx("invalid.crt", "invalid.key", config::HttpVersion::Http1_1);
+        TlsContext ctx("invalid.crt", "invalid.key", orbit::config::HttpVersion::Http1_1);
     }, std::runtime_error);
 }
 
 TEST(TlsContextTest, EmptyCertsThrow) {
     EXPECT_THROW({
-        TlsContext ctx("", "", config::HttpVersion::Http1_1);
+        TlsContext ctx("", "", orbit::config::HttpVersion::Http1_1);
     }, std::runtime_error);
 }

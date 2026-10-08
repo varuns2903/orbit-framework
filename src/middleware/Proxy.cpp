@@ -24,7 +24,7 @@
 #undef ERROR
 #endif
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
 

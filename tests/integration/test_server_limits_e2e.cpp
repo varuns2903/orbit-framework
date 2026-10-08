@@ -13,15 +13,15 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-network::socket_t connect_to(uint16_t port, int timeout_ms = 3000) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_to(uint16_t port, int timeout_ms = 3000) {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
-        return network::INVALID_SOCKET_FD;
+        orbit::network::close_socket(fd);
+        return orbit::network::INVALID_SOCKET_FD;
     }
 #ifdef _WIN32
     DWORD t = static_cast<DWORD>(timeout_ms);
@@ -33,23 +33,23 @@ network::socket_t connect_to(uint16_t port, int timeout_ms = 3000) {
     return fd;
 }
 
-void send_str(network::socket_t fd, const std::string& s) {
+void send_str(orbit::network::socket_t fd, const std::string& s) {
     ::send(fd, s.data(), static_cast<int>(s.size()), 0);
 }
 
-std::string read_some(network::socket_t fd) {
+std::string read_some(orbit::network::socket_t fd) {
     char buf[4096];
     auto n = ::recv(fd, buf, sizeof(buf), 0);
     return n > 0 ? std::string(buf, static_cast<size_t>(n)) : std::string();
 }
 
 std::string exchange(uint16_t port, const std::string& request) {
-    network::socket_t fd = connect_to(port);
-    if (fd == network::INVALID_SOCKET_FD) return "<connect failed>";
+    orbit::network::socket_t fd = connect_to(port);
+    if (fd == orbit::network::INVALID_SOCKET_FD) return "<connect failed>";
     send_str(fd, request);
     std::string out;
     for (std::string chunk = read_some(fd); !chunk.empty(); chunk = read_some(fd)) out += chunk;
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return out;
 }
 
@@ -65,9 +65,9 @@ std::string client_frame(uint8_t opcode, const std::string& payload) {
 }
 
 // Opens a WebSocket on /ws; returns the socket after the 101 response.
-network::socket_t open_websocket(uint16_t port, int timeout_ms) {
-    network::socket_t fd = connect_to(port, timeout_ms);
-    if (fd == network::INVALID_SOCKET_FD) return fd;
+orbit::network::socket_t open_websocket(uint16_t port, int timeout_ms) {
+    orbit::network::socket_t fd = connect_to(port, timeout_ms);
+    if (fd == orbit::network::INVALID_SOCKET_FD) return fd;
     send_str(fd, "GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                  "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
     std::string res;
@@ -82,27 +82,27 @@ network::socket_t open_websocket(uint16_t port, int timeout_ms) {
 
 class Server {
 public:
-    explicit Server(const config::ServerConfig& cfg) : app_(std::make_unique<server::App>(cfg)), port_(cfg.port) {
-        app_->get("/ok", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+    explicit Server(const orbit::config::ServerConfig& cfg) : app_(std::make_unique<orbit::server::App>(cfg)), port_(cfg.port) {
+        app_->get("/ok", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("ok");
             w->send(std::move(res));
         });
-        app_->get("/moved", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res; // no body
-            res.status(http::HttpStatus::Found);
+        app_->get("/moved", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res; // no body
+            res.status(orbit::http::HttpStatus::Found);
             res.headers["Location"] = "/ok";
             w->send(std::move(res));
         });
-        app_->ws("/ws", [](http::websocket::WebSocketConnection& ws) {
+        app_->ws("/ws", [](orbit::http::websocket::WebSocketConnection& ws) {
             ws.on_message([&ws](const std::string& m) { ws.send(m); });
         });
-        server::App* app = app_.get();
+        orbit::server::App* app = app_.get();
         thread_ = std::thread([app] { app->listen(); });
         for (int i = 0; i < 200; ++i) {
-            network::socket_t fd = connect_to(port_);
-            if (fd != network::INVALID_SOCKET_FD) {
-                network::close_socket(fd);
+            orbit::network::socket_t fd = connect_to(port_);
+            if (fd != orbit::network::INVALID_SOCKET_FD) {
+                orbit::network::close_socket(fd);
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -114,7 +114,7 @@ public:
     }
 
 private:
-    std::unique_ptr<server::App> app_;
+    std::unique_ptr<orbit::server::App> app_;
     uint16_t port_;
     std::thread thread_;
 };
@@ -122,7 +122,7 @@ private:
 } // namespace
 
 TEST(ServerLimitsTest, RequestLineHeaderCountAndSizeAreConfigurable) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8129;
     cfg.max_request_line = 100;
     cfg.max_headers = 5;
@@ -146,21 +146,21 @@ TEST(ServerLimitsTest, RequestLineHeaderCountAndSizeAreConfigurable) {
 }
 
 TEST(ServerLimitsTest, ServerPingsWebSockets) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8130;
     cfg.websocket_ping_interval = std::chrono::seconds(1);
     Server server(cfg);
 
-    network::socket_t fd = open_websocket(8130, 3000);
-    ASSERT_NE(fd, network::INVALID_SOCKET_FD);
+    orbit::network::socket_t fd = open_websocket(8130, 3000);
+    ASSERT_NE(fd, orbit::network::INVALID_SOCKET_FD);
     std::string frame = read_some(fd); // nothing else is sent, so this is the ping
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     ASSERT_GE(frame.size(), 2u);
     EXPECT_EQ(static_cast<uint8_t>(frame[0]), 0x89) << "expected a ping frame";
 }
 
 TEST(ServerLimitsTest, PingsKeepLivePeersAndIdleTimeoutDropsSilentOnes) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8131;
     cfg.websocket_ping_interval = std::chrono::seconds(1);
     cfg.websocket_idle_timeout = std::chrono::seconds(2);
@@ -169,7 +169,7 @@ TEST(ServerLimitsTest, PingsKeepLivePeersAndIdleTimeoutDropsSilentOnes) {
     // Live peer: answers every ping with a pong.
     std::atomic<bool> live_closed{false};
     std::thread live([&] {
-        network::socket_t fd = open_websocket(8131, 500);
+        orbit::network::socket_t fd = open_websocket(8131, 500);
         auto until = Clock::now() + std::chrono::milliseconds(4500);
         while (Clock::now() < until) {
             std::string data = read_some(fd);
@@ -188,17 +188,17 @@ TEST(ServerLimitsTest, PingsKeepLivePeersAndIdleTimeoutDropsSilentOnes) {
             }
             if (static_cast<uint8_t>(data[0]) == 0x89) send_str(fd, client_frame(0xA, ""));
         }
-        network::close_socket(fd);
+        orbit::network::close_socket(fd);
     });
 
     // Silent peer: never reads or answers; the server must close it.
-    network::socket_t silent = open_websocket(8131, 6000);
-    ASSERT_NE(silent, network::INVALID_SOCKET_FD);
+    orbit::network::socket_t silent = open_websocket(8131, 6000);
+    ASSERT_NE(silent, orbit::network::INVALID_SOCKET_FD);
     auto start = Clock::now();
     std::string rest;
     for (std::string chunk = read_some(silent); !chunk.empty(); chunk = read_some(silent)) rest += chunk;
     auto closed_after = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start);
-    network::close_socket(silent);
+    orbit::network::close_socket(silent);
 
     live.join();
     EXPECT_LT(closed_after.count(), 4000) << "silent peer was not dropped by the idle timeout";
@@ -207,28 +207,28 @@ TEST(ServerLimitsTest, PingsKeepLivePeersAndIdleTimeoutDropsSilentOnes) {
 }
 
 TEST(ServerLimitsTest, WebSocketMessageLimitFromConfig) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8132;
     cfg.websocket_max_message_size = 10;
     Server server(cfg);
 
-    network::socket_t fd = open_websocket(8132, 3000);
-    ASSERT_NE(fd, network::INVALID_SOCKET_FD);
+    orbit::network::socket_t fd = open_websocket(8132, 3000);
+    ASSERT_NE(fd, orbit::network::INVALID_SOCKET_FD);
     send_str(fd, client_frame(0x1, std::string(20, 'm')));
     std::string reply = read_some(fd);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     ASSERT_GE(reply.size(), 4u);
     EXPECT_EQ(static_cast<uint8_t>(reply[0]), 0x88) << "expected a close frame";
     EXPECT_EQ((static_cast<uint8_t>(reply[2]) << 8) | static_cast<uint8_t>(reply[3]), 1009);
 }
 
 TEST(ServerLimitsTest, EmptyBodyResponseKeepsTheConnectionUsable) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8147;
     Server server(cfg);
 
-    network::socket_t fd = connect_to(8147, 2000);
-    ASSERT_NE(fd, network::INVALID_SOCKET_FD);
+    orbit::network::socket_t fd = connect_to(8147, 2000);
+    ASSERT_NE(fd, orbit::network::INVALID_SOCKET_FD);
     send_str(fd, "GET /moved HTTP/1.1\r\nHost: x\r\n\r\n");
     std::string first = read_some(fd);
     EXPECT_EQ(first.rfind("HTTP/1.1 302", 0), 0u) << first;
@@ -239,7 +239,7 @@ TEST(ServerLimitsTest, EmptyBodyResponseKeepsTheConnectionUsable) {
     send_str(fd, "GET /ok HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
     std::string second = read_some(fd);
     auto took = std::chrono::steady_clock::now() - started;
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     EXPECT_EQ(second.rfind("HTTP/1.1 200", 0), 0u) << second;
     EXPECT_LT(took, std::chrono::milliseconds(1000));
 }

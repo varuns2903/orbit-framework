@@ -1,9 +1,10 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <functional>
 #include <orbit/network/PlatformSocket.hpp>
 #include <sys/types.h>
 
-namespace network {
+namespace orbit::network {
 
 class Proactor {
 public:

@@ -1,8 +1,9 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <coroutine>
 #include <exception>
 
-namespace concurrency {
+namespace orbit::concurrency {
 
 struct Task {
     struct promise_type {

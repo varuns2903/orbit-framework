@@ -7,13 +7,13 @@
 #include <filesystem>
 #include <fstream>
 
-using namespace server;
-using namespace http;
-using namespace database;
-using namespace orm;
+using namespace orbit::server;
+using namespace orbit::http;
+using namespace orbit::database;
+using namespace orbit::orm;
 
 int main(int argc, char* argv[]) {
-    auto config = config::ServerConfig::parse(argc, argv);
+    auto config = orbit::config::ServerConfig::parse(argc, argv);
     App app(config);
 
     // Create a dummy migration directory and file for testing
@@ -22,7 +22,7 @@ int main(int argc, char* argv[]) {
 
     // Run migrations on startup!
     app.get("/migrate", [](HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> res) {
-        auto coro = [res]() -> concurrency::Task {
+        auto coro = [res]() -> orbit::concurrency::Task {
             auto db = std::make_shared<PostgresClient>(&res->proactor(), "dbname=postgres");
             bool connected = co_await connect_async(db);
             

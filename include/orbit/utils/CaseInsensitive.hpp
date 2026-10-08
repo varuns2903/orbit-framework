@@ -1,10 +1,11 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <string_view>
 #include <cctype>
 #include <algorithm>
 
-namespace utils {
+namespace orbit::utils {
 
 struct CaseInsensitiveHash {
     template <typename StringType>
