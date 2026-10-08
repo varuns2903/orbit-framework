@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <orbit/server/App.hpp>
 #include <orbit/concurrency/Task.hpp>
+#include <orbit/concurrency/ThreadPool.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include "../utils/TestConfig.hpp"
@@ -26,16 +27,21 @@ namespace {
 
 constexpr int kPort = 8171;
 
-// Resumes the coroutine on another thread, as database and HTTP client
-// callbacks do: the exception is thrown far from the router's try/catch.
+orbit::concurrency::ThreadPool* g_pool = nullptr;
+
+// Resumes the coroutine later on one of the App's worker threads, as
+// database and HTTP client callbacks resume on long-lived threads: the
+// exception is thrown far from the router's try/catch. (Not a short-lived
+// std::thread: with io_uring, I/O submitted by a thread that then exits can
+// be cancelled by the kernel, which is a separate problem.)
 struct ResumeElsewhere {
     std::chrono::milliseconds delay{5};
     bool await_ready() const noexcept { return false; }
     void await_suspend(std::coroutine_handle<> h) const {
-        std::thread([h, d = delay] {
+        g_pool->enqueue([h, d = delay] {
             std::this_thread::sleep_for(d);
             h.resume();
-        }).detach();
+        });
     }
     void await_resume() const noexcept {}
 };
@@ -144,6 +150,7 @@ protected:
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
         curl_easy_cleanup(probe);
+        g_pool = &app->get_thread_pool(); // exists once the server is running
     }
 
     static void TearDownTestSuite() {
