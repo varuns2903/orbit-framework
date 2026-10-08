@@ -270,6 +270,16 @@ void Router::on_error(ErrorHandler handler) {
 }
 
 void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> response_writer) const {
+    // Exceptions from asynchronous handler code (a coroutine handler that
+    // throws after a co_await) arrive here later, through the writer. The
+    // request stays alive until its response is sent, so the pointer is
+    // valid whenever the sink can still run (see report_async_exception).
+    if (response_writer) {
+        response_writer->set_error_sink([this, req = &request](std::exception_ptr error,
+                                                             std::shared_ptr<http::ResponseWriter> writer) {
+            handle_exception(std::move(error), *req, std::move(writer));
+        });
+    }
     try {
         // 1. Run global and route-specific middlewares
         for (auto& mw : middlewares_) {
@@ -342,10 +352,19 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
         }
         response_writer->send(std::move(res));
         
+    } catch (...) {
+        handle_exception(std::current_exception(), request, response_writer);
+    }
+}
+
+void Router::handle_exception(std::exception_ptr error, http::HttpRequest& request,
+                              std::shared_ptr<http::ResponseWriter> response_writer) const {
+    const ErrorHandler* handler = error_handler_ ? &error_handler_
+                                : (parent_ && parent_->error_handler_) ? &parent_->error_handler_
+                                : nullptr;
+    try {
+        std::rethrow_exception(error);
     } catch (const std::exception& e) {
-        const ErrorHandler* handler = error_handler_ ? &error_handler_
-                                    : (parent_ && parent_->error_handler_) ? &parent_->error_handler_
-                                    : nullptr;
         if (handler) {
             // An error handler that throws used to escape route(): the
             // worker caught it, but the client never got a response and
@@ -359,22 +378,20 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
             } catch (...) {
                 LOG_ERROR("Error handler failed for route " << request.uri << " (handling: " << e.what() << ")");
             }
-            // Never a second response after part of one has gone out.
-            if (response_writer->has_responded()) return;
         } else {
             // The exception text can contain SQL, file paths or secrets; it
             // goes to the log, never to the client.
             LOG_ERROR("Unhandled exception in route " << request.uri << ": " << e.what());
         }
-        http::HttpResponse res;
-        res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
-        response_writer->send(std::move(res));
     } catch (...) {
         LOG_ERROR("Unknown unhandled exception in route " << request.uri);
-        http::HttpResponse res;
-        res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
-        response_writer->send(std::move(res));
     }
+    // Never a second response after part of one has gone out (a handler
+    // that sent its response and then threw, or a failed error handler).
+    if (response_writer->has_responded()) return;
+    http::HttpResponse res;
+    res.status(http::HttpStatus::InternalServerError).send("500 Internal Server Error");
+    response_writer->send(std::move(res));
 }
 
 void Router::RouteBuilder::handler(RouteHandler h) {

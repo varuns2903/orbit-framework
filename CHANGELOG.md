@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OFF` when Orbit is not the top-level project, and when it is turned on the
   sanitizer link flags reach the application through `OrbitFramework::core`.
   A new CI job builds such an application in Debug.
+- **An exception in a coroutine handler no longer terminates the server**
+  (#184). `Task::promise_type::unhandled_exception()` called `std::terminate()`;
+  exceptions from `Task` handlers — before or after a `co_await`, on any thread
+  — now go through the router's error handling (`on_error`, else a 500), like
+  those from synchronous handlers. Exceptions after the response was sent, or
+  from coroutines that are not handlers, are logged.
 
 ## [v2.0.0] - 2026-10-08
 

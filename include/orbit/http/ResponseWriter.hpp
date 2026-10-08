@@ -3,7 +3,11 @@
 #include <orbit/http/HttpResponse.hpp>
 #include <string_view>
 #include <atomic>
+#include <cstdint>
+#include <exception>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <orbit/http/json.hpp>
 
 namespace orbit::network { class Proactor; }
@@ -101,15 +105,52 @@ public:
      */
     bool has_responded() const { return responded_.load(); }
 
+    /**
+     * @brief Receives an exception that escaped asynchronous handler code,
+     *        such as a coroutine handler that threw after a co_await.
+     *
+     * The router installs one for each request; it runs the same error
+     * handling as for a handler that throws synchronously.
+     */
+    using ErrorSink = std::function<void(std::exception_ptr, std::shared_ptr<ResponseWriter>)>;
+    void set_error_sink(ErrorSink sink) {
+        std::lock_guard<std::mutex> lock(error_sink_mutex_);
+        error_sink_ = std::move(sink);
+    }
+
+    /// Identifies the request this writer is answering. A writer reused
+    /// across requests (an HTTP/1.1 keep-alive connection) advances it with
+    /// each request, so late failures of an earlier one can be told apart.
+    uint64_t request_generation() const { return generation_.load(); }
+
+    /**
+     * @brief Reports an exception from asynchronous handler code.
+     *
+     * Goes through the request's error sink (the router's on_error handler,
+     * else a 500). The exception is only logged if part of the response has
+     * already been sent, or if @p generation is no longer the writer's
+     * current request (the connection moved on to another). Never throws.
+     */
+    static void report_async_exception(const std::shared_ptr<ResponseWriter>& writer, uint64_t generation,
+                                       std::exception_ptr error) noexcept;
+
 protected:
     /// Implementations call this whenever they write part of a response.
     void mark_responded() { responded_ = true; }
     /// For writers reused across requests (an HTTP/1.1 keep-alive
     /// connection), at the start of each request.
-    void reset_responded() { responded_ = false; }
+    void reset_responded() {
+        responded_ = false;
+        ++generation_;
+        std::lock_guard<std::mutex> lock(error_sink_mutex_);
+        error_sink_ = nullptr;
+    }
 
 private:
     std::atomic<bool> responded_{false};
+    std::atomic<uint64_t> generation_{0};
+    std::mutex error_sink_mutex_;
+    ErrorSink error_sink_;
 };
 
 } // namespace http
