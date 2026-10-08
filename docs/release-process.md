@@ -60,7 +60,7 @@ tag of this repository, and recorded in the public Rekor transparency log.
 ## Verifying a release
 
 ```bash
-VERSION=1.6.0
+VERSION=2.0.0
 # 1. Checksums
 sha256sum -c SHA256SUMS --ignore-missing
 
