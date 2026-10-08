@@ -1,0 +1,87 @@
+name: Benchmarks
+
+# Runs benchmarks/run_benchmarks.sh (Orbit vs Drogon and Crow, #19) on a
+# GitHub-hosted runner, on demand. The runner is a shared VM: its figures are
+# reproducible by anyone and show their own spread, but they are not a
+# substitute for a quiet dedicated machine (docs/benchmarks.md).
+on:
+  workflow_dispatch:
+    inputs:
+      frameworks:
+        description: "Frameworks to run"
+        default: "orbit drogon crow"
+      trials:
+        description: "Measured trials per endpoint"
+        default: "5"
+      duration:
+        description: "Length of one trial (wrk -d)"
+        default: "15s"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: Orbit vs Drogon vs Crow
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v7
+
+    # Same key and path as the main CI build, so its cache is reused.
+    - name: Cache vcpkg dependencies
+      uses: actions/cache@v6
+      with:
+        path: |
+          build/vcpkg_installed
+          vcpkg/downloads
+        key: ${{ runner.os }}-vcpkg-manifest-v1-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-manifest-v1-
+
+    - name: Install tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake wrk
+
+    - name: Setup vcpkg (pinned to builtin-baseline)
+      run: |
+        mkdir -p vcpkg
+        cd vcpkg
+        git init
+        git remote add origin https://github.com/microsoft/vcpkg.git
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
+        ./bootstrap-vcpkg.sh -disableMetrics
+
+    - name: Run the comparison
+      env:
+        FRAMEWORKS: ${{ inputs.frameworks }}
+        TRIALS: ${{ inputs.trials }}
+        DURATION: ${{ inputs.duration }}
+        BUILD_DIR: build
+        EXTRA_CMAKE_ARGS: >-
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      run: benchmarks/run_benchmarks.sh
+
+    - name: Publish results
+      if: always()
+      run: |
+        if [ -f benchmark-results.md ]; then
+          cat benchmark-results.md >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload results
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: benchmark-results
+        path: benchmark-results.md
+        if-no-files-found: ignore
+        retention-days: 90
