@@ -1,11 +1,12 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <memory>
 #include <vector>
 #include <orbit/http/json.hpp>
 #include <orbit/database/MongoClient.hpp>
 
-namespace orm {
+namespace orbit::orm {
 
 /**
  * @brief An awaiter for MongoDB queries that maps JSON responses back to C++ ModelType vectors.

@@ -91,7 +91,7 @@ H2Result h2_request(const std::string& path, const std::string& post_body = "", 
 
 class Http2E2ETest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
@@ -103,16 +103,16 @@ protected:
         for (int i = 0; i < 100000; ++i) g_file_content += "line " + std::to_string(i) + "\n";
         std::ofstream(g_file, std::ios::binary) << g_file_content;
 
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.ssl_cert = g_cert;
         cfg.ssl_key = g_key;
-        cfg.http_version = config::HttpVersion::Http2;
+        cfg.http_version = orbit::config::HttpVersion::Http2;
         cfg.max_body_size = 1024;
-        app = new server::App(cfg);
+        app = new orbit::server::App(cfg);
 
-        app->get("/file", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/file", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.send_file(g_file, "application/octet-stream");
             w->send(std::move(res));
         });
@@ -120,10 +120,10 @@ protected:
         // Opens a file right after send(). The descriptor number the stream
         // just released is reused for it, so a second close() of the response's
         // file descriptor would close this unrelated file.
-        app->get("/file-then-open", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
+        app->get("/file-then-open", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
             int sentinel = -1;
             {
-                http::HttpResponse res;
+                orbit::http::HttpResponse res;
                 res.send_file(g_file, "application/octet-stream");
                 w->send(std::move(res));
                 sentinel = ::open(g_file.c_str(), O_RDONLY);
@@ -132,19 +132,19 @@ protected:
             if (sentinel != -1) ::close(sentinel);
         });
 #endif
-        app->post("/echo", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->post("/echo", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("got " + std::to_string(req.body.size()));
             w->send(std::move(res));
         });
-        app->get("/slow", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
+        app->get("/slow", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
             std::this_thread::sleep_for(std::chrono::milliseconds(600));
-            http::HttpResponse res;
+            orbit::http::HttpResponse res;
             res.set_body("late");
             w->send(std::move(res)); // the client has already gone
         });
-        app->get("/ok", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/ok", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("ok");
             w->send(std::move(res));
         });
@@ -172,7 +172,7 @@ protected:
     }
 };
 
-server::App* Http2E2ETest::app = nullptr;
+orbit::server::App* Http2E2ETest::app = nullptr;
 std::thread Http2E2ETest::server_thread;
 
 TEST_F(Http2E2ETest, NegotiatesHttp2) {

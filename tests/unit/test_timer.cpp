@@ -2,7 +2,7 @@
 #include <orbit/server/TimerManager.hpp>
 #include <thread>
 
-using namespace server;
+using namespace orbit::server;
 
 TEST(TimerManagerTest, BasicTimerExecution) {
     TimerManager tm;

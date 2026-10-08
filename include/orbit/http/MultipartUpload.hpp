@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/MultipartStreamParser.hpp>
 #include <orbit/http/ResponseWriter.hpp>
@@ -9,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace http {
+namespace orbit::http {
 
 /// A file part saved to disk by receive_multipart().
 struct UploadedFile {

@@ -2,7 +2,7 @@
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/utils/Logger.hpp>
 
-namespace middleware {
+namespace orbit::middleware {
 
 DistributedRateLimiter::DistributedRateLimiter(const std::string& redis_host, int redis_port, size_t max_requests,
                                                std::chrono::seconds window, KeyFunction key,

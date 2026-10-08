@@ -6,7 +6,7 @@
 #include <thread>
 
 TEST(ThreadPoolTest, ExecutesTasksCorrectly) {
-    concurrency::ThreadPool pool(4);
+    orbit::concurrency::ThreadPool pool(4);
     std::atomic<int> counter{0};
     
     for (int i = 0; i < 100; ++i) {
@@ -28,7 +28,7 @@ TEST(ThreadPoolTest, DestructorDoesNotMissTheStopSignal) {
     auto done = std::make_shared<std::atomic<bool>>(false);
     std::thread([done] {
         for (int i = 0; i < 20000; ++i) {
-            concurrency::ThreadPool pool(1);
+            orbit::concurrency::ThreadPool pool(1);
         }
         *done = true;
     }).detach(); // detached: if it hangs, fail the test instead of the binary

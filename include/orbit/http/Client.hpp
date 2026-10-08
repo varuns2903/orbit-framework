@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <chrono>
 #include <coroutine>
 #include <functional>
@@ -9,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace http {
+namespace orbit::http {
 
 /// An outbound HTTP request for Client.
 struct ClientRequest {

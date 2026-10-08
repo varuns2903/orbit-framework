@@ -76,16 +76,16 @@ app.post("/signup", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
 
 ### File uploads streamed to disk
 
-For uploads, register a **stream route**, so the body is not buffered in memory, and pass it to `http::receive_multipart`. File parts are written as they arrive to private, randomly named files (`MultipartLimits::upload_dir`, by default a 0700 per-process directory under the system temp directory), within the limits you set:
+For uploads, register a **stream route**, so the body is not buffered in memory, and pass it to `orbit::http::receive_multipart`. File parts are written as they arrive to private, randomly named files (`MultipartLimits::upload_dir`, by default a 0700 per-process directory under the system temp directory), within the limits you set:
 
 ```cpp
 #include <orbit/http/MultipartUpload.hpp>
 
-app.group("/api", [](routing::Router& api) {
+app.group("/api", [](orbit::routing::Router& api) {
     api.add_stream_route(HttpMethod::POST, "/upload", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
-        http::MultipartLimits limits;
+        orbit::http::MultipartLimits limits;
         limits.max_file_size = 50 * 1024 * 1024;
-        http::receive_multipart(req, res, [res](http::MultipartUpload& upload) {
+        orbit::http::receive_multipart(req, res, [res](orbit::http::MultipartUpload& upload) {
             HttpResponse response;
             if (!upload.ok()) {
                 response.status(HttpStatus::BadRequest).send(upload.error);

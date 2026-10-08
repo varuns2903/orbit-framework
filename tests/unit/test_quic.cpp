@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-using server::quic::detail::ErrorAction;
+using orbit::server::quic::detail::ErrorAction;
 
 namespace {
 
@@ -64,7 +64,7 @@ std::string nv_value(const nghttp3_nv& nv) { return std::string(reinterpret_cast
 // ---------------- Errors ----------------
 
 TEST(QuicErrorActionTest, ReadErrors) {
-    using server::quic::detail::on_read_error;
+    using orbit::server::quic::detail::on_read_error;
     // The peer sent CONNECTION_CLOSE: draining period, nothing more is sent.
     EXPECT_EQ(on_read_error(NGTCP2_ERR_DRAINING), ErrorAction::Drain);
     // ngtcp2 asks for the state to be dropped silently.
@@ -78,7 +78,7 @@ TEST(QuicErrorActionTest, ReadErrors) {
 }
 
 TEST(QuicErrorActionTest, ExpiryErrors) {
-    using server::quic::detail::on_expiry_error;
+    using orbit::server::quic::detail::on_expiry_error;
     // RFC 9000 section 10.1: an idle timeout closes silently.
     EXPECT_EQ(on_expiry_error(NGTCP2_ERR_IDLE_CLOSE), ErrorAction::Drop);
     // Loss detection gave up, for example: tell the peer.
@@ -90,48 +90,48 @@ TEST(QuicErrorActionTest, ExpiryErrors) {
 
 TEST(QuicFirstPacketTest, Rfc9001ClientInitialIsAccepted) {
     auto pkt = rfc9001_client_initial();
-    EXPECT_TRUE(server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
+    EXPECT_TRUE(orbit::server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
 }
 
 TEST(QuicFirstPacketTest, InitialOfExactly1200BytesIsAccepted) {
     auto pkt = long_packet(0, 8, 1200);
-    EXPECT_TRUE(server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
+    EXPECT_TRUE(orbit::server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
 }
 
 TEST(QuicFirstPacketTest, InitialUnder1200BytesIsDropped) {
     // RFC 9000 section 14.1: smaller client Initials must be discarded.
     auto pkt = long_packet(0, 8, 1199);
-    EXPECT_FALSE(server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
+    EXPECT_FALSE(orbit::server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
 }
 
 TEST(QuicFirstPacketTest, InitialWithShortDcidIsDropped) {
     // RFC 9000 section 7.2: the client's first DCID is at least 8 bytes.
     auto pkt = long_packet(0, 7, 1200);
-    EXPECT_FALSE(server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
+    EXPECT_FALSE(orbit::server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
 }
 
 TEST(QuicFirstPacketTest, HandshakePacketCannotOpenAConnection) {
     auto pkt = long_packet(2, 8, 1200);
-    EXPECT_FALSE(server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
+    EXPECT_FALSE(orbit::server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
 }
 
 TEST(QuicFirstPacketTest, ShortHeaderPacketCannotOpenAConnection) {
     std::vector<uint8_t> pkt(1200, 0);
     pkt[0] = 0x40; // short header, fixed bit set
-    EXPECT_FALSE(server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
+    EXPECT_FALSE(orbit::server::quic::detail::acceptable_first_packet(pkt.data(), pkt.size()));
 }
 
 TEST(QuicFirstPacketTest, TruncatedAndEmptyInputIsDropped) {
     auto pkt = rfc9001_client_initial();
     for (size_t len : {0u, 1u, 5u, 6u, 14u, 20u}) {
-        EXPECT_FALSE(server::quic::detail::acceptable_first_packet(pkt.data(), len)) << "length " << len;
+        EXPECT_FALSE(orbit::server::quic::detail::acceptable_first_packet(pkt.data(), len)) << "length " << len;
     }
 }
 
 // ---------------- Connection IDs ----------------
 
 TEST(QuicConnectionIdTest, EqualityComparesLengthAndBytes) {
-    server::QuicConnectionIdEqual eq;
+    orbit::server::QuicConnectionIdEqual eq;
     EXPECT_TRUE(eq(cid("abcdefgh"), cid("abcdefgh")));
     EXPECT_FALSE(eq(cid("abcdefgh"), cid("abcdefgi")));
     EXPECT_FALSE(eq(cid("abcdefgh"), cid("abcdefg")));
@@ -139,7 +139,7 @@ TEST(QuicConnectionIdTest, EqualityComparesLengthAndBytes) {
 }
 
 TEST(QuicConnectionIdTest, HashIsStableAndUsesEveryByte) {
-    server::QuicConnectionIdHash hash;
+    orbit::server::QuicConnectionIdHash hash;
     EXPECT_EQ(hash(cid("abcdefgh")), hash(cid("abcdefgh")));
     // A prefix of the same bytes is a different ID and should land elsewhere.
     EXPECT_NE(hash(cid("abcdefgh")), hash(cid("abcdefg")));
@@ -149,7 +149,7 @@ TEST(QuicConnectionIdTest, HashIsStableAndUsesEveryByte) {
 // ---------------- Sent chunks ----------------
 
 TEST(QuicSentChunksTest, HandsOutInOrderAndIgnoresEmptyChunks) {
-    server::quic::detail::SentChunks chunks;
+    orbit::server::quic::detail::SentChunks chunks;
     chunks.push("one");
     chunks.push("");
     chunks.push("two");
@@ -164,7 +164,7 @@ TEST(QuicSentChunksTest, HandsOutInOrderAndIgnoresEmptyChunks) {
 }
 
 TEST(QuicSentChunksTest, HandOutRespectsTheVectorCount) {
-    server::quic::detail::SentChunks chunks;
+    orbit::server::quic::detail::SentChunks chunks;
     for (const char* c : {"a", "b", "c"}) chunks.push(c);
     nghttp3_vec vec[2];
     EXPECT_EQ(chunks.hand_out(vec, 0), 0u);
@@ -175,7 +175,7 @@ TEST(QuicSentChunksTest, HandOutRespectsTheVectorCount) {
 }
 
 TEST(QuicSentChunksTest, ChunksStayUntilFullyAcknowledged) {
-    server::quic::detail::SentChunks chunks;
+    orbit::server::quic::detail::SentChunks chunks;
     chunks.push("hello"); // 5
     chunks.push("big world"); // 9
     nghttp3_vec vec[2];
@@ -198,7 +198,7 @@ TEST(QuicSentChunksTest, ChunksStayUntilFullyAcknowledged) {
 }
 
 TEST(QuicSentChunksTest, AcksNeverFreeChunksThatWereNotHandedOut) {
-    server::quic::detail::SentChunks chunks;
+    orbit::server::quic::detail::SentChunks chunks;
     chunks.push("abc");
     chunks.ack(100); // more than was ever handed out
     EXPECT_EQ(chunks.held(), 1u);
@@ -209,12 +209,12 @@ TEST(QuicSentChunksTest, AcksNeverFreeChunksThatWereNotHandedOut) {
 // ---------------- Response headers ----------------
 
 TEST(Http3ResponseHeadersTest, StatusFirstAndNamesLowercased) {
-    http::HttpResponse res;
-    res.status_code = http::HttpStatus::NotFound;
+    orbit::http::HttpResponse res;
+    res.status_code = orbit::http::HttpStatus::NotFound;
     res.headers["Content-Type"] = "text/plain";
     res.headers["X-Custom-Header"] = "MixedCase Value";
 
-    auto block = server::quic::detail::build_response_headers(res);
+    auto block = orbit::server::quic::detail::build_response_headers(res);
     ASSERT_EQ(block.nvs.size(), 3u);
     EXPECT_EQ(nv_name(block.nvs[0]), ":status");
     EXPECT_EQ(nv_value(block.nvs[0]), "404");
@@ -225,7 +225,7 @@ TEST(Http3ResponseHeadersTest, StatusFirstAndNamesLowercased) {
 }
 
 TEST(Http3ResponseHeadersTest, ConnectionSpecificFieldsAreDropped) {
-    http::HttpResponse res;
+    orbit::http::HttpResponse res;
     res.headers["Connection"] = "keep-alive";
     res.headers["Transfer-Encoding"] = "chunked";
     res.headers["Keep-Alive"] = "timeout=5";
@@ -233,7 +233,7 @@ TEST(Http3ResponseHeadersTest, ConnectionSpecificFieldsAreDropped) {
     res.headers["Proxy-Connection"] = "close";
     res.headers["Vary"] = "Accept";
 
-    auto block = server::quic::detail::build_response_headers(res);
+    auto block = orbit::server::quic::detail::build_response_headers(res);
     ASSERT_EQ(block.nvs.size(), 2u);
     EXPECT_EQ(nv_name(block.nvs[1]), "vary");
 }
@@ -242,9 +242,9 @@ TEST(Http3ResponseHeadersTest, EntriesPointIntoLiveStorage) {
     // Regression: the storage once reallocated on the last push, leaving the
     // short-string entries pointing at freed memory.
     for (size_t count : {0u, 1u, 2u, 7u, 33u}) {
-        http::HttpResponse res;
+        orbit::http::HttpResponse res;
         for (size_t i = 0; i < count; ++i) res.headers["H" + std::to_string(i)] = "v" + std::to_string(i);
-        auto block = server::quic::detail::build_response_headers(res);
+        auto block = orbit::server::quic::detail::build_response_headers(res);
         ASSERT_EQ(block.nvs.size(), count + 1);
         EXPECT_EQ(nv_name(block.nvs[0]), ":status");
         EXPECT_EQ(nv_value(block.nvs[0]), "200");

@@ -2,7 +2,7 @@
 #include <orbit/utils/Random.hpp>
 #include <algorithm>
 
-namespace middleware {
+namespace orbit::middleware {
 
 Csrf::Csrf(const std::string& cookie_name, const std::string& header_name)
     : cookie_name_(cookie_name), header_name_(header_name) {}

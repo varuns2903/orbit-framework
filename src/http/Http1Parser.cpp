@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace http {
+namespace orbit::http {
 
 struct Http1Parser::Impl {
     explicit Impl(Limits l) : limits(l) {

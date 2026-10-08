@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <string>
 
-namespace http {
+namespace orbit::http {
 
 bool connection_option_present(std::string_view field_value, std::string_view option) {
     size_t pos = 0;

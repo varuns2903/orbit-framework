@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/orm/MongoQueryBuilder.hpp>
 #include <orbit/orm/QueryBuilder.hpp>
 
@@ -12,8 +13,8 @@
  */
 #define ORBIT_REGISTER_MODEL(Type, TableName) \
     template <typename DBClient> \
-    inline orm::QueryBuilder<DBClient, Type> query_##Type(std::shared_ptr<DBClient> db) { \
-        return orm::QueryBuilder<DBClient, Type>(db, TableName); \
+    inline ::orbit::orm::QueryBuilder<DBClient, Type> query_##Type(std::shared_ptr<DBClient> db) { \
+        return ::orbit::orm::QueryBuilder<DBClient, Type>(db, TableName); \
     }
 
 /**
@@ -22,6 +23,6 @@
  * @param Type The C++ struct/class name.
  */
 #define ORBIT_REGISTER_MONGO_MODEL(Type) \
-    inline orm::MongoQueryBuilder<Type> query_mongo_##Type(std::shared_ptr<database::MongoClient> db) { \
-        return orm::MongoQueryBuilder<Type>(db); \
+    inline ::orbit::orm::MongoQueryBuilder<Type> query_mongo_##Type(std::shared_ptr<::orbit::database::MongoClient> db) { \
+        return ::orbit::orm::MongoQueryBuilder<Type>(db); \
     }

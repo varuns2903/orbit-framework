@@ -6,7 +6,7 @@
 #include <string>
 #include <system_error>
 
-namespace config {
+namespace orbit::config {
 
 namespace {
 

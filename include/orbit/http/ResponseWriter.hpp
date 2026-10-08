@@ -1,14 +1,15 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include <string_view>
 #include <atomic>
 #include <memory>
 #include <orbit/http/json.hpp>
 
-namespace network { class Proactor; }
-namespace concurrency { class ThreadPool; }
+namespace orbit::network { class Proactor; }
+namespace orbit::concurrency { class ThreadPool; }
 
-namespace http {
+namespace orbit::http {
 
 /**
  * @brief Abstract interface for writing HTTP responses.

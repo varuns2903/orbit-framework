@@ -13,7 +13,7 @@ namespace {
 constexpr uint16_t kPort = 8094;
 
 struct RawClient {
-    network::socket_t fd{network::INVALID_SOCKET_FD};
+    orbit::network::socket_t fd{orbit::network::INVALID_SOCKET_FD};
 
     RawClient() {
         fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -30,7 +30,7 @@ struct RawClient {
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
     }
-    ~RawClient() { network::close_socket(fd); }
+    ~RawClient() { orbit::network::close_socket(fd); }
 
     void send_bytes(const std::string& data) {
         ::send(fd, data.data(), static_cast<int>(data.size()), 0);
@@ -87,14 +87,14 @@ std::atomic<int> g_messages{0};
 
 class WebSocketLimitsE2ETest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
-        app = new server::App(cfg);
-        app->ws("/ws", [](http::websocket::WebSocketConnection& ws) {
+        app = new orbit::server::App(cfg);
+        app->ws("/ws", [](orbit::http::websocket::WebSocketConnection& ws) {
             ws.set_max_message_size(1024);
             ws.on_message([&ws](const std::string& msg) {
                 ++g_messages;
@@ -113,7 +113,7 @@ protected:
     }
 };
 
-server::App* WebSocketLimitsE2ETest::app = nullptr;
+orbit::server::App* WebSocketLimitsE2ETest::app = nullptr;
 std::thread WebSocketLimitsE2ETest::server_thread;
 
 TEST_F(WebSocketLimitsE2ETest, EchoStillWorks) {

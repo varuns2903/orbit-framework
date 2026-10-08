@@ -4,14 +4,14 @@
 #include <mutex>
 
 int main() {
-    config::ServerConfig cfg;
+    orbit::config::ServerConfig cfg;
     cfg.port = 8081;
-    server::App app(cfg);
+    orbit::server::App app(cfg);
 
-    std::unordered_set<http::websocket::WebSocketConnection*> clients;
+    std::unordered_set<orbit::http::websocket::WebSocketConnection*> clients;
     std::mutex clients_mutex;
 
-    app.ws("/chat", [&clients, &clients_mutex](http::websocket::WebSocketConnection& ws) {
+    app.ws("/chat", [&clients, &clients_mutex](orbit::http::websocket::WebSocketConnection& ws) {
         
         {
             std::lock_guard<std::mutex> lock(clients_mutex);

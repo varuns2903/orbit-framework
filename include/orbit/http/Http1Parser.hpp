@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/http/HttpRequest.hpp>
 
 #include <cstddef>
@@ -7,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-namespace http {
+namespace orbit::http {
 
 /**
  * @brief Incremental HTTP/1.1 request parser, built on llhttp (the parser

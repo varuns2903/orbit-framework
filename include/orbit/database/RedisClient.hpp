@@ -1,11 +1,12 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <vector>
 #include <optional>
 #include <mutex>
 #include <orbit/network/Socket.hpp>
 
-namespace database {
+namespace orbit::database {
 
 /**
  * @brief A synchronous Redis client providing core operations.

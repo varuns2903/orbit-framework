@@ -7,7 +7,7 @@
 #include <sys/sendfile.h>
 #include <errno.h>
 
-namespace network {
+namespace orbit::network {
 
 EpollProactor::EpollProactor() : events_(1024) {
     epoll_fd_ = epoll_create1(0);

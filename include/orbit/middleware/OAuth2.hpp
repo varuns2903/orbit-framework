@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <functional>
 #include <memory>
@@ -7,7 +8,7 @@
 #include <orbit/http/ResponseWriter.hpp>
 #include <orbit/http/json.hpp>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @brief Provider endpoints, client credentials and flow settings for OAuth2.

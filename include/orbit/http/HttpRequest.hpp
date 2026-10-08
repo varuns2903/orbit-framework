@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #ifdef _WIN32
 #undef DELETE
 #endif
@@ -11,11 +12,11 @@
 #include <orbit/http/MultipartForm.hpp>
 #include <orbit/utils/CaseInsensitive.hpp>
 
-namespace middleware {
+namespace orbit::middleware {
 class Session;
 }
 
-namespace http {
+namespace orbit::http {
 
 /**
  * @brief Represents standard HTTP methods.

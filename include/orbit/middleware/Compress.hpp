@@ -1,9 +1,10 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/routing/Router.hpp>
 #include <string_view>
 #include <vector>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @defgroup middlewares Middlewares

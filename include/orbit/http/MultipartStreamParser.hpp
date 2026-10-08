@@ -1,10 +1,11 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <functional>
 
-namespace http {
+namespace orbit::http {
 
 /**
  * @brief Limits for MultipartStreamParser. Exceeding one fails the parse

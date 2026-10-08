@@ -1,11 +1,11 @@
 #include <orbit/server/App.hpp>
 #include <iostream>
 
-using namespace server;
-using namespace http;
+using namespace orbit::server;
+using namespace orbit::http;
 
 int main(int argc, char* argv[]) {
-    auto config = config::ServerConfig::parse(argc, argv);
+    auto config = orbit::config::ServerConfig::parse(argc, argv);
     config.worker_threads = std::thread::hardware_concurrency();
     
     App app(config);

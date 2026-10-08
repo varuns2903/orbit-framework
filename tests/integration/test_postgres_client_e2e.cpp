@@ -72,19 +72,19 @@ std::string conninfo(const std::string& socket_dir) {
     return "host=" + socket_dir + " port=" + std::to_string(kPgPort) + " user=postgres dbname=postgres";
 }
 
-concurrency::Task scenario(std::shared_ptr<database::PostgresClient> db, std::shared_ptr<database::PostgresClient> admin,
+orbit::concurrency::Task scenario(std::shared_ptr<orbit::database::PostgresClient> db, std::shared_ptr<orbit::database::PostgresClient> admin,
                            Results* r, std::promise<void>* done) {
     db->set_statement_timeout(std::chrono::milliseconds(300));
-    auto connect = database::connect_async(db);
+    auto connect = orbit::database::connect_async(db);
     r->connected = co_await connect;
-    auto connect_admin = database::connect_async(admin);
+    auto connect_admin = orbit::database::connect_async(admin);
     bool admin_ok = co_await connect_admin;
     if (r->connected && admin_ok) {
         // Typed access
-        auto typed_q = database::execute_async(db,
+        auto typed_q = orbit::database::execute_async(db,
             "SELECT 42::int AS i, 3.5::float8 AS d, true AS b, 'x'::text AS s, NULL::int AS n, "
             "9223372036854775807::bigint AS big");
-        database::ResultSet typed = co_await typed_q;
+        orbit::database::ResultSet typed = co_await typed_q;
         if (typed.ok() && typed.size() == 1) {
             r->i = typed[0].get_as<int>("i");
             r->d = typed[0].get_as<double>("d");
@@ -96,93 +96,93 @@ concurrency::Task scenario(std::shared_ptr<database::PostgresClient> db, std::sh
 
         // Prepared statements: the same SQL three times
         for (int k = 1; k <= 3; ++k) {
-            auto q = database::execute_async(db, "SELECT $1::int + 1 AS v", Params{std::to_string(k)});
-            database::ResultSet res = co_await q;
+            auto q = orbit::database::execute_async(db, "SELECT $1::int + 1 AS v", Params{std::to_string(k)});
+            orbit::database::ResultSet res = co_await q;
             if (res.ok() && res.size() == 1) r->prepared_sum += res[0].value_or<int>("v", 0);
         }
         // typed_q above was prepared too, so two statements are cached
         r->cached_after_reuse = db->prepared_statement_count();
-        auto server_q = database::query_async(db, "SELECT count(*) AS n FROM pg_prepared_statements");
-        database::ResultSet server = co_await server_q;
+        auto server_q = orbit::database::query_async(db, "SELECT count(*) AS n FROM pg_prepared_statements");
+        orbit::database::ResultSet server = co_await server_q;
         if (server.ok() && server.size() == 1) r->server_prepared_after_reuse = server[0].get("n").value_or("");
-        auto second = database::execute_async(db, "SELECT $1::text AS v", Params{std::string("y")});
+        auto second = orbit::database::execute_async(db, "SELECT $1::text AS v", Params{std::string("y")});
         co_await second;
         r->cached_after_second_sql = db->prepared_statement_count();
-        auto bad = database::execute_async(db, "SELEC 1");
-        database::ResultSet bad_res = co_await bad;
+        auto bad = orbit::database::execute_async(db, "SELEC 1");
+        orbit::database::ResultSet bad_res = co_await bad;
         r->syntax_error_failed = !bad_res.ok();
         r->cached_after_syntax_error = db->prepared_statement_count();
 
         // Transactions
-        auto create = database::query_async(db, "CREATE TABLE tx_items (v int)");
+        auto create = orbit::database::query_async(db, "CREATE TABLE tx_items (v int)");
         co_await create;
-        auto begin1 = database::begin_async(db);
+        auto begin1 = orbit::database::begin_async(db);
         co_await begin1;
-        auto ins1 = database::execute_async(db, "INSERT INTO tx_items VALUES ($1)", Params{std::string("1")});
+        auto ins1 = orbit::database::execute_async(db, "INSERT INTO tx_items VALUES ($1)", Params{std::string("1")});
         co_await ins1;
-        auto rb = database::rollback_async(db);
+        auto rb = orbit::database::rollback_async(db);
         co_await rb;
-        auto count1 = database::query_async(db, "SELECT count(*) AS n FROM tx_items");
-        database::ResultSet c1 = co_await count1;
+        auto count1 = orbit::database::query_async(db, "SELECT count(*) AS n FROM tx_items");
+        orbit::database::ResultSet c1 = co_await count1;
         if (c1.ok() && c1.size() == 1) r->rows_after_rollback = c1[0].get("n").value_or("");
 
-        auto begin2 = database::begin_async(db);
+        auto begin2 = orbit::database::begin_async(db);
         co_await begin2;
-        auto ins2 = database::execute_async(db, "INSERT INTO tx_items VALUES ($1)", Params{std::string("2")});
+        auto ins2 = orbit::database::execute_async(db, "INSERT INTO tx_items VALUES ($1)", Params{std::string("2")});
         co_await ins2;
-        auto commit2 = database::commit_async(db);
-        database::ResultSet committed = co_await commit2;
+        auto commit2 = orbit::database::commit_async(db);
+        orbit::database::ResultSet committed = co_await commit2;
         r->commit_ok = committed.ok();
-        auto count2 = database::query_async(db, "SELECT count(*) AS n FROM tx_items");
-        database::ResultSet c2 = co_await count2;
+        auto count2 = orbit::database::query_async(db, "SELECT count(*) AS n FROM tx_items");
+        orbit::database::ResultSet c2 = co_await count2;
         if (c2.ok() && c2.size() == 1) r->rows_after_commit = c2[0].get("n").value_or("");
 
-        auto begin3 = database::begin_async(db);
+        auto begin3 = orbit::database::begin_async(db);
         co_await begin3;
-        auto ins3 = database::execute_async(db, "INSERT INTO tx_items VALUES ($1)", Params{std::string("3")});
+        auto ins3 = orbit::database::execute_async(db, "INSERT INTO tx_items VALUES ($1)", Params{std::string("3")});
         co_await ins3;
-        auto div0 = database::query_async(db, "SELECT 1/0");
+        auto div0 = orbit::database::query_async(db, "SELECT 1/0");
         co_await div0;
         r->in_tx_after_error = db->in_transaction();
-        auto commit3 = database::commit_async(db);
-        database::ResultSet failed_commit = co_await commit3;
+        auto commit3 = orbit::database::commit_async(db);
+        orbit::database::ResultSet failed_commit = co_await commit3;
         r->commit_after_error_failed = !failed_commit.ok();
         r->commit_after_error_message = failed_commit.error();
         r->in_tx_after_failed_commit = db->in_transaction();
-        auto count3 = database::query_async(db, "SELECT count(*) AS n FROM tx_items");
-        database::ResultSet c3 = co_await count3;
+        auto count3 = orbit::database::query_async(db, "SELECT count(*) AS n FROM tx_items");
+        orbit::database::ResultSet c3 = co_await count3;
         if (c3.ok() && c3.size() == 1) r->rows_after_failed_tx = c3[0].get("n").value_or("");
 
         // Statement timeout
-        auto sleep = database::query_async(db, "SELECT pg_sleep(3)");
-        database::ResultSet slept = co_await sleep;
+        auto sleep = orbit::database::query_async(db, "SELECT pg_sleep(3)");
+        orbit::database::ResultSet slept = co_await sleep;
         r->timeout_error = slept.error();
 
         // The server drops the connection
-        auto pid_q = database::query_async(db, "SELECT pg_backend_pid() AS pid");
-        database::ResultSet pid = co_await pid_q;
+        auto pid_q = orbit::database::query_async(db, "SELECT pg_backend_pid() AS pid");
+        orbit::database::ResultSet pid = co_await pid_q;
         std::string backend = pid.ok() && pid.size() == 1 ? pid[0].get("pid").value_or("") : "";
-        auto kill = database::query_async(admin, "SELECT pg_terminate_backend($1::int)", Params{backend});
+        auto kill = orbit::database::query_async(admin, "SELECT pg_terminate_backend($1::int)", Params{backend});
         co_await kill;
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        auto after_kill = database::query_async(db, "SELECT 1");
-        database::ResultSet dead = co_await after_kill;
+        auto after_kill = orbit::database::query_async(db, "SELECT 1");
+        orbit::database::ResultSet dead = co_await after_kill;
         r->query_after_kill_failed = !dead.ok();
         r->healthy_after_kill = db->is_healthy();
-        auto reconnect = database::connect_async(db);
+        auto reconnect = orbit::database::connect_async(db);
         r->reconnected = co_await reconnect;
         r->healthy_after_reconnect = db->is_healthy();
         r->cached_after_reconnect = db->prepared_statement_count();
-        auto show = database::query_async(db, "SHOW statement_timeout");
-        database::ResultSet shown = co_await show;
+        auto show = orbit::database::query_async(db, "SHOW statement_timeout");
+        orbit::database::ResultSet shown = co_await show;
         if (shown.ok() && shown.size() == 1) r->timeout_after_reconnect = shown[0].get(0).value_or("");
 
         // Cache limit: beyond it statements still run, unprepared
         db->set_max_prepared_statements(1);
-        auto p1 = database::execute_async(db, "SELECT 1 AS v");
+        auto p1 = orbit::database::execute_async(db, "SELECT 1 AS v");
         co_await p1;
-        auto p2 = database::execute_async(db, "SELECT $1::text AS v", Params{std::string("unprepared")});
-        database::ResultSet unprepared = co_await p2;
+        auto p2 = orbit::database::execute_async(db, "SELECT $1::text AS v", Params{std::string("unprepared")});
+        orbit::database::ResultSet unprepared = co_await p2;
         r->cached_at_limit = db->prepared_statement_count();
         if (unprepared.ok() && unprepared.size() == 1) r->unprepared_result = unprepared[0].get("v").value_or("");
     }
@@ -233,14 +233,14 @@ std::string PostgresClientTest::socket_dir;
 bool PostgresClientTest::available = false;
 
 TEST_F(PostgresClientTest, PreparedTransactionsTimeoutsAndReconnect) {
-    network::EpollProactor proactor;
+    orbit::network::EpollProactor proactor;
     std::atomic<bool> running{true};
     std::thread loop([&] {
         while (running) proactor.run_once(50);
     });
 
-    auto db = std::make_shared<database::PostgresClient>(&proactor, conninfo(socket_dir));
-    auto admin = std::make_shared<database::PostgresClient>(&proactor, conninfo(socket_dir));
+    auto db = std::make_shared<orbit::database::PostgresClient>(&proactor, conninfo(socket_dir));
+    auto admin = std::make_shared<orbit::database::PostgresClient>(&proactor, conninfo(socket_dir));
     Results r;
     std::promise<void> done;
     auto finished = done.get_future();

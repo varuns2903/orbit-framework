@@ -24,8 +24,8 @@ std::string server_uri() {
 }
 
 // A collection no other test (or earlier run) has written to.
-database::MongoClient::Config config_for(const std::string& collection) {
-    database::MongoClient::Config c;
+orbit::database::MongoClient::Config config_for(const std::string& collection) {
+    orbit::database::MongoClient::Config c;
     c.uri = server_uri();
     c.dbname = "orbit_test";
     c.collection_name = collection + "_" + std::to_string(
@@ -74,7 +74,7 @@ protected:
         if (required && *required) FAIL() << "ORBIT_REQUIRE_MONGODB_TESTS is set but ORBIT_TEST_MONGODB_URI is not";
         GTEST_SKIP() << "no MongoDB server configured (ORBIT_TEST_MONGODB_URI)";
     }
-    concurrency::ThreadPool pool{2};
+    orbit::concurrency::ThreadPool pool{2};
 };
 
 namespace {
@@ -88,7 +88,7 @@ struct CrudResults {
     size_t none = 99;
 };
 
-concurrency::Task crud_scenario(database::MongoClient* db, CrudResults* r, Done* done) {
+orbit::concurrency::Task crud_scenario(orbit::database::MongoClient* db, CrudResults* r, Done* done) {
     try {
         for (const char* doc : {R"({"name": "ada", "year": 1815})",
                                 R"({"name": "alan", "year": 1912})",
@@ -110,7 +110,7 @@ concurrency::Task crud_scenario(database::MongoClient* db, CrudResults* r, Done*
 } // namespace
 
 TEST_F(MongoClientTest, InsertsAndFindsByFilter) {
-    database::MongoClient db(pool, config_for("crud"));
+    orbit::database::MongoClient db(pool, config_for("crud"));
     CrudResults r;
     ASSERT_TRUE(run_scenario([&](Done* done) { crud_scenario(&db, &r, done); }));
     ASSERT_EQ(r.error, "");
@@ -134,7 +134,7 @@ struct ErrorResults {
     std::string bad_operator;
 };
 
-concurrency::Task error_scenario(database::MongoClient* db, ErrorResults* r, Done* done) {
+orbit::concurrency::Task error_scenario(orbit::database::MongoClient* db, ErrorResults* r, Done* done) {
     try {
         co_await db->find_async("{not json");
     } catch (const std::exception& e) {
@@ -162,7 +162,7 @@ concurrency::Task error_scenario(database::MongoClient* db, ErrorResults* r, Don
 } // namespace
 
 TEST_F(MongoClientTest, ErrorsAreThrownWithTheirCause) {
-    database::MongoClient db(pool, config_for("errors"));
+    orbit::database::MongoClient db(pool, config_for("errors"));
     ErrorResults r;
     ASSERT_TRUE(run_scenario([&](Done* done) { error_scenario(&db, &r, done); }));
     EXPECT_EQ(r.bad_filter.rfind("BSON Parse Error: ", 0), 0u) << r.bad_filter;
@@ -174,10 +174,10 @@ TEST_F(MongoClientTest, ErrorsAreThrownWithTheirCause) {
 }
 
 TEST_F(MongoClientTest, InvalidUriIsRejectedAtConstruction) {
-    database::MongoClient::Config c;
+    orbit::database::MongoClient::Config c;
     c.uri = "not-a-mongodb-uri";
     try {
-        database::MongoClient db(pool, c);
+        orbit::database::MongoClient db(pool, c);
         FAIL() << "constructed a client from an invalid URI";
     } catch (const std::runtime_error& e) {
         EXPECT_EQ(std::string(e.what()).rfind("Failed to parse MongoDB URI: ", 0), 0u) << e.what();
@@ -186,7 +186,7 @@ TEST_F(MongoClientTest, InvalidUriIsRejectedAtConstruction) {
 
 namespace {
 
-concurrency::Task find_scenario(database::MongoClient* db, std::string* error, Done* done) {
+orbit::concurrency::Task find_scenario(orbit::database::MongoClient* db, std::string* error, Done* done) {
     try {
         co_await db->find_async("{}");
     } catch (const std::exception& e) {
@@ -198,12 +198,12 @@ concurrency::Task find_scenario(database::MongoClient* db, std::string* error, D
 } // namespace
 
 TEST_F(MongoClientTest, UnreachableServerFailsTheQuery) {
-    database::MongoClient::Config c;
+    orbit::database::MongoClient::Config c;
     // Port 1 refuses connections; the short selection timeout keeps it quick.
     c.uri = "mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=300&connectTimeoutMS=300";
     c.dbname = "orbit_test";
     c.collection_name = "unreachable";
-    database::MongoClient db(pool, c);
+    orbit::database::MongoClient db(pool, c);
     std::string error;
     ASSERT_TRUE(run_scenario([&](Done* done) { find_scenario(&db, &error, done); }));
     EXPECT_EQ(error.rfind("MongoDB Cursor Error: ", 0), 0u) << error;
@@ -213,8 +213,8 @@ TEST_F(MongoClientTest, UnreachableServerFailsTheQuery) {
 // library stays initialised while any client exists.
 TEST_F(MongoClientTest, ClientsCanComeAndGo) {
     for (int round = 0; round < 3; ++round) {
-        auto first = std::make_unique<database::MongoClient>(pool, config_for("lifecycle"));
-        auto second = std::make_unique<database::MongoClient>(pool, config_for("lifecycle"));
+        auto first = std::make_unique<orbit::database::MongoClient>(pool, config_for("lifecycle"));
+        auto second = std::make_unique<orbit::database::MongoClient>(pool, config_for("lifecycle"));
         first.reset();
         CrudResults r;
         ASSERT_TRUE(run_scenario([&](Done* done) { crud_scenario(second.get(), &r, done); }));

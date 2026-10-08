@@ -9,7 +9,7 @@
 #include <unistd.h>
 #endif
 
-namespace utils {
+namespace orbit::utils {
 
 LogLevel Logger::current_level = LogLevel::INFO;
 std::mutex Logger::log_mutex;

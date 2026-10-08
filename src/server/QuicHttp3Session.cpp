@@ -17,7 +17,7 @@
 #undef ERROR
 #endif
 
-namespace server {
+namespace orbit::server {
 
 namespace {
 

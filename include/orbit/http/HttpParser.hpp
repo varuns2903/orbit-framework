@@ -1,9 +1,10 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <optional>
 #include <string_view>
 
-namespace http {
+namespace orbit::http {
 
 /**
  * @brief Tests whether a Connection header field carries a given option.

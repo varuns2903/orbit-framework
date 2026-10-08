@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/server/Connection.hpp>
 #include <orbit/network/Proactor.hpp>
 #include <orbit/routing/Router.hpp>
@@ -11,7 +12,7 @@
 #include <functional>
 #include <atomic>
 
-namespace server {
+namespace orbit::server {
 
 /**
  * @brief Manages active HTTP connections.

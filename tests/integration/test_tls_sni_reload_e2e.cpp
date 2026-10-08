@@ -67,15 +67,15 @@ void make_cert(const std::string& cert_path, const std::string& key_path, const 
     EVP_PKEY_free(pkey);
 }
 
-network::socket_t connect_tcp() {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_tcp() {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
-        return network::INVALID_SOCKET_FD;
+        orbit::network::close_socket(fd);
+        return orbit::network::INVALID_SOCKET_FD;
     }
     return fd;
 }
@@ -89,8 +89,8 @@ struct Handshake {
 // A TLS handshake asking for @p server_name ("" sends no SNI).
 Handshake handshake(const std::string& server_name, bool offer_h2 = false) {
     Handshake result;
-    network::socket_t fd = connect_tcp();
-    if (fd == network::INVALID_SOCKET_FD) return result;
+    orbit::network::socket_t fd = connect_tcp();
+    if (fd == orbit::network::INVALID_SOCKET_FD) return result;
     SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
     SSL* ssl = SSL_new(ctx);
     if (offer_h2) {
@@ -115,7 +115,7 @@ Handshake handshake(const std::string& server_name, bool offer_h2 = false) {
     }
     SSL_free(ssl);
     SSL_CTX_free(ctx);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return result;
 }
 
@@ -131,18 +131,18 @@ bool eventually_serves(const std::string& server_name, const std::string& cn, in
 
 class Server {
 public:
-    explicit Server(config::ServerConfig cfg) : app_(std::make_unique<server::App>(cfg)) {
-        app_->get("/", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+    explicit Server(orbit::config::ServerConfig cfg) : app_(std::make_unique<orbit::server::App>(cfg)) {
+        app_->get("/", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("ok");
             w->send(std::move(res));
         });
-        server::App* app = app_.get();
+        orbit::server::App* app = app_.get();
         thread_ = std::thread([app] { app->listen(); });
         for (int i = 0; i < 200; ++i) {
-            network::socket_t fd = connect_tcp();
-            if (fd != network::INVALID_SOCKET_FD) {
-                network::close_socket(fd);
+            orbit::network::socket_t fd = connect_tcp();
+            if (fd != orbit::network::INVALID_SOCKET_FD) {
+                orbit::network::close_socket(fd);
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -150,21 +150,21 @@ public:
     }
     ~Server() {
         app_->stop();
-        network::socket_t fd = connect_tcp();
-        if (fd != network::INVALID_SOCKET_FD) network::close_socket(fd);
+        orbit::network::socket_t fd = connect_tcp();
+        if (fd != orbit::network::INVALID_SOCKET_FD) orbit::network::close_socket(fd);
         if (thread_.joinable()) thread_.join();
     }
-    server::App& app() { return *app_; }
+    orbit::server::App& app() { return *app_; }
 
 private:
-    std::unique_ptr<server::App> app_;
+    std::unique_ptr<orbit::server::App> app_;
     std::thread thread_;
 };
 
-config::ServerConfig sni_config() {
-    config::ServerConfig cfg = orbit::test::server_config();
+orbit::config::ServerConfig sni_config() {
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = kPort;
-    cfg.http_version = config::HttpVersion::Http2;
+    cfg.http_version = orbit::config::HttpVersion::Http2;
     cfg.ssl_cert = path("default.pem");
     cfg.ssl_key = path("default.key");
     cfg.sni_certificates = {
@@ -243,7 +243,7 @@ TEST_F(TlsSniReloadTest, FailedReloadKeepsTheCurrentCertificates) {
 }
 
 TEST_F(TlsSniReloadTest, ChangedFilesAreReloadedOnTheInterval) {
-    config::ServerConfig cfg = sni_config();
+    orbit::config::ServerConfig cfg = sni_config();
     cfg.tls_reload_interval = std::chrono::seconds(1);
     Server server(cfg);
     ASSERT_EQ(handshake("").cn, "default");
@@ -265,6 +265,6 @@ TEST_F(TlsSniReloadTest, SighupReloads) {
 #endif
 
 TEST(TlsContextTest, MissingFilesFailAtStartup) {
-    EXPECT_THROW(network::TlsContext("/nonexistent/cert.pem", "/nonexistent/key.pem", config::HttpVersion::Http1_1),
+    EXPECT_THROW(orbit::network::TlsContext("/nonexistent/cert.pem", "/nonexistent/key.pem", orbit::config::HttpVersion::Http1_1),
                  std::runtime_error);
 }

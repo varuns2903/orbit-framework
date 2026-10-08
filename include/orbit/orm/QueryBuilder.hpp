@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,7 +14,7 @@
 #include <orbit/http/json.hpp>
 #include <orbit/database/ResultSet.hpp>
 
-namespace orm {
+namespace orbit::orm {
 
 /**
  * @brief Values bound to the `?` placeholders of an expression, in order.

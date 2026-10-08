@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-using namespace config;
+using namespace orbit::config;
 
 TEST(ServerConfigTest, DefaultPort) {
     ServerConfig cfg;

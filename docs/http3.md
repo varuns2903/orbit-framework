@@ -11,11 +11,11 @@ To enable HTTP/3, simply pass the `--engine` flag and ensure you have valid TLS 
 #include "network/TlsContext.hpp"
 
 int main() {
-    config::ServerConfig cfg;
+    orbit::config::ServerConfig cfg;
     cfg.port = 443;
     
     // HTTP/3 requires TLS 1.3
-    network::TlsContext tls_ctx("server.crt", "server.key");
+    orbit::network::TlsContext tls_ctx("server.crt", "server.key");
 
     App app(cfg, &tls_ctx);
 

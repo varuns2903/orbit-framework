@@ -17,7 +17,7 @@
 // middleware), on_error, health checks, and the TLS and shutdown calls
 // that need no running server.
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -27,7 +27,7 @@ std::string url(const std::string& path) {
     return "http://127.0.0.1:" + std::to_string(kPort) + path;
 }
 
-routing::RouteHandler reply(std::string body) {
+orbit::routing::RouteHandler reply(std::string body) {
     return [body](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
         HttpResponse res;
         res.set_body(body, "text/plain");
@@ -36,7 +36,7 @@ routing::RouteHandler reply(std::string body) {
 }
 
 // Route middleware that marks the response, so the test can see it ran.
-routing::Middleware mark(std::string value) {
+orbit::routing::Middleware mark(std::string value) {
     return [value](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
         w->set_header("X-Route-Mw", value);
         return true;
@@ -47,14 +47,14 @@ routing::Middleware mark(std::string value) {
 
 class AppApiTest : public ::testing::Test {
 protected:
-    static std::unique_ptr<server::App> app;
+    static std::unique_ptr<orbit::server::App> app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.host = "127.0.0.1";
         cfg.port = kPort;
-        app = std::make_unique<server::App>(cfg);
+        app = std::make_unique<orbit::server::App>(cfg);
 
         app->put("/verb", reply("put"))
             .patch("/verb", reply("patch"))
@@ -93,7 +93,7 @@ protected:
     }
 };
 
-std::unique_ptr<server::App> AppApiTest::app;
+std::unique_ptr<orbit::server::App> AppApiTest::app;
 std::thread AppApiTest::server_thread;
 
 TEST_F(AppApiTest, EveryVerbIsRouted) {
@@ -137,9 +137,9 @@ TEST_F(AppApiTest, HealthChecksAnswerOnDefaultAndCustomPaths) {
 }
 
 TEST(AppControlTest, ReloadTlsWithoutTlsFails) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = kPort + 1;
-    server::App app(cfg);
+    orbit::server::App app(cfg);
     std::string error;
     EXPECT_FALSE(app.reload_tls(&error));
     EXPECT_EQ(error, "TLS is not enabled");
@@ -149,10 +149,10 @@ TEST(AppControlTest, ReloadTlsWithoutTlsFails) {
 // A shutdown requested before listen() still applies: listen() returns at
 // once, and the app reports itself draining.
 TEST(AppControlTest, ShutdownBeforeListenStopsIt) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.host = "127.0.0.1";
     cfg.port = kPort + 2;
-    server::App app(cfg);
+    orbit::server::App app(cfg);
     app.shutdown(std::chrono::seconds(1));
     EXPECT_TRUE(app.is_draining());
 

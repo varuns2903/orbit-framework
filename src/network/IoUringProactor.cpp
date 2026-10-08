@@ -6,7 +6,7 @@
 #include <sys/sendfile.h>
 #include <poll.h>
 
-namespace network {
+namespace orbit::network {
 
 IoUringProactor::IoUringProactor(unsigned entries) {
     if (io_uring_queue_init(entries, &ring_, 0) < 0) {

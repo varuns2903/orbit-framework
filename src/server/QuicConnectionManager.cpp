@@ -9,7 +9,7 @@
 #include <iostream>
 #include <cstring>
 
-namespace server {
+namespace orbit::server {
 
 namespace quic::detail {
 

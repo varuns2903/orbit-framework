@@ -13,7 +13,7 @@
 #include <thread>
 #include <chrono>
 
-namespace server {
+namespace orbit::server {
 
 EventLoop::EventLoop(Listener& listener, const routing::Router& router, const config::ServerConfig& config,
                      concurrency::ThreadPool& thread_pool, network::TlsContext* tls_context,

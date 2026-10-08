@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/server/App.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <orbit/http/WebSocketConnection.hpp>
@@ -11,7 +12,7 @@
 #include <memory>
 #include <iostream>
 
-namespace websocket {
+namespace orbit::websocket {
 
 struct EmptySession {};
 

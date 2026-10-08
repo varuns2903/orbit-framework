@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/routing/Router.hpp>
 #include <array>
 #include <cstdint>
@@ -7,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @brief An IPv4 or IPv6 network ("10.0.0.0/8", "::1", "fd00::/8").

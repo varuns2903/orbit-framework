@@ -109,20 +109,20 @@ Result h2(const std::string& path, const std::string& cookie = "", const std::st
 // Wakes the event loop with a plain TCP connect. A TLS request would wait for
 // a response that a stopping server never sends.
 void poke_server() {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }
 
 } // namespace
 
 class Http2ParityTest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
@@ -131,25 +131,25 @@ protected:
         g_key = (dir / "orbit_h2p_key.pem").string();
         ASSERT_TRUE(make_self_signed(g_cert, g_key));
 
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.ssl_cert = g_cert;
         cfg.ssl_key = g_key;
-        cfg.http_version = config::HttpVersion::Http2;
-        app = new server::App(cfg);
+        cfg.http_version = orbit::config::HttpVersion::Http2;
+        app = new orbit::server::App(cfg);
 
-        app->use([](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            w->add_interceptor([](http::HttpResponse& res) { res.headers["X-Intercepted"] = "yes"; });
+        app->use([](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            w->add_interceptor([](orbit::http::HttpResponse& res) { res.headers["X-Intercepted"] = "yes"; });
             return true;
         });
-        app->get("/whoami", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/whoami", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("uri=" + req.uri + " q=" + req.query["q"] + " session=" + req.cookies["session"] +
                          " theme=" + req.cookies["theme"]);
             w->send(std::move(res));
         });
-        app->get("/stream", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/stream", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             w->send_headers(res);
             w->write_chunk("one,");
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -158,19 +158,19 @@ protected:
             w->write_chunk("three");
             w->end();
         });
-        app->get("/sse", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/sse", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.headers["Content-Type"] = "text/event-stream";
             w->send_headers(res);
             w->send_sse_event("hello\nworld", "greet", "1");
             w->end();
         });
-        app->post("/upload", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
+        app->post("/upload", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
             auto received = std::make_shared<std::string>();
             w->read_body_stream(
                 [received](std::string_view chunk) { received->append(chunk); },
                 [received, w]() {
-                    http::HttpResponse res;
+                    orbit::http::HttpResponse res;
                     res.set_body("got " + std::to_string(received->size()));
                     w->send(std::move(res));
                 });
@@ -206,7 +206,7 @@ protected:
     }
 };
 
-server::App* Http2ParityTest::app = nullptr;
+orbit::server::App* Http2ParityTest::app = nullptr;
 std::thread Http2ParityTest::server_thread;
 
 TEST_F(Http2ParityTest, QueryCookiesAndInterceptors) {

@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <chrono>
 #include <functional>
@@ -7,7 +8,7 @@
 #include <orbit/http/ResponseWriter.hpp>
 #include <orbit/database/RedisClient.hpp>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @ingroup middlewares

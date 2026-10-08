@@ -11,7 +11,7 @@
 #include <orbit/utils/Logger.hpp>
 #include <cctype>
 
-namespace http {
+namespace orbit::http {
 
 HttpResponse::HttpResponse(HttpResponse&& other) noexcept 
     : status_code(other.status_code),

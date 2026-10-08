@@ -12,13 +12,13 @@ TEST_F(WebSocketTest, ValidHandshakeGeneration) {
     std::string client_key = "dGhlIHNhbXBsZSBub25jZQ==";
     std::string expected_accept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
     
-    std::string generated_accept = http::websocket::Handshake::generate_accept_key(client_key);
+    std::string generated_accept = orbit::http::websocket::Handshake::generate_accept_key(client_key);
     
     EXPECT_EQ(generated_accept, expected_accept);
 }
 
 TEST(WebSocketHandshakeKeyTest, ValidatesClientKeyFormat) {
-    using http::websocket::Handshake;
+    using orbit::http::websocket::Handshake;
     EXPECT_TRUE(Handshake::is_valid_client_key("dGhlIHNhbXBsZSBub25jZQ=="));
     EXPECT_FALSE(Handshake::is_valid_client_key(""));
     EXPECT_FALSE(Handshake::is_valid_client_key("dGhlIHNhbXBsZSBub25jZQ="));   // 23 chars

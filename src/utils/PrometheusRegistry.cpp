@@ -6,7 +6,7 @@
 #include <system_error>
 #include <string>
 
-namespace utils {
+namespace orbit::utils {
 
 namespace {
 // Default buckets, suited to request latencies in seconds (the Prometheus

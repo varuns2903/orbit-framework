@@ -18,7 +18,7 @@
 #include <thread>
 #include "../utils/TestConfig.hpp"
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -118,15 +118,15 @@ public:
     void end() override {}
     void add_interceptor(std::function<void(HttpResponse&)>) override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
 };
 
 // Runs the middleware; returns "" if accepted, otherwise the error body.
-std::string check(const routing::Middleware& mw, const std::string& token) {
+std::string check(const orbit::routing::Middleware& mw, const std::string& token) {
     HttpRequest req;
     std::string auth = "Bearer " + token;
     req.set_header("Authorization", auth);
@@ -143,9 +143,9 @@ std::string check(const routing::Middleware& mw, const std::string& token) {
 
 TEST(JwtAsymmetricTest, Rs256WithPemKey) {
     PKey key = rsa_key(2048);
-    middleware::JwtOptions opts;
+    orbit::middleware::JwtOptions opts;
     opts.public_key_pem = public_pem(key);
-    auto mw = middleware::jwt_auth(opts);
+    auto mw = orbit::middleware::jwt_auth(opts);
 
     EXPECT_EQ(check(mw, token_for(key, "RS256")), "");
     // Signed by somebody else's key.
@@ -159,9 +159,9 @@ TEST(JwtAsymmetricTest, Rs256WithPemKey) {
 
 TEST(JwtAsymmetricTest, Es256WithPemKey) {
     PKey key = ec_key();
-    middleware::JwtOptions opts;
+    orbit::middleware::JwtOptions opts;
     opts.public_key_pem = public_pem(key);
-    auto mw = middleware::jwt_auth(opts);
+    auto mw = orbit::middleware::jwt_auth(opts);
     EXPECT_EQ(check(mw, token_for(key, "ES256")), "");
     EXPECT_NE(check(mw, token_for(ec_key(), "ES256")), "");
     // DER instead of raw r||s is not a valid JWS signature.
@@ -171,9 +171,9 @@ TEST(JwtAsymmetricTest, Es256WithPemKey) {
 TEST(JwtAsymmetricTest, TokensCannotChooseTheAlgorithm) {
     PKey rsa = rsa_key(2048);
     std::string pem = public_pem(rsa);
-    middleware::JwtOptions opts;
+    orbit::middleware::JwtOptions opts;
     opts.public_key_pem = pem;
-    auto mw = middleware::jwt_auth(opts);
+    auto mw = orbit::middleware::jwt_auth(opts);
 
     // Classic confusion: HS256 "signed" with the public key text as the HMAC secret.
     auto hmac_with_pem = [&pem](const std::string& data) {
@@ -190,15 +190,15 @@ TEST(JwtAsymmetricTest, TokensCannotChooseTheAlgorithm) {
 }
 
 TEST(JwtAsymmetricTest, UnusableKeysAreRefusedAtSetup) {
-    middleware::JwtOptions weak;
+    orbit::middleware::JwtOptions weak;
     weak.public_key_pem = public_pem(rsa_key(1024));
-    EXPECT_THROW(middleware::jwt_auth(weak), std::invalid_argument);
+    EXPECT_THROW(orbit::middleware::jwt_auth(weak), std::invalid_argument);
 
-    middleware::JwtOptions garbage;
+    orbit::middleware::JwtOptions garbage;
     garbage.public_key_pem = "-----BEGIN PUBLIC KEY-----\nnope\n-----END PUBLIC KEY-----\n";
-    EXPECT_THROW(middleware::jwt_auth(garbage), std::invalid_argument);
+    EXPECT_THROW(orbit::middleware::jwt_auth(garbage), std::invalid_argument);
 
-    EXPECT_THROW(middleware::jwt_auth(middleware::JwtOptions{}), std::invalid_argument);
+    EXPECT_THROW(orbit::middleware::jwt_auth(orbit::middleware::JwtOptions{}), std::invalid_argument);
 }
 
 TEST(JwtAsymmetricTest, JwksSelectsKeysByKidAndFollowsRotation) {
@@ -207,9 +207,9 @@ TEST(JwtAsymmetricTest, JwksSelectsKeysByKidAndFollowsRotation) {
     std::mutex mutex;
     nlohmann::json jwks = {{"keys", nlohmann::json::array({jwk(k1, "k1")})}};
 
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = 8128;
-    server::App issuer(cfg);
+    orbit::server::App issuer(cfg);
     issuer.get("/jwks.json", [&](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
         HttpResponse res;
         {
@@ -221,10 +221,10 @@ TEST(JwtAsymmetricTest, JwksSelectsKeysByKidAndFollowsRotation) {
     std::thread server([&issuer] { issuer.listen(); });
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
-    middleware::JwtOptions opts;
+    orbit::middleware::JwtOptions opts;
     opts.jwks_url = "http://127.0.0.1:8128/jwks.json";
     opts.jwks_min_refetch = std::chrono::seconds(0); // let the test rotate immediately
-    auto mw = middleware::jwt_auth(opts);
+    auto mw = orbit::middleware::jwt_auth(opts);
 
     EXPECT_EQ(check(mw, token_for(k1, "RS256", "k1")), "");
     EXPECT_NE(check(mw, token_for(k2, "ES256", "k2")), ""); // not published yet

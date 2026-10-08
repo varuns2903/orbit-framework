@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 
 #include <nghttp3/nghttp3.h>
 #include <deque>
@@ -10,7 +11,7 @@
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/http/ResponseWriter.hpp>
 
-namespace server {
+namespace orbit::server {
 
 class QuicConnection;
 

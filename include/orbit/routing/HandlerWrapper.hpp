@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/http/ResponseWriter.hpp>
@@ -9,7 +10,7 @@
 #include <string>
 #include <tuple>
 
-namespace routing {
+namespace orbit::routing {
 
 // Function traits to inspect lambda signatures
 template <typename T>

@@ -7,9 +7,9 @@
 #include <orbit/http/json.hpp>
 #include <iostream>
 
-using namespace server;
-using namespace http;
-using namespace database;
+using namespace orbit::server;
+using namespace orbit::http;
+using namespace orbit::database;
 
 // 1. Define the model
 struct User {
@@ -26,7 +26,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(User, id, username, age, is_active)
 ORBIT_REGISTER_MODEL(User, "users")
 
 int main() {
-    config::ServerConfig config;
+    orbit::config::ServerConfig config;
     config.port = 8082;
     App app(config);
 
@@ -34,7 +34,7 @@ int main() {
         auto pg_client = std::make_shared<PostgresClient>(&writer->proactor(), "dbname=postgres user=postgres");
         
         // C++20 Coroutine lambda
-        auto coro = [writer, pg_client]() -> concurrency::Task {
+        auto coro = [writer, pg_client]() -> orbit::concurrency::Task {
             bool connected = co_await connect_async(pg_client);
             if (!connected) {
                 HttpResponse out;
@@ -52,7 +52,7 @@ int main() {
 
             // ORM SELECT with Expression Templates (C++ DSL)
             std::vector<User> active_users = co_await query_User(pg_client)
-                                                .where(orm::Col("is_active") == true && orm::Col("age") > 18)
+                                                .where(orbit::orm::Col("is_active") == true && orbit::orm::Col("age") > 18)
                                                 .get_async();
 
             nlohmann::json response = active_users;

@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/network/Proactor.hpp>
 
 #ifdef _WIN32
@@ -6,7 +7,7 @@
 #include <mutex>
 #include <vector>
 
-namespace network {
+namespace orbit::network {
 
 enum class IocpOperationType {
     READ,

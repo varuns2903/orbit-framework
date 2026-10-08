@@ -5,10 +5,10 @@
 #include <orbit/server/App.hpp>
 
 int main(int argc, char* argv[]) {
-    config::ServerConfig config = config::ServerConfig::parse(argc, argv);
-    server::App app(config);
+    orbit::config::ServerConfig config = orbit::config::ServerConfig::parse(argc, argv);
+    orbit::server::App app(config);
 
-    app.ws("/", [](http::websocket::WebSocketConnection& ws) {
+    app.ws("/", [](orbit::http::websocket::WebSocketConnection& ws) {
         ws.set_max_message_size(64 * 1024 * 1024); // Autobahn sends messages up to 16 MiB
         ws.on_message([&ws](const std::string& text) { ws.send(text); });
         ws.on_binary_message([&ws](const std::string& data) { ws.send_binary(data); });

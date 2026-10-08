@@ -15,7 +15,7 @@
 #include <fcntl.h>
 #include <vector>
 
-namespace server {
+namespace orbit::server {
 
 // The only thing the signal handler does is record the signal. Lock-free
 // atomic operations are async-signal-safe; logging, locking, allocating or

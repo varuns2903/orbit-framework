@@ -6,8 +6,8 @@
 #include <string_view>
 #include <vector>
 
-using namespace http;
-using http::h2::detail::HeaderBlock;
+using namespace orbit::http;
+using orbit::http::h2::detail::HeaderBlock;
 
 namespace {
 

@@ -3,7 +3,7 @@
 #include <optional>
 #include <string>
 
-using namespace http;
+using namespace orbit::http;
 
 TEST(HttpParserTest, ValidGetRequest) {
     std::string_view raw = 
@@ -46,50 +46,50 @@ TEST(HttpParserTest, MalformedRequestMissingCRLF) {
 // --- Connection header option parsing (RFC 9110 section 7.6.1) ---
 
 TEST(ConnectionOptionTest, MatchesSingleToken) {
-    EXPECT_TRUE(http::connection_option_present("close", "close"));
-    EXPECT_TRUE(http::connection_option_present("keep-alive", "keep-alive"));
+    EXPECT_TRUE(orbit::http::connection_option_present("close", "close"));
+    EXPECT_TRUE(orbit::http::connection_option_present("keep-alive", "keep-alive"));
 }
 
 TEST(ConnectionOptionTest, IsCaseInsensitive) {
-    EXPECT_TRUE(http::connection_option_present("Close", "close"));
-    EXPECT_TRUE(http::connection_option_present("CLOSE", "close"));
-    EXPECT_TRUE(http::connection_option_present("Keep-Alive", "keep-alive"));
+    EXPECT_TRUE(orbit::http::connection_option_present("Close", "close"));
+    EXPECT_TRUE(orbit::http::connection_option_present("CLOSE", "close"));
+    EXPECT_TRUE(orbit::http::connection_option_present("Keep-Alive", "keep-alive"));
 }
 
 TEST(ConnectionOptionTest, FindsTokenInCommaSeparatedList) {
-    EXPECT_TRUE(http::connection_option_present("keep-alive, TE", "keep-alive"));
-    EXPECT_TRUE(http::connection_option_present("TE, close", "close"));
-    EXPECT_TRUE(http::connection_option_present("upgrade, close, TE", "close"));
+    EXPECT_TRUE(orbit::http::connection_option_present("keep-alive, TE", "keep-alive"));
+    EXPECT_TRUE(orbit::http::connection_option_present("TE, close", "close"));
+    EXPECT_TRUE(orbit::http::connection_option_present("upgrade, close, TE", "close"));
 }
 
 TEST(ConnectionOptionTest, TolerateSurroundingWhitespace) {
-    EXPECT_TRUE(http::connection_option_present("  close  ", "close"));
-    EXPECT_TRUE(http::connection_option_present("TE,\tclose", "close"));
+    EXPECT_TRUE(orbit::http::connection_option_present("  close  ", "close"));
+    EXPECT_TRUE(orbit::http::connection_option_present("TE,\tclose", "close"));
 }
 
 TEST(ConnectionOptionTest, DoesNotMatchSubstrings) {
     // "close" must not be found inside a longer token.
-    EXPECT_FALSE(http::connection_option_present("closer", "close"));
-    EXPECT_FALSE(http::connection_option_present("not-close", "close"));
-    EXPECT_FALSE(http::connection_option_present("keep-alive", "close"));
+    EXPECT_FALSE(orbit::http::connection_option_present("closer", "close"));
+    EXPECT_FALSE(orbit::http::connection_option_present("not-close", "close"));
+    EXPECT_FALSE(orbit::http::connection_option_present("keep-alive", "close"));
 }
 
 TEST(ConnectionOptionTest, HandlesEmptyAndDegenerateInput) {
-    EXPECT_FALSE(http::connection_option_present("", "close"));
-    EXPECT_FALSE(http::connection_option_present(",", "close"));
-    EXPECT_FALSE(http::connection_option_present(" , , ", "close"));
+    EXPECT_FALSE(orbit::http::connection_option_present("", "close"));
+    EXPECT_FALSE(orbit::http::connection_option_present(",", "close"));
+    EXPECT_FALSE(orbit::http::connection_option_present(" , , ", "close"));
 }
 
 // --- HTTP version parsing, which drives connection persistence ---
 
 TEST(HttpParserTest, RecordsHttpVersionOneZero) {
-    auto req = http::HttpParser::parse("GET / HTTP/1.0\r\nHost: x\r\n\r\n");
+    auto req = orbit::http::HttpParser::parse("GET / HTTP/1.0\r\nHost: x\r\n\r\n");
     ASSERT_TRUE(req.has_value());
     EXPECT_EQ(req->http_version, "HTTP/1.0");
 }
 
 TEST(HttpParserTest, RecordsHttpVersionOneOne) {
-    auto req = http::HttpParser::parse("GET / HTTP/1.1\r\nHost: x\r\n\r\n");
+    auto req = orbit::http::HttpParser::parse("GET / HTTP/1.1\r\nHost: x\r\n\r\n");
     ASSERT_TRUE(req.has_value());
     EXPECT_EQ(req->http_version, "HTTP/1.1");
 }
@@ -139,7 +139,7 @@ TEST(PercentDecodingTest, SlashAllowedInQuery) {
 
 TEST(UrlEncodedTest, DecodesPairs) {
     std::unordered_map<std::string, std::string> out;
-    ASSERT_TRUE(http::parse_urlencoded("a=1&b=two+words&c=%26%3D&empty=&flag&&x=%E2%9C%93", out));
+    ASSERT_TRUE(orbit::http::parse_urlencoded("a=1&b=two+words&c=%26%3D&empty=&flag&&x=%E2%9C%93", out));
     EXPECT_EQ(out["a"], "1");
     EXPECT_EQ(out["b"], "two words");
     EXPECT_EQ(out["c"], "&=");
@@ -152,20 +152,20 @@ TEST(UrlEncodedTest, DecodesPairs) {
 
 TEST(UrlEncodedTest, LastValueWinsAndValueKeepsLaterEquals) {
     std::unordered_map<std::string, std::string> out;
-    ASSERT_TRUE(http::parse_urlencoded("k=1&k=2&e=a=b", out));
+    ASSERT_TRUE(orbit::http::parse_urlencoded("k=1&k=2&e=a=b", out));
     EXPECT_EQ(out["k"], "2");
     EXPECT_EQ(out["e"], "a=b");
 }
 
 TEST(UrlEncodedTest, MalformedEscapeFails) {
     std::unordered_map<std::string, std::string> out;
-    EXPECT_FALSE(http::parse_urlencoded("a=%zz", out));
-    EXPECT_FALSE(http::parse_urlencoded("a=%4", out));
-    EXPECT_TRUE(http::parse_urlencoded("", out));
+    EXPECT_FALSE(orbit::http::parse_urlencoded("a=%zz", out));
+    EXPECT_FALSE(orbit::http::parse_urlencoded("a=%4", out));
+    EXPECT_TRUE(orbit::http::parse_urlencoded("", out));
 }
 
 TEST(FormFieldsTest, OnlyForUrlEncodedBodies) {
-    http::HttpRequest req;
+    orbit::http::HttpRequest req;
     req.body = "name=Ada+Lovelace&lang=c%2B%2B";
     EXPECT_TRUE(req.form_fields().empty()); // no Content-Type
 
@@ -182,7 +182,7 @@ TEST(FormFieldsTest, OnlyForUrlEncodedBodies) {
 }
 
 TEST(FormFieldsTest, MalformedBodyGivesNoFields) {
-    http::HttpRequest req;
+    orbit::http::HttpRequest req;
     req.set_header("Content-Type", "application/x-www-form-urlencoded");
     req.body = "ok=1&bad=%G0";
     EXPECT_TRUE(req.form_fields().empty());
@@ -220,7 +220,7 @@ TEST(HttpParserFramingTest, IncompleteRequestIsNotParsed) {
 }
 
 TEST(HttpParserFramingTest, RequestOutlivesTheInput) {
-    std::optional<http::HttpRequest> req;
+    std::optional<orbit::http::HttpRequest> req;
     {
         std::string raw = "POST /p?x=1 HTTP/1.1\r\nHost: owned\r\nCookie: a=b\r\nContent-Length: 4\r\n\r\nbody";
         req = HttpParser::parse(raw);

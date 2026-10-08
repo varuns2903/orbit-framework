@@ -11,8 +11,8 @@ namespace {
 
 constexpr uint16_t kPort = 8095;
 
-network::socket_t connect_client() {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_client() {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
@@ -28,12 +28,12 @@ network::socket_t connect_client() {
     return fd;
 }
 
-void send_all(network::socket_t fd, const std::string& data) {
+void send_all(orbit::network::socket_t fd, const std::string& data) {
     ::send(fd, data.data(), static_cast<int>(data.size()), 0);
 }
 
 // Reads until `needle` shows up, the peer closes, or the timeout expires.
-std::string read_until(network::socket_t fd, const std::string& needle) {
+std::string read_until(orbit::network::socket_t fd, const std::string& needle) {
     std::string out;
     char buf[1024];
     while (out.find(needle) == std::string::npos) {
@@ -61,14 +61,14 @@ const char* kHandshake =
 
 class WebSocketUpgradeE2ETest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
-        app = new server::App(cfg);
-        app->ws("/ws", [](http::websocket::WebSocketConnection& ws) {
+        app = new orbit::server::App(cfg);
+        app->ws("/ws", [](orbit::http::websocket::WebSocketConnection& ws) {
             ws.on_message([&ws](const std::string& msg) { ws.send("echo:" + msg); });
         });
         server_thread = std::thread([] { app->listen(); });
@@ -77,20 +77,20 @@ protected:
 
     static void TearDownTestSuite() {
         app->stop();
-        network::socket_t wake = connect_client();
+        orbit::network::socket_t wake = connect_client();
         send_all(wake, "GET / HTTP/1.1\r\nConnection: close\r\n\r\n");
         read_until(wake, "\r\n\r\n");
-        network::close_socket(wake);
+        orbit::network::close_socket(wake);
         if (server_thread.joinable()) server_thread.join();
         delete app;
     }
 };
 
-server::App* WebSocketUpgradeE2ETest::app = nullptr;
+orbit::server::App* WebSocketUpgradeE2ETest::app = nullptr;
 std::thread WebSocketUpgradeE2ETest::server_thread;
 
 TEST_F(WebSocketUpgradeE2ETest, ReadsFramesSentAfterTheHandshake) {
-    network::socket_t fd = connect_client();
+    orbit::network::socket_t fd = connect_client();
     send_all(fd, kHandshake);
     ASSERT_NE(read_until(fd, "\r\n\r\n").find("101 Switching Protocols"), std::string::npos);
 
@@ -99,12 +99,12 @@ TEST_F(WebSocketUpgradeE2ETest, ReadsFramesSentAfterTheHandshake) {
 
     send_all(fd, masked_text_frame("two"));
     EXPECT_NE(read_until(fd, "echo:two").find("echo:two"), std::string::npos);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }
 
 TEST_F(WebSocketUpgradeE2ETest, StillHandlesFramePipelinedWithHandshake) {
-    network::socket_t fd = connect_client();
+    orbit::network::socket_t fd = connect_client();
     send_all(fd, std::string(kHandshake) + masked_text_frame("early"));
     EXPECT_NE(read_until(fd, "echo:early").find("echo:early"), std::string::npos);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }

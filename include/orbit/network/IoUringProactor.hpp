@@ -1,11 +1,12 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/network/Proactor.hpp>
 #include <liburing.h>
 #include <atomic>
 #include <mutex>
 #include <functional>
 
-namespace network {
+namespace orbit::network {
 
 class IoUringProactor : public Proactor {
 public:

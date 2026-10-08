@@ -4,8 +4,8 @@
 #include <iostream>
 #include <string>
 
-using namespace server;
-using namespace http;
+using namespace orbit::server;
+using namespace orbit::http;
 
 // 1. Define your standard C++ structs
 struct UserProfile {
@@ -25,7 +25,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(UserProfile, name, role, age)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ServerStatus, status, active_connections, uptime_seconds)
 
 int main() {
-    config::ServerConfig config;
+    orbit::config::ServerConfig config;
     config.port = 8083;
     App app(config);
 

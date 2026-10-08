@@ -1,9 +1,10 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/routing/Router.hpp>
 #include <chrono>
 #include <string>
 
-namespace middleware {
+namespace orbit::middleware {
 
 /**
  * @brief Verification settings for jwt_auth(). Configure at least one key:

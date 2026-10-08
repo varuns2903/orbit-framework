@@ -32,7 +32,7 @@ if(NOT DEFINED VCPKG_MANIFEST_FEATURES OR "${VCPKG_MANIFEST_FEATURES}" STREQUAL 
     set(VCPKG_MANIFEST_NO_DEFAULT_FEATURES ON CACHE BOOL "" FORCE)
 endif()
 
-project(OrbitFramework VERSION 1.6.0 LANGUAGES CXX)
+project(OrbitFramework VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -248,6 +248,9 @@ add_library(server_core ${SERVER_SOURCES})
 # propagate through the build tree, the installed export, and FetchContent
 # alike, and the two sides always agree on layout.
 target_compile_definitions(server_core PUBLIC ${ORBIT_PUBLIC_DEFINITIONS})
+# Orbit's own code uses the orbit:: names only; the global aliases in
+# legacy_namespaces.hpp are for applications written against 1.x.
+target_compile_definitions(server_core PRIVATE ORBIT_NO_LEGACY_NAMESPACES)
 
 # If building as a shared library, define exports
 if(BUILD_SHARED_LIBS)
@@ -419,6 +422,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
             endforeach()
             add_executable(${name} examples/${name}.cpp)
             target_link_libraries(${name} PRIVATE server_core)
+            target_compile_definitions(${name} PRIVATE ORBIT_NO_LEGACY_NAMESPACES)
         endfunction()
 
         # No optional subsystems: core HTTP, routing, WebSockets, templating.
@@ -472,6 +476,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
         add_executable(http_server_tests ${ORBIT_TEST_SOURCES})
         target_link_libraries(http_server_tests PRIVATE gtest_main server_core CURL::libcurl)
+        # The tests use the orbit:: names; test_legacy_namespaces.cpp turns
+        # the 1.x aliases back on for itself.
+        target_compile_definitions(http_server_tests PRIVATE ORBIT_NO_LEGACY_NAMESPACES)
         # The compression tests decode what the middleware produced.
         if(ORBIT_ENABLE_BROTLI)
             pkg_check_modules(BROTLIDEC REQUIRED IMPORTED_TARGET libbrotlidec)
@@ -499,6 +506,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         foreach(fuzz_target IN ITEMS fuzz_http1_parser fuzz_websocket fuzz_multipart fuzz_http2)
             add_executable(${fuzz_target} tests/fuzz/${fuzz_target}.cpp)
             target_link_libraries(${fuzz_target} PRIVATE server_core)
+            target_compile_definitions(${fuzz_target} PRIVATE ORBIT_NO_LEGACY_NAMESPACES)
             # Enable libFuzzer and AddressSanitizer
             target_compile_options(${fuzz_target} PRIVATE -fsanitize=fuzzer,address -g -O1)
             target_link_options(${fuzz_target} PRIVATE -fsanitize=fuzzer,address)

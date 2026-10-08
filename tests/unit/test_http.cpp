@@ -2,7 +2,7 @@
 #include <orbit/http/HttpParser.hpp>
 #include <orbit/http/HttpResponse.hpp>
 
-using namespace http;
+using namespace orbit::http;
 
 // ==================== HttpParser Edge Cases ====================
 

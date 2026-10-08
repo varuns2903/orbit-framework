@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -7,7 +8,7 @@
 #include <orbit/http/json.hpp>
 #include <orbit/utils/CaseInsensitive.hpp>
 
-namespace http {
+namespace orbit::http {
 
 /**
  * @brief Standard HTTP status codes.

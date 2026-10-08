@@ -7,7 +7,7 @@
 #include <thread>
 #include "../utils/TestConfig.hpp"
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -16,13 +16,13 @@ constexpr uint16_t kPort = 8093;
 // Sends raw bytes and returns everything the server writes back until it
 // closes the connection or goes quiet.
 std::string raw_exchange(const std::string& bytes) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
+        orbit::network::close_socket(fd);
         return "<connect failed>";
     }
 #ifdef _WIN32
@@ -41,7 +41,7 @@ std::string raw_exchange(const std::string& bytes) {
         if (n <= 0) break;
         out.append(buf, static_cast<size_t>(n));
     }
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return out;
 }
 
@@ -55,14 +55,14 @@ size_t count(const std::string& haystack, const std::string& needle) {
 
 class Http1FramingTest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.max_body_size = 64;
-        app = new server::App(cfg);
+        app = new orbit::server::App(cfg);
 
         app->get("/hello", [](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
             HttpResponse res;
@@ -88,7 +88,7 @@ protected:
     }
 };
 
-server::App* Http1FramingTest::app = nullptr;
+orbit::server::App* Http1FramingTest::app = nullptr;
 std::thread Http1FramingTest::server_thread;
 
 TEST_F(Http1FramingTest, ConflictingContentLengthIsRejectedAndServerSurvives) {

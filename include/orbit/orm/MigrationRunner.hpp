@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <vector>
 #include <optional>
@@ -14,7 +15,7 @@
 
 
 
-namespace orm {
+namespace orbit::orm {
 
 /**
  * @brief Simple Database Migration Runner for C++ Coroutines (PostgreSQL)

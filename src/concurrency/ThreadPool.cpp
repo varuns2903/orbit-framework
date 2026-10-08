@@ -2,7 +2,7 @@
 #include <orbit/utils/Logger.hpp>
 #include <exception>
 
-namespace concurrency {
+namespace orbit::concurrency {
 
 ThreadPool::ThreadPool(size_t num_threads) {
     for (size_t i = 0; i < num_threads; ++i) {

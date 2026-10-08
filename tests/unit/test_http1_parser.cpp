@@ -8,8 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
-using http::Http1Parser;
-using http::HttpMethod;
+using orbit::http::Http1Parser;
+using orbit::http::HttpMethod;
 using Event = Http1Parser::Event;
 
 namespace {
@@ -28,7 +28,7 @@ struct Seen {
     }
 };
 
-Seen seen(const http::HttpRequest& r) {
+Seen seen(const orbit::http::HttpRequest& r) {
     Seen s{r.method, r.uri, r.target, r.http_version, {}, r.query, r.cookies};
     for (const auto& [k, v] : r.headers) {
         std::string key(k);
@@ -348,7 +348,7 @@ TEST(Http1ParserTest, BodyLimitCanBeChosenPerRequest) {
     Http1Parser::Limits limits;
     limits.max_body_size = 4;
     Http1Parser p(limits);
-    p.set_body_limit([](const http::HttpRequest& r) -> size_t {
+    p.set_body_limit([](const orbit::http::HttpRequest& r) -> size_t {
         return r.uri == "/upload" ? SIZE_MAX : 4;
     });
     const std::string big = "POST /upload HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\n0123456789";

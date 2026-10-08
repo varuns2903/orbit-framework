@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -39,8 +39,8 @@ public:
     void write_chunk(std::string_view) override {}
     void end() override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -64,8 +64,8 @@ std::string gunzip(const std::string& in) {
 const std::string kBody(2000, 'x');
 
 // Runs a request through compress() and a handler that sends `res`.
-HttpResponse run(const char* accept_encoding, HttpResponse res, middleware::CompressOptions options = {}) {
-    auto mw = middleware::compress(std::move(options));
+HttpResponse run(const char* accept_encoding, HttpResponse res, orbit::middleware::CompressOptions options = {}) {
+    auto mw = orbit::middleware::compress(std::move(options));
     HttpRequest req;
     if (accept_encoding) req.headers["Accept-Encoding"] = accept_encoding;
     auto writer = std::make_shared<InterceptingWriter>();
@@ -83,19 +83,19 @@ HttpResponse text_response(const std::string& body = kBody) {
 } // namespace
 
 TEST(CompressTest, AcceptEncodingParsing) {
-    EXPECT_TRUE(middleware::accepts_gzip("gzip"));
-    EXPECT_TRUE(middleware::accepts_gzip("deflate, GZIP;q=0.5"));
-    EXPECT_TRUE(middleware::accepts_gzip("x-gzip"));
-    EXPECT_TRUE(middleware::accepts_gzip("*"));
-    EXPECT_TRUE(middleware::accepts_gzip("br, *;q=0.1"));
-    EXPECT_FALSE(middleware::accepts_gzip("gzip;q=0"));
-    EXPECT_FALSE(middleware::accepts_gzip("gzip; q=0.000"));
-    EXPECT_FALSE(middleware::accepts_gzip("*, gzip;q=0")); // explicit entry beats the wildcard
-    EXPECT_FALSE(middleware::accepts_gzip("*;q=0"));
-    EXPECT_FALSE(middleware::accepts_gzip("br, deflate"));
-    EXPECT_FALSE(middleware::accepts_gzip("gzipped"));
-    EXPECT_FALSE(middleware::accepts_gzip(""));
-    EXPECT_FALSE(middleware::accepts_gzip("gzip;q=abc")); // malformed q counts as 0
+    EXPECT_TRUE(orbit::middleware::accepts_gzip("gzip"));
+    EXPECT_TRUE(orbit::middleware::accepts_gzip("deflate, GZIP;q=0.5"));
+    EXPECT_TRUE(orbit::middleware::accepts_gzip("x-gzip"));
+    EXPECT_TRUE(orbit::middleware::accepts_gzip("*"));
+    EXPECT_TRUE(orbit::middleware::accepts_gzip("br, *;q=0.1"));
+    EXPECT_FALSE(orbit::middleware::accepts_gzip("gzip;q=0"));
+    EXPECT_FALSE(orbit::middleware::accepts_gzip("gzip; q=0.000"));
+    EXPECT_FALSE(orbit::middleware::accepts_gzip("*, gzip;q=0")); // explicit entry beats the wildcard
+    EXPECT_FALSE(orbit::middleware::accepts_gzip("*;q=0"));
+    EXPECT_FALSE(orbit::middleware::accepts_gzip("br, deflate"));
+    EXPECT_FALSE(orbit::middleware::accepts_gzip("gzipped"));
+    EXPECT_FALSE(orbit::middleware::accepts_gzip(""));
+    EXPECT_FALSE(orbit::middleware::accepts_gzip("gzip;q=abc")); // malformed q counts as 0
 }
 
 TEST(CompressTest, CompressesAndSetsVary) {
@@ -190,14 +190,14 @@ TEST(CompressTest, IncompressibleBodyIsSentAsIs) {
 
 namespace {
 
-using middleware::ContentCoding;
+using orbit::middleware::ContentCoding;
 
 const std::vector<ContentCoding> kAll{ContentCoding::Brotli, ContentCoding::Zstd, ContentCoding::Gzip};
 
 // What negotiation can pick: a coding missing from this build falls through
 // to the next acceptable one.
 ContentCoding expect_available(ContentCoding preferred, ContentCoding fallback) {
-    return middleware::coding_available(preferred) ? preferred : fallback;
+    return orbit::middleware::coding_available(preferred) ? preferred : fallback;
 }
 
 std::string decode(const std::string& coding, const std::string& in) {
@@ -237,42 +237,42 @@ std::string varied_text() {
 } // namespace
 
 TEST(CompressNegotiationTest, HighestQualityWins) {
-    EXPECT_EQ(middleware::negotiate_coding("br;q=0.5, gzip", kAll), ContentCoding::Gzip);
-    EXPECT_EQ(middleware::negotiate_coding("gzip;q=0.2, zstd;q=0.9", kAll),
+    EXPECT_EQ(orbit::middleware::negotiate_coding("br;q=0.5, gzip", kAll), ContentCoding::Gzip);
+    EXPECT_EQ(orbit::middleware::negotiate_coding("gzip;q=0.2, zstd;q=0.9", kAll),
               expect_available(ContentCoding::Zstd, ContentCoding::Gzip));
 }
 
 TEST(CompressNegotiationTest, TiesFollowServerPreference) {
-    EXPECT_EQ(middleware::negotiate_coding("gzip, deflate, br, zstd", kAll),
+    EXPECT_EQ(orbit::middleware::negotiate_coding("gzip, deflate, br, zstd", kAll),
               expect_available(ContentCoding::Brotli, expect_available(ContentCoding::Zstd, ContentCoding::Gzip)));
-    EXPECT_EQ(middleware::negotiate_coding("gzip, br", {ContentCoding::Gzip, ContentCoding::Brotli}), ContentCoding::Gzip);
-    EXPECT_EQ(middleware::negotiate_coding("*", kAll),
+    EXPECT_EQ(orbit::middleware::negotiate_coding("gzip, br", {ContentCoding::Gzip, ContentCoding::Brotli}), ContentCoding::Gzip);
+    EXPECT_EQ(orbit::middleware::negotiate_coding("*", kAll),
               expect_available(ContentCoding::Brotli, expect_available(ContentCoding::Zstd, ContentCoding::Gzip)));
 }
 
 TEST(CompressNegotiationTest, RefusalsAndWildcards) {
-    EXPECT_EQ(middleware::negotiate_coding("*, br;q=0, zstd;q=0", kAll), ContentCoding::Gzip);
-    EXPECT_EQ(middleware::negotiate_coding("br;q=0, gzip;q=0", kAll), ContentCoding::Identity);
-    EXPECT_EQ(middleware::negotiate_coding("*;q=0", kAll), ContentCoding::Identity);
-    EXPECT_EQ(middleware::negotiate_coding("identity, deflate", kAll), ContentCoding::Identity);
-    EXPECT_EQ(middleware::negotiate_coding("", kAll), ContentCoding::Identity);
-    EXPECT_EQ(middleware::negotiate_coding("BR", {ContentCoding::Brotli}),
+    EXPECT_EQ(orbit::middleware::negotiate_coding("*, br;q=0, zstd;q=0", kAll), ContentCoding::Gzip);
+    EXPECT_EQ(orbit::middleware::negotiate_coding("br;q=0, gzip;q=0", kAll), ContentCoding::Identity);
+    EXPECT_EQ(orbit::middleware::negotiate_coding("*;q=0", kAll), ContentCoding::Identity);
+    EXPECT_EQ(orbit::middleware::negotiate_coding("identity, deflate", kAll), ContentCoding::Identity);
+    EXPECT_EQ(orbit::middleware::negotiate_coding("", kAll), ContentCoding::Identity);
+    EXPECT_EQ(orbit::middleware::negotiate_coding("BR", {ContentCoding::Brotli}),
               expect_available(ContentCoding::Brotli, ContentCoding::Identity));
-    EXPECT_EQ(middleware::negotiate_coding("brotli, zst", kAll), ContentCoding::Identity); // not the tokens
+    EXPECT_EQ(orbit::middleware::negotiate_coding("brotli, zst", kAll), ContentCoding::Identity); // not the tokens
 }
 
 TEST(CompressNegotiationTest, CodingNames) {
-    EXPECT_EQ(middleware::coding_name(ContentCoding::Gzip), "gzip");
-    EXPECT_EQ(middleware::coding_name(ContentCoding::Brotli), "br");
-    EXPECT_EQ(middleware::coding_name(ContentCoding::Zstd), "zstd");
-    EXPECT_EQ(middleware::coding_name(ContentCoding::Identity), "");
+    EXPECT_EQ(orbit::middleware::coding_name(ContentCoding::Gzip), "gzip");
+    EXPECT_EQ(orbit::middleware::coding_name(ContentCoding::Brotli), "br");
+    EXPECT_EQ(orbit::middleware::coding_name(ContentCoding::Zstd), "zstd");
+    EXPECT_EQ(orbit::middleware::coding_name(ContentCoding::Identity), "");
 }
 
 TEST(CompressTest, EachCodingRoundTrips) {
     const std::string body = varied_text();
     for (ContentCoding coding : kAll) {
-        if (!middleware::coding_available(coding)) continue;
-        std::string name(middleware::coding_name(coding));
+        if (!orbit::middleware::coding_available(coding)) continue;
+        std::string name(orbit::middleware::coding_name(coding));
         HttpResponse res = run(name.c_str(), text_response(body));
         EXPECT_EQ(res.headers["Content-Encoding"], name);
         EXPECT_EQ(res.headers["Content-Length"], std::to_string(res.body.size())) << name;
@@ -283,19 +283,19 @@ TEST(CompressTest, EachCodingRoundTrips) {
 
 TEST(CompressTest, BrowserStyleHeaderGetsThePreferredCoding) {
     HttpResponse res = run("gzip, deflate, br, zstd", text_response(varied_text()));
-    std::string expected(middleware::coding_name(
+    std::string expected(orbit::middleware::coding_name(
         expect_available(ContentCoding::Brotli, expect_available(ContentCoding::Zstd, ContentCoding::Gzip))));
     EXPECT_EQ(res.headers["Content-Encoding"], expected);
     EXPECT_EQ(decode(expected, res.body), varied_text());
 }
 
 TEST(CompressTest, OptionsChoosePreferenceAndMinimumSize) {
-    middleware::CompressOptions gzip_only;
+    orbit::middleware::CompressOptions gzip_only;
     gzip_only.preference = {ContentCoding::Gzip};
     EXPECT_EQ(run("br, zstd, gzip", text_response(varied_text()), gzip_only).headers["Content-Encoding"], "gzip");
     EXPECT_EQ(run("br, zstd", text_response(varied_text()), gzip_only).headers.count("Content-Encoding"), 0u);
 
-    middleware::CompressOptions large_only;
+    orbit::middleware::CompressOptions large_only;
     large_only.min_size = 100000;
     HttpResponse small = run("gzip", text_response(varied_text()), large_only);
     EXPECT_EQ(small.headers.count("Content-Encoding"), 0u);

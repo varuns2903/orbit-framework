@@ -3,12 +3,12 @@
 #include <iostream>
 #include <memory>
 
-using namespace server;
-using namespace http;
-using namespace middleware;
+using namespace orbit::server;
+using namespace orbit::http;
+using namespace orbit::middleware;
 
 int main(int argc, char* argv[]) {
-    auto config = config::ServerConfig::parse(argc, argv);
+    auto config = orbit::config::ServerConfig::parse(argc, argv);
     App app(config);
 
     // A mock executor that just echoes the query and variables back

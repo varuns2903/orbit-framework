@@ -2,7 +2,7 @@
 #include <sstream>
 #include <regex>
 
-namespace openapi {
+namespace orbit::openapi {
 
 void OpenApiRegistry::register_route(http::HttpMethod method, const std::string& path, const RouteMetadata& meta) {
     // Convert /api/users/:id to /api/users/{id}

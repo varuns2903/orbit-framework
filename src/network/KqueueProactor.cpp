@@ -9,7 +9,7 @@
 #include <cerrno>
 #include <functional>
 
-namespace network {
+namespace orbit::network {
 
 KqueueProactor::KqueueProactor() : events_(64) {
     kq_fd_ = kqueue();

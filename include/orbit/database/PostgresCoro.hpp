@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/database/PostgresClient.hpp>
 #include <coroutine>
 #include <memory>
@@ -6,7 +7,7 @@
 #include <optional>
 #include <vector>
 
-namespace database {
+namespace orbit::database {
 
 /**
  * @brief A coroutine awaiter for connecting a PostgresClient asynchronously.

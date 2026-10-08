@@ -1,11 +1,12 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <orbit/network/Proactor.hpp>
 #include <sys/epoll.h>
 #include <unordered_map>
 #include <mutex>
 #include <vector>
 
-namespace network {
+namespace orbit::network {
 
 class EpollProactor : public Proactor {
 public:

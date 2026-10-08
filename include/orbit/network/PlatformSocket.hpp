@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 
 #include <string>
 
@@ -22,7 +23,7 @@
     #include <netdb.h>
 #endif
 
-namespace network {
+namespace orbit::network {
 
 #ifdef _WIN32
     using socket_t = SOCKET;

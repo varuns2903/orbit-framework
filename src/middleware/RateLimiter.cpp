@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace middleware {
+namespace orbit::middleware {
 
 RateLimiter::RateLimiter(RateLimitOptions options)
     : options_(std::move(options)),

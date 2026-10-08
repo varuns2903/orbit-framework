@@ -14,8 +14,8 @@ namespace {
 constexpr uint16_t kPort = 8096;
 using Clock = std::chrono::steady_clock;
 
-network::socket_t connect_client(int recv_timeout_ms = 3000) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_client(int recv_timeout_ms = 3000) {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
@@ -31,11 +31,11 @@ network::socket_t connect_client(int recv_timeout_ms = 3000) {
     return fd;
 }
 
-void send_all(network::socket_t fd, const std::string& data) {
+void send_all(orbit::network::socket_t fd, const std::string& data) {
     ::send(fd, data.data(), static_cast<int>(data.size()), 0);
 }
 
-std::string read_until(network::socket_t fd, const std::string& needle) {
+std::string read_until(orbit::network::socket_t fd, const std::string& needle) {
     std::string out;
     char buf[1024];
     while (out.find(needle) == std::string::npos) {
@@ -47,7 +47,7 @@ std::string read_until(network::socket_t fd, const std::string& needle) {
 }
 
 // True once the server has closed the connection (recv returns 0).
-bool peer_closed(network::socket_t fd) {
+bool peer_closed(orbit::network::socket_t fd) {
     char buf[256];
     while (true) {
         auto n = ::recv(fd, buf, sizeof(buf), 0);
@@ -76,38 +76,38 @@ std::atomic<int> g_plain_closes{0};
 
 class ConnectionLifecycleTest : public ::testing::Test {
 protected:
-    static server::App* app;
-    static websocket::EventRouter<>* events;
+    static orbit::server::App* app;
+    static orbit::websocket::EventRouter<>* events;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.header_timeout = std::chrono::seconds(1);
         cfg.keep_alive_timeout = std::chrono::seconds(1);
         cfg.idle_timeout = std::chrono::seconds(1);
         cfg.websocket_idle_timeout = std::chrono::seconds(0);
-        app = new server::App(cfg);
+        app = new orbit::server::App(cfg);
 
-        app->get("/slow", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
+        app->get("/slow", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2500));
-            http::HttpResponse res;
+            orbit::http::HttpResponse res;
             res.set_body("done");
             w->send(std::move(res));
         });
-        app->get("/fast", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/fast", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("fast");
             w->send(std::move(res));
         });
-        app->ws("/plain", [](http::websocket::WebSocketConnection& ws) {
+        app->ws("/plain", [](orbit::http::websocket::WebSocketConnection& ws) {
             ws.on_message([&ws](const std::string& msg) { ws.send("echo:" + msg); });
             ws.on_close([] { ++g_plain_closes; });
         });
 
-        events = new websocket::EventRouter<>();
-        events->on_connect([](websocket::EventSocket<websocket::EmptySession>& s) { s.join("lobby"); });
-        events->on("say", [](websocket::EventSocket<websocket::EmptySession>& s) {
+        events = new orbit::websocket::EventRouter<>();
+        events->on_connect([](orbit::websocket::EventSocket<orbit::websocket::EmptySession>& s) { s.join("lobby"); });
+        events->on("say", [](orbit::websocket::EventSocket<orbit::websocket::EmptySession>& s) {
             events->to("lobby").emit("said", s.id());
         });
         events->attach(*app, "/events");
@@ -118,26 +118,26 @@ protected:
 
     static void TearDownTestSuite() {
         app->stop();
-        network::socket_t wake = connect_client();
+        orbit::network::socket_t wake = connect_client();
         send_all(wake, "GET /fast HTTP/1.1\r\nConnection: close\r\n\r\n");
         read_until(wake, "fast");
-        network::close_socket(wake);
+        orbit::network::close_socket(wake);
         if (server_thread.joinable()) server_thread.join();
         delete app;
         delete events;
     }
 };
 
-server::App* ConnectionLifecycleTest::app = nullptr;
-websocket::EventRouter<>* ConnectionLifecycleTest::events = nullptr;
+orbit::server::App* ConnectionLifecycleTest::app = nullptr;
+orbit::websocket::EventRouter<>* ConnectionLifecycleTest::events = nullptr;
 std::thread ConnectionLifecycleTest::server_thread;
 
 TEST_F(ConnectionLifecycleTest, DroppedWebSocketFiresOnClose) {
     int before = g_plain_closes.load();
-    network::socket_t fd = connect_client();
+    orbit::network::socket_t fd = connect_client();
     send_all(fd, ws_handshake("/plain"));
     ASSERT_NE(read_until(fd, "\r\n\r\n").find("101"), std::string::npos);
-    network::close_socket(fd); // no close frame
+    orbit::network::close_socket(fd); // no close frame
 
     auto deadline = Clock::now() + std::chrono::seconds(3);
     while (g_plain_closes.load() == before && Clock::now() < deadline) {
@@ -149,41 +149,41 @@ TEST_F(ConnectionLifecycleTest, DroppedWebSocketFiresOnClose) {
 TEST_F(ConnectionLifecycleTest, BroadcastAfterPeerDropIsSafe) {
     // Under ASan this used to report a heap-use-after-free: the dropped
     // socket stayed in the room with a dangling connection reference.
-    network::socket_t a = connect_client();
-    network::socket_t b = connect_client();
+    orbit::network::socket_t a = connect_client();
+    orbit::network::socket_t b = connect_client();
     send_all(a, ws_handshake("/events"));
     send_all(b, ws_handshake("/events"));
     ASSERT_NE(read_until(a, "\r\n\r\n").find("101"), std::string::npos);
     ASSERT_NE(read_until(b, "\r\n\r\n").find("101"), std::string::npos);
 
-    network::close_socket(b);
+    orbit::network::close_socket(b);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     send_all(a, masked_text_frame(R"({"event":"say"})"));
     EXPECT_NE(read_until(a, "said").find("said"), std::string::npos);
-    network::close_socket(a);
+    orbit::network::close_socket(a);
 }
 
 TEST_F(ConnectionLifecycleTest, IdleWebSocketIsNotReaped) {
-    network::socket_t fd = connect_client();
+    orbit::network::socket_t fd = connect_client();
     send_all(fd, ws_handshake("/plain"));
     ASSERT_NE(read_until(fd, "\r\n\r\n").find("101"), std::string::npos);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(2500)); // > every HTTP timeout
     send_all(fd, masked_text_frame("still-here"));
     EXPECT_NE(read_until(fd, "echo:still-here").find("echo:still-here"), std::string::npos);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }
 
 TEST_F(ConnectionLifecycleTest, SlowHandlerIsNotCutOff) {
-    network::socket_t fd = connect_client(5000);
+    orbit::network::socket_t fd = connect_client(5000);
     send_all(fd, "GET /slow HTTP/1.1\r\nHost: x\r\n\r\n");
     EXPECT_NE(read_until(fd, "done").find("done"), std::string::npos);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }
 
 TEST_F(ConnectionLifecycleTest, TricklingHeadersDoesNotExtendTheDeadline) {
-    network::socket_t fd = connect_client(200);
+    orbit::network::socket_t fd = connect_client(200);
     auto start = Clock::now();
     send_all(fd, "GET /fast HTTP/1.1\r\n");
     bool closed = false;
@@ -194,15 +194,15 @@ TEST_F(ConnectionLifecycleTest, TricklingHeadersDoesNotExtendTheDeadline) {
     auto elapsed = Clock::now() - start;
     EXPECT_TRUE(closed);
     EXPECT_LT(elapsed, std::chrono::milliseconds(2500));
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }
 
 TEST_F(ConnectionLifecycleTest, IdleKeepAliveConnectionIsClosed) {
-    network::socket_t fd = connect_client(3000);
+    orbit::network::socket_t fd = connect_client(3000);
     send_all(fd, "GET /fast HTTP/1.1\r\nHost: x\r\n\r\n");
     ASSERT_NE(read_until(fd, "fast").find("fast"), std::string::npos);
     auto start = Clock::now();
     EXPECT_TRUE(peer_closed(fd));
     EXPECT_LT(Clock::now() - start, std::chrono::milliseconds(2500));
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 }

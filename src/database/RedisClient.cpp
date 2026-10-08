@@ -6,7 +6,7 @@
 #include <netdb.h>
 #endif
 
-namespace database {
+namespace orbit::database {
 
 RedisClient::RedisClient(const std::string& host, int port) : host_(host), port_(port) {
     connect();

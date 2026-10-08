@@ -11,7 +11,7 @@
 #include <thread>
 #include "../utils/TestConfig.hpp"
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -32,8 +32,8 @@ public:
     void end() override {}
     void add_interceptor(Interceptor i) override { interceptors.push_back(std::move(i)); }
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("unused"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("unused"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("unused"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
@@ -54,8 +54,8 @@ std::string cookie_value(const HttpResponse& res, const std::string& name) {
     return "";
 }
 
-middleware::OAuth2Config provider_config(const std::string& token_path = "/token") {
-    middleware::OAuth2Config c;
+orbit::middleware::OAuth2Config provider_config(const std::string& token_path = "/token") {
+    orbit::middleware::OAuth2Config c;
     c.client_id = "client id";
     c.client_secret = "s3cr&t";
     c.redirect_uri = "https://app.example/callback?x=1";
@@ -70,7 +70,7 @@ struct Flow {
     std::string location, state, verifier;
 };
 
-Flow start_login(const middleware::OAuth2& oauth) {
+Flow start_login(const orbit::middleware::OAuth2& oauth) {
     auto login = oauth.login_handler();
     HttpRequest req;
     auto w = std::make_shared<CaptureWriter>();
@@ -88,7 +88,7 @@ struct Outcome {
     nlohmann::json user;
 };
 
-Outcome run_callback(const middleware::OAuth2& oauth, const std::string& query_state, const std::string& cookie_state,
+Outcome run_callback(const orbit::middleware::OAuth2& oauth, const std::string& query_state, const std::string& cookie_state,
                      const std::string& verifier) {
     Outcome out;
     auto cb = oauth.callback_handler(
@@ -107,13 +107,13 @@ Outcome run_callback(const middleware::OAuth2& oauth, const std::string& query_s
 
 class OAuth2Test : public ::testing::Test {
 protected:
-    static server::App* provider;
+    static orbit::server::App* provider;
     static std::thread provider_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kProviderPort;
-        provider = new server::App(cfg);
+        provider = new orbit::server::App(cfg);
         provider->post("/token", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
             { std::lock_guard<std::mutex> l(g_mutex); g_last_token_body = std::string(req.body); }
             HttpResponse res;
@@ -151,25 +151,25 @@ protected:
         // event loop is blocked waiting for I/O with no timeout, so connect
         // once to wake it; otherwise join() never returns.
         {
-            network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+            orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
             sockaddr_in addr{};
             addr.sin_family = AF_INET;
             addr.sin_port = htons(kProviderPort);
             addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
             ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-            network::close_socket(fd);
+            orbit::network::close_socket(fd);
         }
         if (provider_thread.joinable()) provider_thread.join();
         delete provider;
     }
 };
 
-server::App* OAuth2Test::provider = nullptr;
+orbit::server::App* OAuth2Test::provider = nullptr;
 std::thread OAuth2Test::provider_thread;
 
 TEST_F(OAuth2Test, LoginRedirectCarriesEncodedParamsStateAndPkce) {
     // Handlers must not depend on the OAuth2 object staying alive.
-    auto login = middleware::OAuth2(provider_config()).login_handler();
+    auto login = orbit::middleware::OAuth2(provider_config()).login_handler();
     HttpRequest req;
     auto w = std::make_shared<CaptureWriter>();
     login(req, w);
@@ -182,7 +182,7 @@ TEST_F(OAuth2Test, LoginRedirectCarriesEncodedParamsStateAndPkce) {
     std::string verifier = cookie_value(w->last, "oauth_pkce");
     EXPECT_GE(state.size(), 43u);
     EXPECT_EQ(query_param(loc, "state"), state);
-    EXPECT_EQ(query_param(loc, "code_challenge"), middleware::detail::pkce_challenge(verifier));
+    EXPECT_EQ(query_param(loc, "code_challenge"), orbit::middleware::detail::pkce_challenge(verifier));
     EXPECT_EQ(query_param(loc, "code_challenge_method"), "S256");
     for (const auto& c : w->last.cookies) {
         EXPECT_TRUE(c.http_only);
@@ -191,7 +191,7 @@ TEST_F(OAuth2Test, LoginRedirectCarriesEncodedParamsStateAndPkce) {
 }
 
 TEST_F(OAuth2Test, CallbackWithMatchingStateCompletes) {
-    middleware::OAuth2 oauth(provider_config());
+    orbit::middleware::OAuth2 oauth(provider_config());
     Flow f = start_login(oauth);
     Outcome out = run_callback(oauth, f.state, f.state, f.verifier);
     ASSERT_TRUE(out.success) << out.error;
@@ -205,7 +205,7 @@ TEST_F(OAuth2Test, CallbackWithMatchingStateCompletes) {
 }
 
 TEST_F(OAuth2Test, CallbackWithoutOrWithWrongStateIsRejected) {
-    middleware::OAuth2 oauth(provider_config());
+    orbit::middleware::OAuth2 oauth(provider_config());
     Flow f = start_login(oauth);
     EXPECT_EQ(run_callback(oauth, "", "", f.verifier).error, "Invalid OAuth2 state");
     EXPECT_EQ(run_callback(oauth, f.state, "", f.verifier).error, "Invalid OAuth2 state");
@@ -213,7 +213,7 @@ TEST_F(OAuth2Test, CallbackWithoutOrWithWrongStateIsRejected) {
 }
 
 TEST_F(OAuth2Test, TokenErrorIsNotEchoed) {
-    middleware::OAuth2 oauth(provider_config("/token-error"));
+    orbit::middleware::OAuth2 oauth(provider_config("/token-error"));
     Flow f = start_login(oauth);
     Outcome out = run_callback(oauth, f.state, f.state, f.verifier);
     EXPECT_FALSE(out.success);
@@ -221,9 +221,9 @@ TEST_F(OAuth2Test, TokenErrorIsNotEchoed) {
 }
 
 TEST_F(OAuth2Test, SlowProviderTimesOut) {
-    middleware::OAuth2Config config = provider_config("/token-slow");
+    orbit::middleware::OAuth2Config config = provider_config("/token-slow");
     config.request_timeout_seconds = 1;
-    middleware::OAuth2 oauth(config);
+    orbit::middleware::OAuth2 oauth(config);
     Flow f = start_login(oauth);
     auto start = std::chrono::steady_clock::now();
     Outcome out = run_callback(oauth, f.state, f.state, f.verifier);
@@ -232,10 +232,10 @@ TEST_F(OAuth2Test, SlowProviderTimesOut) {
 }
 
 TEST(OAuth2UrlCodingTest, RoundTrips) {
-    EXPECT_EQ(middleware::detail::url_encode("a b&c/d~"), "a%20b%26c%2Fd~");
-    EXPECT_EQ(middleware::detail::url_decode("a%20b%26c%2Fd~+e"), "a b&c/d~ e");
-    EXPECT_EQ(middleware::detail::url_decode("%zz"), "%zz");
+    EXPECT_EQ(orbit::middleware::detail::url_encode("a b&c/d~"), "a%20b%26c%2Fd~");
+    EXPECT_EQ(orbit::middleware::detail::url_decode("a%20b%26c%2Fd~+e"), "a b&c/d~ e");
+    EXPECT_EQ(orbit::middleware::detail::url_decode("%zz"), "%zz");
     // RFC 7636 appendix B test vector
-    EXPECT_EQ(middleware::detail::pkce_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+    EXPECT_EQ(orbit::middleware::detail::pkce_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
               "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
 }

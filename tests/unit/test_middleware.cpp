@@ -12,8 +12,8 @@
 #include <string>
 #include <thread>
 
-using namespace middleware;
-using namespace http;
+using namespace orbit::middleware;
+using namespace orbit::http;
 
 class MiddlewareMockResponseWriter : public ResponseWriter {
 public:
@@ -39,8 +39,8 @@ public:
     void set_header(const std::string& key, const std::string& value) override {
         default_headers_[key] = value;
     }
-    network::Proactor& proactor() override { throw std::runtime_error("Not implemented"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("Not implemented"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("Not implemented"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("Not implemented"); }
     void send_sse_event(std::string_view data, std::string_view event, std::string_view id) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_close) override {}
     void read_body_stream(std::function<void(std::string_view)> on_data, std::function<void()> on_end) override {}

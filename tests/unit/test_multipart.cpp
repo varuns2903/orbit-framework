@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #endif
 
-using namespace http;
+using namespace orbit::http;
 
 TEST(MultipartTest, BasicParsing) {
     std::string boundary = "boundary123";

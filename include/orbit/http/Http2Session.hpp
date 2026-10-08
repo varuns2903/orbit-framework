@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
@@ -14,14 +15,14 @@
 #include <mutex>
 #include <string_view>
 
-namespace server {
+namespace orbit::server {
     class Connection;
 }
-namespace network {
+namespace orbit::network {
     class Proactor;
 }
 
-namespace http {
+namespace orbit::http {
 namespace h2 {
 
 namespace detail {

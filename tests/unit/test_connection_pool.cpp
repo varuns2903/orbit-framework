@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-using network::ConnectionPool;
+using orbit::network::ConnectionPool;
 
 namespace {
 

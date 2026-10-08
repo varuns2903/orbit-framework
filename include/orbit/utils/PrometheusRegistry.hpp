@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <string>
 #include <unordered_map>
 #include <mutex>
@@ -6,7 +7,7 @@
 #include <vector>
 #include <chrono>
 
-namespace utils {
+namespace orbit::utils {
 
 class PrometheusRegistry {
 public:

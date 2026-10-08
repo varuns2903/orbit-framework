@@ -67,10 +67,10 @@ Edit `main.cpp`:
 #include <orbit/http/json.hpp>
 
 int main() {
-    config::ServerConfig config;
+    orbit::config::ServerConfig config;
     config.port = 8080;
 
-    server::App app(config);
+    orbit::server::App app(config);
 
     // Return a string — Orbit handles the HTTP response automatically
     app.get("/", []() -> std::string {
@@ -83,7 +83,7 @@ int main() {
     });
 
     // Dynamic route parameters
-    app.get("/users/:id", [](const http::HttpRequest& req) -> nlohmann::json {
+    app.get("/users/:id", [](const orbit::http::HttpRequest& req) -> nlohmann::json {
         return {{"user_id", req.params.at("id")}};
     });
 
@@ -440,13 +440,13 @@ attached to GitHub Releases yet, so build your own for now.
 #include <orbit/middleware/JwtAuth.hpp>
 #include <orbit/middleware/RateLimiter.hpp>
 
-app.use(middleware::cors());                                        // Global CORS
-app.use(middleware::rate_limit(1000, std::chrono::seconds(60)));    // Rate limit
+app.use(orbit::middleware::cors());                                        // Global CORS
+app.use(orbit::middleware::rate_limit(1000, std::chrono::seconds(60)));    // Rate limit
 
 // Protected route group
-app.group("/api/v1", [](routing::Router& r) {
-    r.use(middleware::jwt_auth("your-secret-key"));
-    r.get("/profile", [](http::HttpRequest& req) -> nlohmann::json {
+app.group("/api/v1", [](orbit::routing::Router& r) {
+    r.use(orbit::middleware::jwt_auth("your-secret-key"));
+    r.get("/profile", [](orbit::http::HttpRequest& req) -> nlohmann::json {
         return {{"user", req.headers["X-User-Id"]}};
     });
 });
@@ -462,17 +462,17 @@ struct User { int id; std::string name; int age; };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(User, id, name, age)
 ORBIT_REGISTER_MODEL(User, "users")
 
-app.get("/adults", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) {
-    auto coro = [writer]() -> concurrency::Task {
-        auto db = std::make_shared<database::PostgresClient>(&writer->proactor(), "dbname=myapp");
+app.get("/adults", [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> writer) {
+    auto coro = [writer]() -> orbit::concurrency::Task {
+        auto db = std::make_shared<orbit::database::PostgresClient>(&writer->proactor(), "dbname=myapp");
         co_await connect_async(db);
 
         // Expression DSL → parameterized SQL (values are bound, not spliced)
         auto users = co_await query_User(db)
-            .where(orm::Col("age") >= 18)
+            .where(orbit::orm::Col("age") >= 18)
             .get_async();
 
-        writer->send(http::HttpResponse().status(200).send(nlohmann::json(users).dump()));
+        writer->send(orbit::http::HttpResponse().status(200).send(nlohmann::json(users).dump()));
     };
     coro();
 });
@@ -485,7 +485,7 @@ app.get("/adults", [](http::HttpRequest& req, std::shared_ptr<http::ResponseWrit
 
 struct PlayerSession { std::string name; int score = 0; };
 
-websocket::EventRouter<PlayerSession> events;
+orbit::websocket::EventRouter<PlayerSession> events;
 
 events.on<std::string>("chat", [](auto& ws, const std::string& msg) {
     ws.to("lobby").emit("chat", ws.session().name + ": " + msg);

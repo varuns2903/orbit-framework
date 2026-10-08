@@ -4,7 +4,7 @@
 #include <cerrno>
 #include <cstring>
 
-namespace network {
+namespace orbit::network {
 
 Socket::Socket() {
     fd_ = ::socket(AF_INET, SOCK_STREAM, 0);

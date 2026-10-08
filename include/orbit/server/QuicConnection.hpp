@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto.h>
@@ -20,7 +21,7 @@
 #include <string>
 #include <orbit/network/PlatformSocket.hpp>
 
-namespace server {
+namespace orbit::server {
 
 namespace detail {
 

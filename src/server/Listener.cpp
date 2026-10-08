@@ -6,7 +6,7 @@
 #include <memory>
 #include <orbit/utils/Logger.hpp>
 
-namespace server {
+namespace orbit::server {
 
 Listener::Listener(uint16_t port) : Listener("0.0.0.0", port) {}
 

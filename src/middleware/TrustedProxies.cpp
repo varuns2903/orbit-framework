@@ -5,7 +5,7 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace middleware {
+namespace orbit::middleware {
 
 namespace {
 

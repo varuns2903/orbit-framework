@@ -12,7 +12,7 @@
 #include <thread>
 #include <unordered_map>
 
-namespace http {
+namespace orbit::http {
 
 namespace {
 

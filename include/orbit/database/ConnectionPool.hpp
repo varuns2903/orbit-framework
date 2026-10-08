@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <algorithm>
 #include <chrono>
 #include <functional>
@@ -10,7 +11,7 @@
 #include <vector>
 #include <orbit/network/Proactor.hpp>
 
-namespace database {
+namespace orbit::database {
 
 /**
  * @brief Health checking and reconnecting for a ConnectionPool.

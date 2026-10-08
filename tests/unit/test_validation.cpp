@@ -7,8 +7,8 @@
 #include <optional>
 #include <string>
 
-using namespace middleware;
-using namespace http;
+using namespace orbit::middleware;
+using namespace orbit::http;
 
 namespace {
 
@@ -22,8 +22,8 @@ public:
     void end() override {}
     void add_interceptor(std::function<void(HttpResponse&)>) override {}
     void set_header(const std::string&, const std::string&) override {}
-    network::Proactor& proactor() override { throw std::runtime_error("Not implemented"); }
-    concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("Not implemented"); }
+    orbit::network::Proactor& proactor() override { throw std::runtime_error("Not implemented"); }
+    orbit::concurrency::ThreadPool& thread_pool() override { throw std::runtime_error("Not implemented"); }
     void send_sse_event(std::string_view, std::string_view, std::string_view) override {}
     void upgrade_to_raw_stream(std::function<void(std::string_view)>, std::function<void()>) override {}
     void read_body_stream(std::function<void(std::string_view)>, std::function<void()>) override {}

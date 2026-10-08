@@ -16,7 +16,7 @@
 #include <thread>
 #include "../utils/TestConfig.hpp"
 
-using namespace http;
+using namespace orbit::http;
 
 namespace {
 
@@ -27,20 +27,20 @@ std::mutex g_mutex;
 std::string g_received;
 bool g_ended = false;
 
-network::socket_t connect_local(uint16_t port) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_local(uint16_t port) {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
-        return network::INVALID_SOCKET_FD;
+        orbit::network::close_socket(fd);
+        return orbit::network::INVALID_SOCKET_FD;
     }
     return fd;
 }
 
-void set_recv_timeout(network::socket_t fd, int ms) {
+void set_recv_timeout(orbit::network::socket_t fd, int ms) {
 #ifdef _WIN32
     DWORD timeout_ms = static_cast<DWORD>(ms);
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
@@ -50,11 +50,11 @@ void set_recv_timeout(network::socket_t fd, int ms) {
 #endif
 }
 
-void send_all(network::socket_t fd, const std::string& data) {
+void send_all(orbit::network::socket_t fd, const std::string& data) {
     ::send(fd, data.data(), static_cast<int>(data.size()), 0);
 }
 
-std::string read_until_close(network::socket_t fd) {
+std::string read_until_close(orbit::network::socket_t fd) {
     std::string out;
     char buf[4096];
     while (true) {
@@ -91,17 +91,17 @@ bool make_self_signed(const std::string& cert_path, const std::string& key_path)
 
 // Starts an App on its own thread; stops it and wakes its loop on destruction.
 struct ServerThread {
-    server::App* app;
+    orbit::server::App* app;
     std::thread thread;
     uint16_t port;
     bool tls;
 
-    ServerThread(server::App* a, uint16_t p, bool use_tls) : app(a), port(p), tls(use_tls) {
+    ServerThread(orbit::server::App* a, uint16_t p, bool use_tls) : app(a), port(p), tls(use_tls) {
         thread = std::thread([this] { app->listen(); });
         for (int i = 0; i < 100; ++i) {
-            network::socket_t fd = connect_local(port);
-            if (fd != network::INVALID_SOCKET_FD) {
-                network::close_socket(fd);
+            orbit::network::socket_t fd = connect_local(port);
+            if (fd != orbit::network::INVALID_SOCKET_FD) {
+                orbit::network::close_socket(fd);
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -110,8 +110,8 @@ struct ServerThread {
 
     ~ServerThread() {
         app->stop();
-        network::socket_t fd = connect_local(port); // wake the loop
-        if (fd != network::INVALID_SOCKET_FD) network::close_socket(fd);
+        orbit::network::socket_t fd = connect_local(port); // wake the loop
+        if (fd != orbit::network::INVALID_SOCKET_FD) orbit::network::close_socket(fd);
         if (thread.joinable()) thread.join();
         delete app;
     }
@@ -123,10 +123,10 @@ struct ServerThread {
 // request body is still arriving. The response flag used to be shared with
 // the request decoder, so the rest of the body was read as raw bytes.
 TEST(ConnectionStateTest, ResponseFramingDoesNotChangeRequestDecoding) {
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = kPlainPort;
-    auto* app = new server::App(cfg);
-    app->group("/s", [](routing::Router& r) {
+    auto* app = new orbit::server::App(cfg);
+    app->group("/s", [](orbit::routing::Router& r) {
         r.add_stream_route(HttpMethod::POST, "/up", [](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
             HttpResponse head;
             head.headers["Content-Length"] = "2";
@@ -148,8 +148,8 @@ TEST(ConnectionStateTest, ResponseFramingDoesNotChangeRequestDecoding) {
     });
     ServerThread server(app, kPlainPort, false);
 
-    network::socket_t fd = connect_local(kPlainPort);
-    ASSERT_NE(fd, network::INVALID_SOCKET_FD);
+    orbit::network::socket_t fd = connect_local(kPlainPort);
+    ASSERT_NE(fd, orbit::network::INVALID_SOCKET_FD);
     set_recv_timeout(fd, 3000);
     send_all(fd, "POST /s/up HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
                  "5\r\nhello\r\n");
@@ -157,7 +157,7 @@ TEST(ConnectionStateTest, ResponseFramingDoesNotChangeRequestDecoding) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     send_all(fd, "6\r\n world\r\n0\r\n\r\n");
     std::string res = read_until_close(fd);
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
 
     EXPECT_EQ(res.rfind("HTTP/1.1 200", 0), 0u) << res;
     EXPECT_NE(res.find("\r\n\r\nok"), std::string::npos) << res;
@@ -174,12 +174,12 @@ TEST(ConnectionStateTest, TlsCloseNotifyClosesTheConnection) {
     std::string key = (dir / "orbit_conn_state_key.pem").string();
     ASSERT_TRUE(make_self_signed(cert, key));
 
-    config::ServerConfig cfg = orbit::test::server_config();
+    orbit::config::ServerConfig cfg = orbit::test::server_config();
     cfg.port = kTlsPort;
     cfg.ssl_cert = cert;
     cfg.ssl_key = key;
     cfg.keep_alive_timeout = std::chrono::seconds(30);
-    auto* app = new server::App(cfg);
+    auto* app = new orbit::server::App(cfg);
     app->get("/ok", [](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
         HttpResponse res;
         res.set_body("ok");
@@ -190,8 +190,8 @@ TEST(ConnectionStateTest, TlsCloseNotifyClosesTheConnection) {
 
         SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
         ASSERT_NE(ctx, nullptr);
-        network::socket_t fd = connect_local(kTlsPort);
-        ASSERT_NE(fd, network::INVALID_SOCKET_FD);
+        orbit::network::socket_t fd = connect_local(kTlsPort);
+        ASSERT_NE(fd, orbit::network::INVALID_SOCKET_FD);
         SSL* ssl = SSL_new(ctx);
         SSL_set_fd(ssl, static_cast<int>(fd));
         ASSERT_EQ(SSL_connect(ssl), 1);
@@ -217,7 +217,7 @@ TEST(ConnectionStateTest, TlsCloseNotifyClosesTheConnection) {
 
         SSL_free(ssl);
         SSL_CTX_free(ctx);
-        network::close_socket(fd);
+        orbit::network::close_socket(fd);
     }
     std::filesystem::remove(cert);
     std::filesystem::remove(key);

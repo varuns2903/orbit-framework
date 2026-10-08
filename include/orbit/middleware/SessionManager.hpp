@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -11,7 +12,7 @@
 #include <orbit/database/RedisClient.hpp>
 #endif
 
-namespace middleware {
+namespace orbit::middleware {
 
 /// Key/value data kept for one session.
 using SessionData = std::unordered_map<std::string, std::string>;

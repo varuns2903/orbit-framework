@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <openssl/x509v3.h>
 
-namespace network {
+namespace orbit::network {
 
 static int alpn_select_cb(SSL* ssl, const unsigned char** out, unsigned char* outlen,
                           const unsigned char* in, unsigned int inlen, void* arg) {

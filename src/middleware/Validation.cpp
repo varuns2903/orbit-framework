@@ -1,7 +1,7 @@
 #include <orbit/middleware/Validation.hpp>
 #include <iostream>
 
-namespace middleware {
+namespace orbit::middleware {
 
 routing::Middleware validate_json(const std::vector<SchemaField>& schema) {
     return [schema](http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> writer) -> bool {

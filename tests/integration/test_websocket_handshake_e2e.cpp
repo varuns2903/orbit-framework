@@ -13,8 +13,8 @@ namespace {
 
 constexpr uint16_t kPort = 8098;
 
-network::socket_t connect_client() {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+orbit::network::socket_t connect_client() {
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
@@ -32,7 +32,7 @@ network::socket_t connect_client() {
 
 // Sends a request and returns the response head (status line + headers).
 std::string exchange(const std::string& request) {
-    network::socket_t fd = connect_client();
+    orbit::network::socket_t fd = connect_client();
     ::send(fd, request.data(), static_cast<int>(request.size()), 0);
     std::string out;
     char buf[1024];
@@ -41,7 +41,7 @@ std::string exchange(const std::string& request) {
         if (n <= 0) break;
         out.append(buf, static_cast<size_t>(n));
     }
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return out;
 }
 
@@ -57,40 +57,40 @@ bool starts_with(const std::string& s, const std::string& prefix) { return s.rfi
 
 std::atomic<int> g_opened{0};
 
-routing::Middleware require_token() {
-    return [](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> w) {
+orbit::routing::Middleware require_token() {
+    return [](orbit::http::HttpRequest& req, std::shared_ptr<orbit::http::ResponseWriter> w) {
         auto it = req.headers.find("X-Token");
         if (it != req.headers.end() && it->second == "let-me-in") return true;
-        http::HttpResponse res;
-        res.status(http::HttpStatus::Unauthorized).send("401 Unauthorized");
+        orbit::http::HttpResponse res;
+        res.status(orbit::http::HttpStatus::Unauthorized).send("401 Unauthorized");
         w->send(std::move(res));
         return false;
     };
 }
 
-void on_open(http::websocket::WebSocketConnection&) { ++g_opened; }
+void on_open(orbit::http::websocket::WebSocketConnection&) { ++g_opened; }
 
 } // namespace
 
 class WebSocketHandshakeTest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
-        app = new server::App(cfg);
+        app = new orbit::server::App(cfg);
 
         app->ws("/open", on_open);
         app->ws("/route-guarded", {require_token()}, on_open);
-        app->ws("/origin-guarded", {middleware::require_origin({"https://good.example"})}, on_open);
-        app->group("/group", [](routing::Router& r) {
+        app->ws("/origin-guarded", {orbit::middleware::require_origin({"https://good.example"})}, on_open);
+        app->group("/group", [](orbit::routing::Router& r) {
             r.use(require_token());
             r.ws("/ws", on_open);
         });
-        app->get("/ping", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/ping", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("pong");
             w->send(std::move(res));
         });
@@ -107,7 +107,7 @@ protected:
     }
 };
 
-server::App* WebSocketHandshakeTest::app = nullptr;
+orbit::server::App* WebSocketHandshakeTest::app = nullptr;
 std::thread WebSocketHandshakeTest::server_thread;
 
 TEST_F(WebSocketHandshakeTest, OpenRouteUpgrades) {

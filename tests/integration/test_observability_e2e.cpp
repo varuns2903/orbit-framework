@@ -18,13 +18,13 @@ namespace {
 constexpr uint16_t kPort = 8133;
 
 std::string exchange(const std::string& request) {
-    network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    orbit::network::socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        network::close_socket(fd);
+        orbit::network::close_socket(fd);
         return "";
     }
 #ifdef _WIN32
@@ -42,7 +42,7 @@ std::string exchange(const std::string& request) {
         if (n <= 0) break;
         out.append(buf, static_cast<size_t>(n));
     }
-    network::close_socket(fd);
+    orbit::network::close_socket(fd);
     return out;
 }
 
@@ -64,43 +64,43 @@ bool is_hex(const std::string& s, size_t len) {
 
 std::mutex g_mutex;
 std::vector<std::string> g_lines;
-std::vector<middleware::Span> g_spans;
+std::vector<orbit::middleware::Span> g_spans;
 
 } // namespace
 
 class ObservabilityTest : public ::testing::Test {
 protected:
-    static server::App* app;
+    static orbit::server::App* app;
     static std::thread server_thread;
 
     static void SetUpTestSuite() {
-        utils::Logger::set_format(utils::LogFormat::Json);
-        utils::Logger::set_sink([](const std::string& line) {
+        orbit::utils::Logger::set_format(orbit::utils::LogFormat::Json);
+        orbit::utils::Logger::set_sink([](const std::string& line) {
             std::lock_guard<std::mutex> lock(g_mutex);
             g_lines.push_back(line);
         });
 
-        config::ServerConfig cfg = orbit::test::server_config();
+        orbit::config::ServerConfig cfg = orbit::test::server_config();
         cfg.port = kPort;
         cfg.log_format = "json";
-        app = new server::App(cfg);
-        app->use(middleware::request_id());
-        middleware::TracingOptions tracing;
-        tracing.on_span_end = [](const middleware::Span& span) {
+        app = new orbit::server::App(cfg);
+        app->use(orbit::middleware::request_id());
+        orbit::middleware::TracingOptions tracing;
+        tracing.on_span_end = [](const orbit::middleware::Span& span) {
             std::lock_guard<std::mutex> lock(g_mutex);
             g_spans.push_back(span);
         };
-        app->use(middleware::tracing(tracing));
-        app->use(middleware::access_log());
-        app->use(middleware::Metrics::track());
+        app->use(orbit::middleware::tracing(tracing));
+        app->use(orbit::middleware::access_log());
+        app->use(orbit::middleware::Metrics::track());
         app->enable_metrics();
-        app->get("/items", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/items", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             res.set_body("items");
             w->send(std::move(res));
         });
-        app->get("/stream", [](http::HttpRequest&, std::shared_ptr<http::ResponseWriter> w) {
-            http::HttpResponse res;
+        app->get("/stream", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter> w) {
+            orbit::http::HttpResponse res;
             w->send_headers(res);
             w->write_chunk("a");
             w->end();
@@ -115,8 +115,8 @@ protected:
         app->stop();
         if (server_thread.joinable()) server_thread.join();
         delete app;
-        utils::Logger::set_sink(nullptr);
-        utils::Logger::set_format(utils::LogFormat::Text);
+        orbit::utils::Logger::set_sink(nullptr);
+        orbit::utils::Logger::set_format(orbit::utils::LogFormat::Text);
     }
 
     // Access-log lines containing `needle`.
@@ -130,7 +130,7 @@ protected:
     }
 };
 
-server::App* ObservabilityTest::app = nullptr;
+orbit::server::App* ObservabilityTest::app = nullptr;
 std::thread ObservabilityTest::server_thread;
 
 TEST_F(ObservabilityTest, RequestIdIsGeneratedReusedOrReplaced) {
@@ -154,8 +154,8 @@ TEST_F(ObservabilityTest, TraceparentIsContinuedOrStarted) {
 
     std::lock_guard<std::mutex> lock(g_mutex);
     ASSERT_GE(g_spans.size(), 2u);
-    const middleware::Span* continued = nullptr;
-    const middleware::Span* root = nullptr;
+    const orbit::middleware::Span* continued = nullptr;
+    const orbit::middleware::Span* root = nullptr;
     for (const auto& s : g_spans) {
         if (s.parent_span_id == "00f067aa0ba902b7") continued = &s;
         else if (s.parent_span_id.empty()) root = &s;
@@ -208,14 +208,14 @@ TEST_F(ObservabilityTest, MetricsHaveStatusLabelsAndLatencyBuckets) {
 
 TEST(LoggerFormatTest, FieldsAreEscapedAndQuoted) {
     std::vector<std::string> lines;
-    utils::Logger::set_sink([&lines](const std::string& l) { lines.push_back(l); });
+    orbit::utils::Logger::set_sink([&lines](const std::string& l) { lines.push_back(l); });
 
-    utils::Logger::set_format(utils::LogFormat::Json);
-    utils::Logger::log_fields(utils::log_levels::kError, "dir/file.cpp", 7, "say \"hi\"\n", {{"k", "a\tb"}});
-    utils::Logger::set_format(utils::LogFormat::Text);
-    utils::Logger::log_fields(utils::log_levels::kError, "dir/file.cpp", 7, "plain", {{"user", "two words"}, {"n", "3"}});
+    orbit::utils::Logger::set_format(orbit::utils::LogFormat::Json);
+    orbit::utils::Logger::log_fields(orbit::utils::log_levels::kError, "dir/file.cpp", 7, "say \"hi\"\n", {{"k", "a\tb"}});
+    orbit::utils::Logger::set_format(orbit::utils::LogFormat::Text);
+    orbit::utils::Logger::log_fields(orbit::utils::log_levels::kError, "dir/file.cpp", 7, "plain", {{"user", "two words"}, {"n", "3"}});
 
-    utils::Logger::set_sink(nullptr);
+    orbit::utils::Logger::set_sink(nullptr);
     ASSERT_EQ(lines.size(), 2u);
     EXPECT_NE(lines[0].find(R"("msg":"say \"hi\"\n")"), std::string::npos) << lines[0];
     EXPECT_NE(lines[0].find(R"("k":"a\tb")"), std::string::npos) << lines[0];

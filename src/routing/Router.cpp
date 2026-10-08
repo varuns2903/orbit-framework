@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <sstream>
 
-namespace routing {
+namespace orbit::routing {
 
 std::string Router::make_route_key(http::HttpMethod method, std::string_view path) const {
     std::string method_str;

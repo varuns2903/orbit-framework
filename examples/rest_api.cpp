@@ -9,11 +9,11 @@
 #include <memory>
 #include <string>
 
-using namespace server;
-using namespace http;
-using namespace middleware;
-using namespace database;
-using namespace concurrency;
+using namespace orbit::server;
+using namespace orbit::http;
+using namespace orbit::middleware;
+using namespace orbit::database;
+using namespace orbit::concurrency;
 
 // C++20 Coroutine Handler Example
 Task coro_db_handler(HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> writer, std::shared_ptr<PostgresClient> pg_client) {
@@ -43,7 +43,7 @@ Task coro_db_handler(HttpRequest& /*req*/, std::shared_ptr<ResponseWriter> write
 }
 
 int main() {
-    config::ServerConfig config;
+    orbit::config::ServerConfig config;
     config.port = 8081;
 
     App app(config);

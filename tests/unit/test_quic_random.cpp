@@ -11,7 +11,7 @@ TEST(QuicRandomTest, BytesDifferAcrossCalls) {
     std::set<std::string> seen;
     for (int i = 0; i < 1000; ++i) {
         std::array<uint8_t, 16> buf{};
-        ASSERT_TRUE(server::detail::quic_random_bytes(buf.data(), buf.size()));
+        ASSERT_TRUE(orbit::server::detail::quic_random_bytes(buf.data(), buf.size()));
         seen.emplace(reinterpret_cast<const char*>(buf.data()), buf.size());
     }
     EXPECT_EQ(seen.size(), 1000u);
@@ -24,11 +24,11 @@ TEST(QuicRandomTest, NotTheUnseededRandSequence) {
     srand(1);
     for (auto& b : libc) b = static_cast<uint8_t>(rand() % 256);
     std::array<uint8_t, 8> ours{};
-    ASSERT_TRUE(server::detail::quic_random_bytes(ours.data(), ours.size()));
+    ASSERT_TRUE(orbit::server::detail::quic_random_bytes(ours.data(), ours.size()));
     EXPECT_NE(ours, libc);
 }
 
 TEST(QuicRandomTest, ZeroLengthIsFine) {
-    EXPECT_TRUE(server::detail::quic_random_bytes(nullptr, 0));
+    EXPECT_TRUE(orbit::server::detail::quic_random_bytes(nullptr, 0));
 }
 #endif // ORBIT_ENABLE_HTTP3

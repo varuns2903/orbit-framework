@@ -23,9 +23,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::string boundary(input.substr(0, newline));
     std::string_view body = input.substr(newline + 1);
 
-    (void)http::MultipartForm::parse("multipart/form-data; boundary=" + boundary, body);
+    (void)orbit::http::MultipartForm::parse("multipart/form-data; boundary=" + boundary, body);
 
-    http::MultipartStreamParser parser(
+    orbit::http::MultipartStreamParser parser(
         boundary, [](const std::string&, const std::string&) {},
         [](const std::string&, const std::string&, const std::string&, const std::string& path) {
             std::error_code ec;

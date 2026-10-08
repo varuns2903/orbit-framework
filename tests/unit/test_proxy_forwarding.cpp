@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 #include <orbit/middleware/Proxy.hpp>
 
-using middleware::detail::ChunkedDecoder;
-using middleware::detail::ProxiedRequest;
-using middleware::detail::build_upstream_request;
+using orbit::middleware::detail::ChunkedDecoder;
+using orbit::middleware::detail::ProxiedRequest;
+using orbit::middleware::detail::build_upstream_request;
 
 namespace {
 

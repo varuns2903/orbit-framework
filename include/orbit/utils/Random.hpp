@@ -1,4 +1,5 @@
 #pragma once
+#include <orbit/legacy_namespaces.hpp>
 #include <openssl/crypto.h>
 #include <openssl/rand.h>
 #include <stdexcept>
@@ -6,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace utils {
+namespace orbit::utils {
 
 /**
  * @brief Returns @p num_bytes of cryptographically secure randomness, hex-encoded.
