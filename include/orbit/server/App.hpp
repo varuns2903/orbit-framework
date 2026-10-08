@@ -1,4 +1,6 @@
 #pragma once
+#include <vector>
+#include <thread>
 
 #include <orbit/server/Listener.hpp>
 #include <orbit/server/EventLoop.hpp>
@@ -211,10 +213,16 @@ public:
      * @return Reference to the ThreadPool.
      * @throws std::runtime_error If the server is not started.
      */
+    /**
+     * @brief Open connections on each event loop (one entry per loop; empty
+     *        before listen()). See ServerConfig::event_loops.
+     */
+    std::vector<size_t> connections_per_event_loop() const;
+
     concurrency::ThreadPool& get_thread_pool() {
         std::lock_guard<std::mutex> lock(loop_mutex_);
-        if (!event_loop_) throw std::runtime_error("Server not started");
-        return event_loop_->get_thread_pool();
+        if (!thread_pool_) throw std::runtime_error("Server not started");
+        return *thread_pool_;
     }
 
     /**
@@ -314,16 +322,28 @@ public:
 private:
     config::ServerConfig config_;
     routing::Router router_;
-    std::unique_ptr<Listener> listener_;
+    // One listening socket per event loop, all on the same port (SO_REUSEPORT).
+    // Declared before the loops, which refer to them.
+    std::vector<std::unique_ptr<Listener>> listeners_;
 #ifdef ORBIT_ENABLE_HTTP3
     std::unique_ptr<network::UdpSocket> quic_socket_;
     std::unique_ptr<QuicConnectionManager> quic_manager_;
 #endif
     std::unique_ptr<network::TlsContext> tls_context_;
-    std::unique_ptr<EventLoop> event_loop_;
-    // listen() creates event_loop_ on the server thread while stop() may run
+    // event_loops_[0] runs on the thread that called listen() and handles
+    // signals, TLS reloads and QUIC; the others run on loop_threads_.
+    // max_connections budget shared by the loops when there are several.
+    // Declared before the loops, which refer to it.
+    std::atomic<size_t> open_connections_{0};
+    std::vector<std::unique_ptr<EventLoop>> event_loops_;
+    std::vector<std::thread> loop_threads_;
+    // Shared by every loop. Declared after the loops so it is destroyed, and
+    // its workers joined, before them: queued handlers hold connections that
+    // use a loop's proactor.
+    std::unique_ptr<concurrency::ThreadPool> thread_pool_;
+    // listen() creates the loops on the server thread while stop() may run
     // on any thread (a test, a signal, an admin endpoint).
-    std::mutex loop_mutex_;
+    mutable std::mutex loop_mutex_;
     bool stop_requested_ = false; // guarded by loop_mutex_; a stop before the loop exists still applies
     unsigned seen_signal_seq_ = 0; // loop thread only
     std::chrono::steady_clock::time_point next_tls_check_{}; // loop thread only

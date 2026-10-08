@@ -42,6 +42,7 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                       << "      --backlog <num>           Listen backlog (default: SOMAXCONN)\n"
                       << "      --max-connections <num>   Connections served at once, 0 = unlimited (default: 0)\n"
                       << "  -t, --threads <num>           Number of worker threads (default: 4)\n"
+                      << "      --event-loops <num>       Event loops accepting and serving connections, Linux only (default: 1)\n"
                       << "  -l, --log-level <level>       Log level (DEBUG, INFO, WARN, ERROR) (default: INFO)\n"
                       << "      --log-format <format>     text or json (default: text)\n"
                       << "  -s, --static-dir <dir>        Directory for static files\n"
@@ -64,6 +65,8 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             cfg.max_connections = static_cast<size_t>(parse_integer(arg, argv[++i], 0, kNoLimit));
         } else if ((arg == "-t" || arg == "--threads") && i + 1 < argc) {
             cfg.worker_threads = static_cast<size_t>(parse_integer(arg, argv[++i], 1, kNoLimit));
+        } else if (arg == "--event-loops" && i + 1 < argc) {
+            cfg.event_loops = static_cast<size_t>(parse_integer(arg, argv[++i], 1, 1024));
         } else if (arg == "--log-format" && i + 1 < argc) {
             cfg.log_format = argv[++i];
         } else if ((arg == "-l" || arg == "--log-level") && i + 1 < argc) {

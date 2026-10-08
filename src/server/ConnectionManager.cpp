@@ -51,6 +51,7 @@ void ConnectionManager::remove_connection(int fd) {
         network::shutdown_socket(fd);
         // Cancel all pending asynchronous operations in the Proactor
         proactor_.remove(fd);
+        if (on_removed_) on_removed_();
         // The shared_ptr will be destroyed here, triggering Connection::~Connection
     }
 }

@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <memory>
 #include <mutex>
+#include <functional>
 #include <atomic>
 
 namespace server {
@@ -33,6 +34,9 @@ public:
      */
     void set_timeouts(const ConnectionTimeouts& timeouts) { timeouts_ = timeouts; }
     void set_limits(const ConnectionLimits& limits) { limits_ = limits; }
+
+    /// Called once for each connection removed (from the thread removing it).
+    void set_on_removed(std::function<void()> callback) { on_removed_ = std::move(callback); }
 
     /// Event-loop thread: pings every WebSocket connection.
     void ping_websockets();
@@ -77,6 +81,7 @@ private:
     
     std::unordered_map<int, std::shared_ptr<Connection>> connections_;
     mutable std::mutex map_mutex_;
+    std::function<void()> on_removed_;
     size_t max_body_size_;
     network::TlsContext* tls_context_;
 };

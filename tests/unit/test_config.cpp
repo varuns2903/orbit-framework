@@ -131,6 +131,11 @@ TEST(ServerConfigParseTest, ShortFlags) {
     EXPECT_EQ(cfg.http_version, HttpVersion::Http3);
 }
 
+TEST(ServerConfigParseTest, EventLoops) {
+    EXPECT_EQ(parse_args({}).event_loops, 1u);
+    EXPECT_EQ(parse_args({"--event-loops", "8"}).event_loops, 8u);
+}
+
 TEST(ServerConfigParseTest, HttpVersionOneOneCanBeChosen) {
     EXPECT_EQ(parse_args({"-v", "2"}).http_version, HttpVersion::Http2);
     EXPECT_EQ(parse_args({"-v", "2", "-v", "1.1"}).http_version, HttpVersion::Http1_1);
@@ -214,6 +219,10 @@ TEST_F(ServerConfigParseDeathTest, NegativeCountsAreRejected) {
     EXPECT_EXIT(parse_args({"--max-body-size", "-1"}), testing::ExitedWithCode(1), "Invalid value for --max-body-size");
     EXPECT_EXIT(parse_args({"--backlog", "-1"}), testing::ExitedWithCode(1), "Invalid value for --backlog");
     EXPECT_EXIT(parse_args({"--tls-reload-interval", "-1"}), testing::ExitedWithCode(1), "Invalid value for --tls-reload-interval");
+}
+
+TEST_F(ServerConfigParseDeathTest, ZeroEventLoopsIsRejected) {
+    EXPECT_EXIT(parse_args({"--event-loops", "0"}), testing::ExitedWithCode(1), "Invalid value for --event-loops");
 }
 
 TEST_F(ServerConfigParseDeathTest, ZeroWorkerThreadsIsRejected) {

@@ -33,7 +33,11 @@ public:
      * @param quic_socket The QUIC UDP socket (optional).
      * @param quic_manager The QUIC connection manager (optional).
      */
-    EventLoop(Listener& listener, const routing::Router& router, const config::ServerConfig& config, network::TlsContext* tls_context = nullptr, network::UdpSocket* quic_socket = nullptr, QuicConnectionManager* quic_manager = nullptr);
+    /// @param thread_pool Runs request handlers; shared by every loop of an App
+    ///        and must outlive this loop's connections.
+    EventLoop(Listener& listener, const routing::Router& router, const config::ServerConfig& config,
+              concurrency::ThreadPool& thread_pool, network::TlsContext* tls_context = nullptr,
+              network::UdpSocket* quic_socket = nullptr, QuicConnectionManager* quic_manager = nullptr);
     
     /**
      * @brief Starts the event loop.
@@ -77,6 +81,15 @@ public:
      */
     concurrency::ThreadPool& get_thread_pool() { return thread_pool_; }
 
+    /// Makes max_connections one budget shared by the loops of an App: `open`
+    /// counts their connections, and a loop reserves a slot in it before each
+    /// accept, so concurrent loops cannot together exceed the limit. Call
+    /// before run(); `open` must outlive the loop.
+    void share_connection_limit(std::atomic<size_t>* open);
+
+    /// Connections this loop currently holds.
+    size_t connection_count() const { return connection_manager_.get_connection_count(); }
+
 private:
     void do_accept();
     void do_read_quic();
@@ -84,6 +97,8 @@ private:
     void on_accepted(network::socket_t client_fd, const sockaddr_in& addr);
     // Accepts whatever else is already queued on the listener (POSIX).
     void accept_pending();
+    void wait_and_accept(); // accept with a reserved slot (shared limit)
+    bool reserve_slot();
     // Stops arming accept until `until` (and while at max_connections).
     void pause_accepting(std::chrono::steady_clock::time_point until);
     void resume_accepting_if_ready();
@@ -92,7 +107,7 @@ private:
     Listener& listener_;
     TimerManager timer_manager_;
     std::unique_ptr<network::Proactor> proactor_;
-    concurrency::ThreadPool thread_pool_;
+    concurrency::ThreadPool& thread_pool_;
     ConnectionManager connection_manager_;
     network::UdpSocket* quic_socket_;
     QuicConnectionManager* quic_manager_;
@@ -112,6 +127,8 @@ private:
     void drain_step();
 
     size_t max_connections_ = 0;
+
+    std::atomic<size_t>* shared_open_ = nullptr; // see share_connection_limit()
     bool nonblocking_accepts_ = true; // accepted sockets must match the proactor's own accept
     // Loop-thread only: accept is not armed while paused (fd limit or
     // max_connections reached); new connections wait in the backlog.
