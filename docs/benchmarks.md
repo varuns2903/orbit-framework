@@ -52,6 +52,12 @@ differences being measured. Fix the CPU frequency governor to `performance`
 where you can, and keep the defaults for anything you publish so the
 results stay comparable.
 
+The same script also runs on a GitHub-hosted runner: Actions → *Benchmarks*
+→ Run workflow (frameworks, trials and duration are inputs). The table lands
+in the run summary and as the `benchmark-results` artifact. A hosted runner
+is a shared 4-vCPU VM, so treat its figures as a reproducible sanity check
+with a wide spread, not as the published result.
+
 ## Results
 
 **Not published yet.** The comparison needs a quiet, dedicated machine; the
