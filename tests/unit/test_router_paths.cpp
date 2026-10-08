@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <orbit/routing/Router.hpp>
-#include <orbit/server/App.hpp>
+#include <orbit/openapi/OpenApi.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/http/ResponseWriter.hpp>
@@ -543,12 +543,14 @@ TEST(RouterNotFoundTest, CustomHandlerAnswersUnknownPathsButNot405) {
     EXPECT_EQ(body_of(dispatch(r2, HttpMethod::GET, "/anything")), "group-404");
 }
 
+// The registry directly, not through App: App.hpp brings in <windows.h> on
+// Windows, whose DELETE macro breaks HttpMethod::DELETE in this file.
 TEST(RouterWildcardTest, OpenApiShowsWildcardsAsPathParameters) {
-    orbit::server::App app{orbit::config::ServerConfig{}};
-    app.get("/files/*path", [](HttpRequest&, std::shared_ptr<ResponseWriter>) {});
-    app.get("/assets/*", [](HttpRequest&, std::shared_ptr<ResponseWriter>) {});
-    app.get("/users/:id", [](HttpRequest&, std::shared_ptr<ResponseWriter>) {});
-    std::string spec = app.openapi().generate_swagger_json("t", "1");
+    orbit::openapi::OpenApiRegistry registry;
+    registry.register_route(HttpMethod::GET, "/files/*path", {});
+    registry.register_route(HttpMethod::GET, "/assets/*", {});
+    registry.register_route(HttpMethod::GET, "/users/:id", {});
+    std::string spec = registry.generate_swagger_json("t", "1");
     EXPECT_NE(spec.find("\"/files/{path}\""), std::string::npos) << spec;
     EXPECT_NE(spec.find("\"/assets/{path}\""), std::string::npos) << spec;
     EXPECT_NE(spec.find("\"/users/{id}\""), std::string::npos) << spec;
