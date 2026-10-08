@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — now go through the router's error handling (`on_error`, else a 500), like
   those from synchronous handlers. Exceptions after the response was sent, or
   from coroutines that are not handlers, are logged.
+- **Memory no longer grows under sustained load** (#168). A cancelled timer
+  stayed in `TimerManager`'s queue until its old deadline, and every request
+  re-arms its connection's timer, so the queue grew with the request rate
+  (about 400 MB after 30 s of load, with throughput dropping 28% once the
+  first deadlines passed). Cancelling now frees the timer, and the queue is
+  rebuilt when cancelled entries dominate it, so it stays proportional to
+  the number of connections.
 
 ## [v2.0.0] - 2026-10-08
 
