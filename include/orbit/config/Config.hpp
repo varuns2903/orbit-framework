@@ -39,6 +39,9 @@ struct ServerConfig {
     // A connection stays on the loop that accepted it, TLS included. Handlers
     // still run on the worker_threads pool. Linux only: elsewhere 1 is used.
     size_t event_loops{1};
+    // Logging is process-wide (utils::Logger). An App applies these only when
+    // they differ from the defaults, so creating an App never resets a level
+    // or format set earlier by Logger::init()/set_format() or by another App.
     std::string log_level{"INFO"};
     std::string log_format{"text"};  // "text" or "json" (one JSON object per line)
     std::string static_dir{"./public"};

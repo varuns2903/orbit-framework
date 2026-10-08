@@ -165,7 +165,13 @@ void Logger::log_fields(LogLevel level, const char* file, int line, const std::s
     if (g_sink) {
         g_sink(out.str());
     } else {
-        std::cout << out.str() << "\n";
+        // One write per line, flushed: when stdout is a file or a pipe
+        // (containers, systemd, `> app.log`) it is block-buffered, so lines
+        // used to appear late and the last ones were lost on a crash.
+        std::string text = out.str();
+        text += '\n';
+        std::fwrite(text.data(), 1, text.size(), stdout);
+        std::fflush(stdout);
     }
 }
 
