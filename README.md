@@ -512,14 +512,14 @@ Orbit is built as a modular stack of composable layers:
 ├─────────────────────────────────────┤
 │   Middleware Chain (CORS, Auth...)  │
 ├─────────────────────────────────────┤
-│   Router (Radix Trie + Hash Map)   │
+│   Router (Radix Trie + Hash Map)    │
 ├─────────────────────────────────────┤
-│  HTTP/1.1 │ HTTP/2 │ HTTP/3 (QUIC) │
+│  HTTP/1.1 │ HTTP/2 │ HTTP/3 (QUIC)  │
 ├─────────────────────────────────────┤
-│  TLS/SSL  │ WebSockets │ SSE       │
+│  TLS/SSL  │ WebSockets │ SSE        │
 ├─────────────────────────────────────┤
 │  Proactor Event Engine              │
-│  io_uring │ epoll │ kqueue │ IOCP  │
+│  io_uring │ epoll │ kqueue │ IOCP   │
 └─────────────────────────────────────┘
 ```
 
