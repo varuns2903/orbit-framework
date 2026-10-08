@@ -22,7 +22,7 @@ Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performan
 
 | Feature | Details |
 |---------|---------|
-| **Fast** | ~61k req/s on a trivial keep-alive workload ([measured](docs/benchmarks.md)); asynchronous Proactor pattern over `io_uring`, `epoll`, `kqueue`, and Windows IOCP |
+| **Fast** | ~106k req/s on a trivial keep-alive workload with 6 event loops, about 40% of Drogon and Crow on the same machine ([measured](docs/benchmarks.md); closing the gap is [#163](https://github.com/varuns2903/orbit-framework/issues/163)); asynchronous Proactor pattern over `io_uring`, `epoll`, `kqueue`, and Windows IOCP |
 | **Modern Protocols** | HTTP/1.1, HTTP/2, **HTTP/3 & QUIC** — no external proxy needed |
 | **Express-Style API** | Routing, middleware chains, route groups, and dynamic parameters |
 | **Magic Returns** | Return `std::string`, structs, or `nlohmann::json` from handlers — Orbit auto-serializes |
