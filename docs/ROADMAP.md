@@ -27,7 +27,7 @@ and [CONTRIBUTING.md](../CONTRIBUTING.md).
 - [x] **19. Support Linux, Windows, and macOS** 
 - [x] **9. HTTP/1.1** — parsed incrementally by [llhttp](https://github.com/nodejs/llhttp), strictly (RFC 9112; request-smuggling framing is rejected).
 - [x] **10. HTTP/2**
-- [x] **11. HTTP/3** (QUIC)
+- [x] **11. HTTP/3** (QUIC) — experimental; see [http3.md](http3.md)
 - [x] **12. REST** (Router & Middleware)
 - [x] **56. Magic Return Values & Auto-JSON HTTP Handlers (FastAPI-style)**
 - [x] **13. WebSockets**

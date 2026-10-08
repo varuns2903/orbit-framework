@@ -102,12 +102,12 @@ use `--parallel 1` or the `debug-nosan` preset.
 | Option | Default | Purpose |
 |--------|---------|---------|
 | `ORBIT_BUILD_TESTS` | `ON` | Build the GoogleTest suite |
-| `ORBIT_ENABLE_HTTP3` | `ON` | HTTP/3 and QUIC support |
+| `ORBIT_ENABLE_HTTP3` | `ON` | HTTP/3 and QUIC support (experimental) |
 | `ORBIT_ENABLE_REDIS` | `ON` | Redis client |
 | `ORBIT_ENABLE_POSTGRES` | `ON` | PostgreSQL client |
 | `ORBIT_ENABLE_MARIADB` | `ON` | MySQL/MariaDB client |
 | `ORBIT_ENABLE_MONGODB` | `ON` | MongoDB client |
-| `ORBIT_ENABLE_GRPC` | `OFF` | gRPC server wrapper |
+| `ORBIT_ENABLE_GRPC` | `OFF` | gRPC server wrapper (experimental) |
 | `ENABLE_SANITIZERS` | `ON` | ASan + UBSan |
 | `ORBIT_ENABLE_COVERAGE` | `OFF` | gcov/lcov instrumentation |
 

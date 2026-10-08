@@ -40,7 +40,7 @@ Orbit uses [Semantic Versioning](https://semver.org/) with one caveat for 1.x.
 
 Not breaking: adding overloads, members, options or headers; internal
 classes in `detail` namespaces; anything documented as experimental
-(currently HTTP/3).
+(currently HTTP/3 and the gRPC wrapper).
 
 ## What a release contains
 

@@ -1,6 +1,6 @@
 # Getting Started with Orbit
 
-Orbit is a high-performance C++20 HTTP/3 web framework built on top of asynchronous kernel event loops (`io_uring` and `epoll`). It aims to provide Express.js-like ergonomics with raw C++ performance.
+Orbit is a high-performance C++20 web framework (HTTP/1.1, HTTP/2, and experimental HTTP/3) built on top of asynchronous kernel event loops (`io_uring` and `epoll`). It aims to provide Express.js-like ergonomics with raw C++ performance.
 
 ## Prerequisites
 
