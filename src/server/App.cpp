@@ -36,8 +36,11 @@ void signal_handler(int signum) {
 
 App::App(const config::ServerConfig& config) : config_(config) {
     network::initialize_platform_networking();
-    utils::Logger::init(config.log_level);
-    utils::Logger::set_format(config.log_format);
+    // The logger is process-wide. Only settings that differ from the
+    // defaults are applied, so an App with a default config cannot undo an
+    // earlier Logger::init() (or another App's --log-level) by being created.
+    if (config.log_level != config::ServerConfig{}.log_level) utils::Logger::init(config.log_level);
+    if (config.log_format != config::ServerConfig{}.log_format) utils::Logger::set_format(config.log_format);
     if (!config_.ssl_cert.empty() && !config_.ssl_key.empty()) {
         tls_context_ = std::make_unique<network::TlsContext>(
             config::TlsCertificate{config_.ssl_cert, config_.ssl_key}, config_.sni_certificates, config_.http_version);

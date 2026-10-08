@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`examples/orm_server.cpp` failed on its second request), and
   `update_async(model)` rewrote the key. Rows are also read by the model's
   field types, so a string column holding `"42"` no longer fails to load.
+- **Log lines are written immediately** (#190). The logger never flushed, so
+  when stdout was a file or pipe (Docker, systemd, a redirect) lines appeared
+  in blocks and the last ones were lost on a crash; each line is now flushed.
+- **Creating an App no longer resets the log level and format** (#190). An App
+  applies `log_level` / `log_format` only when they differ from the defaults,
+  so a default-configured App (or a second App in the process) cannot undo an
+  earlier `Logger::init()` or `--log-level`.
 
 ## [v2.0.0] - 2026-10-08
 

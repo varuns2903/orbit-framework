@@ -33,6 +33,16 @@ carries their IDs.
 {"ts":"2026-10-04T12:00:00.123Z","level":"info","source":"Observability.cpp:142","msg":"GET /items 200 0.41ms","method":"GET","path":"/items","status":"200","bytes":"5","duration_ms":"0.41","client_ip":"203.0.113.7","user_agent":"curl/8.5","request_id":"9f2c…","trace_id":"4bf9…"}
 ```
 
+Each line is written and flushed as it is logged, so logs appear immediately
+in `docker logs`, journald or a redirected file, and nothing is lost if the
+process crashes.
+
+The level and format are **process-wide**. An `App` applies `log_level` and
+`log_format` only when they differ from the defaults (`INFO`, `text`), so
+creating an App never resets a level set earlier with
+`orbit::utils::Logger::init()` / `set_format()` or by another App. Several Apps
+in one process share one setting: the last one that sets it explicitly wins.
+
 Log your own structured events with `orbit::utils::Logger::log_fields(level, __FILE__,
 __LINE__, "message", {{"key", "value"}})`. `orbit::utils::Logger::set_sink()` sends
 lines somewhere other than stdout (it is called under the logger's lock, so it
