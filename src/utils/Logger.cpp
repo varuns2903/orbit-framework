@@ -168,9 +168,9 @@ void Logger::log_fields(LogLevel level, const char* file, int line, const std::s
         // One write per line, flushed: when stdout is a file or a pipe
         // (containers, systemd, `> app.log`) it is block-buffered, so lines
         // used to appear late and the last ones were lost on a crash.
-        std::string line = out.str();
-        line += '\n';
-        std::fwrite(line.data(), 1, line.size(), stdout);
+        std::string text = out.str();
+        text += '\n';
+        std::fwrite(text.data(), 1, text.size(), stdout);
         std::fflush(stdout);
     }
 }
