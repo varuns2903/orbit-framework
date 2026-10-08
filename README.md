@@ -559,6 +559,7 @@ cmake -B build \
 | [📊 Test Coverage](docs/coverage.md) | Measured coverage, per-file gaps, and how to reproduce |
 | [🔭 Observability](docs/observability.md) | JSON logs, access logs, request IDs, tracing, metrics |
 | [⚡ Benchmarks](docs/benchmarks.md) | Throughput figures, methodology, and their limits |
+| [🧭 Performance bottlenecks](docs/performance/bottlenecks.md) | Where Orbit loses time today, the alternatives and their trade-offs |
 | [🏷️ Release Process](docs/release-process.md) | Versioning policy, release contents, verifying signatures |
 
 ---
