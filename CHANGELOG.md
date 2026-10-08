@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `-DORBIT_ENABLE_HTTP3=ON` (vcpkg port: `orbit-framework[http3]`) and
   run with `--http-version 3`. The Docker image still enables it.
 
+### Fixed
+
+- **Debug builds of applications that use Orbit through FetchContent or
+  `add_subdirectory` link again** (#185). `ENABLE_SANITIZERS` now defaults to
+  `OFF` when Orbit is not the top-level project, and when it is turned on the
+  sanitizer link flags reach the application through `OrbitFramework::core`.
+  A new CI job builds such an application in Debug.
+
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1

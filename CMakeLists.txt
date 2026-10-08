@@ -58,7 +58,16 @@ option(ORBIT_ENABLE_HTTP3 "Enable experimental HTTP/3 and QUIC support" OFF)
 option(ORBIT_ENABLE_BROTLI "Enable brotli response compression (middleware::compress)" ON)
 option(ORBIT_ENABLE_ZSTD "Enable zstd response compression (middleware::compress)" ON)
 option(ORBIT_ENABLE_GRPC "Enable gRPC support" OFF)
-option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior Sanitizers" ON)
+# Sanitizers are for developing Orbit itself. When Orbit is a dependency
+# (FetchContent / add_subdirectory) they default to off: instrumenting
+# server_core forces the sanitizer runtime on the application, which is the
+# application's choice to make.
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    set(_orbit_sanitizers_default ON)
+else()
+    set(_orbit_sanitizers_default OFF)
+endif()
+option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior Sanitizers (Debug builds)" ${_orbit_sanitizers_default})
 option(ORBIT_ENABLE_TSAN "Build with ThreadSanitizer (Debug only; replaces ASan/UBSan)" OFF)
 option(ORBIT_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 
@@ -71,13 +80,18 @@ endif()
 
 # Optional sanitizers for debug builds to catch memory leaks and UB.
 # ThreadSanitizer cannot be combined with ASan, so it takes precedence.
+# add_compile_options()/add_link_options() reach only targets in this
+# directory tree; ORBIT_SANITIZER_LINK_FLAGS is also put on server_core's
+# INTERFACE below, so an application that links Orbit links the runtime too.
+set(ORBIT_SANITIZER_LINK_FLAGS "")
 if(ORBIT_ENABLE_TSAN AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
     add_link_options(-fsanitize=thread)
+    set(ORBIT_SANITIZER_LINK_FLAGS -fsanitize=thread)
 elseif(ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-
     add_link_options(-fsanitize=address,undefined)
+    set(ORBIT_SANITIZER_LINK_FLAGS -fsanitize=address,undefined)
 endif()
 
 find_package(OpenSSL REQUIRED)
@@ -250,6 +264,9 @@ if(ORBIT_ENABLE_MONGODB)
 endif()
 
 add_library(server_core ${SERVER_SOURCES})
+if(ORBIT_SANITIZER_LINK_FLAGS)
+    target_link_options(server_core INTERFACE ${ORBIT_SANITIZER_LINK_FLAGS})
+endif()
 
 # These macros gate conditional members in public headers — App.hpp declares
 # quic_socket_ and quic_manager_ only under ORBIT_ENABLE_HTTP3, for instance.

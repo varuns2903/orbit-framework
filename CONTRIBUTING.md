@@ -108,7 +108,7 @@ use `--parallel 1` or the `debug-nosan` preset.
 | `ORBIT_ENABLE_MARIADB` | `ON` | MySQL/MariaDB client |
 | `ORBIT_ENABLE_MONGODB` | `ON` | MongoDB client |
 | `ORBIT_ENABLE_GRPC` | `OFF` | gRPC server wrapper (experimental) |
-| `ENABLE_SANITIZERS` | `ON` | ASan + UBSan |
+| `ENABLE_SANITIZERS` | `ON` (`OFF` when Orbit is a dependency) | ASan + UBSan |
 | `ORBIT_ENABLE_COVERAGE` | `OFF` | gcov/lcov instrumentation |
 
 Turning off subsystems you are not touching makes builds substantially faster.
