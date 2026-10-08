@@ -1,3 +1,6 @@
+# No symbol export macros yet: a shared build would export nothing.
+vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
+
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO varuns2903/orbit-framework

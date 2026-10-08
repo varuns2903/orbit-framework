@@ -4,7 +4,7 @@
   "description": "Asynchronous, middleware-driven C++20 web framework with HTTP/1.1, HTTP/2, HTTP/3 and WebSocket support",
   "homepage": "https://github.com/varuns2903/orbit-framework",
   "license": "MIT",
-  "supports": "!uwp",
+  "supports": "!uwp & !android & !(windows & x86)",
   "dependencies": [
     {
       "name": "curl",
