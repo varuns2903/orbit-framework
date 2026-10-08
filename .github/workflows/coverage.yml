@@ -95,7 +95,8 @@ jobs:
           -DORBIT_ENABLE_COVERAGE=ON \
           -DENABLE_SANITIZERS=OFF \
           -DORBIT_BUILD_EXAMPLES=OFF \
-          -DORBIT_ENABLE_GRPC=OFF
+          -DORBIT_ENABLE_GRPC=OFF \
+          -DORBIT_ENABLE_HTTP3=ON
 
     - name: Build
       run: cmake --build build_cov --parallel 4

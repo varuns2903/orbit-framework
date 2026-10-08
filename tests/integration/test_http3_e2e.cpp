@@ -423,6 +423,9 @@ TEST_F(Http3Test, ConcurrentStreamsOnOneConnection) {
 #else
 
 TEST(Http3Test, DisabledInThisBuild) {
+    // CI sets ORBIT_REQUIRE_HTTP3_TESTS where HTTP/3 must be exercised; a
+    // build that left it out would otherwise skip these tests silently.
+    if (std::getenv("ORBIT_REQUIRE_HTTP3_TESTS")) FAIL() << "built with ORBIT_ENABLE_HTTP3=OFF";
     GTEST_SKIP() << "built with ORBIT_ENABLE_HTTP3=OFF";
 }
 

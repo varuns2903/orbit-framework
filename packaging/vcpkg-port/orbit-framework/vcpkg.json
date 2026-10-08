@@ -33,7 +33,6 @@
   ],
   "default-features": [
     "brotli",
-    "http3",
     "mariadb",
     "mongodb",
     "postgres",
@@ -53,7 +52,7 @@
       ]
     },
     "http3": {
-      "description": "HTTP/3 and QUIC",
+      "description": "Experimental HTTP/3 and QUIC",
       "dependencies": [
         "nghttp3",
         {

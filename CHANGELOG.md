@@ -5,6 +5,16 @@ All notable changes to the Orbit Framework are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **HTTP/3 is off by default.** It is experimental, so `ORBIT_ENABLE_HTTP3`
+  now defaults to `OFF` and `http3` is no longer a default vcpkg feature;
+  default builds no longer compile ngtcp2 and nghttp3. To keep HTTP/3, build
+  with `-DORBIT_ENABLE_HTTP3=ON` (vcpkg port: `orbit-framework[http3]`) and
+  run with `--http-version 3`. The Docker image still enables it.
+
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1
@@ -480,6 +490,7 @@ project, so **upgrading from v1.4.0 or earlier is strongly recommended**.
 - CMake build system with install/export rules.
 - `nlohmann/json` integration for JSON request/response handling.
 
+[Unreleased]: https://github.com/varuns2903/orbit-framework/compare/v2.0.0...HEAD
 [v2.0.0]: https://github.com/varuns2903/orbit-framework/compare/v1.6.0...v2.0.0
 [v1.6.0]: https://github.com/varuns2903/orbit-framework/compare/v1.5.1...v1.6.0
 [v1.5.1]: https://github.com/varuns2903/orbit-framework/compare/v1.5.0...v1.5.1

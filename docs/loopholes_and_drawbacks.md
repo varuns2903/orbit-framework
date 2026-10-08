@@ -38,11 +38,13 @@ the first loop.
 
 ## 3. Large default dependency set
 
-PostgreSQL, MariaDB, MongoDB, Redis and HTTP/3 support are enabled by
-default. Turning one off (`-DORBIT_ENABLE_POSTGRES=OFF`, ...) removes it from
-the Orbit build, but `vcpkg.json` still lists every backend's library, so
-vcpkg installs them all on the first build (making them optional manifest
-features is tracked in #36).
+PostgreSQL, MariaDB, MongoDB, Redis, brotli and zstd are enabled by default;
+HTTP/3 and gRPC are experimental and off unless enabled. With vcpkg, the
+manifest features follow the `ORBIT_ENABLE_*` options (#36), so turning a
+backend off (`-DORBIT_ENABLE_POSTGRES=OFF`, ...) also stops vcpkg from
+building its library. The default set still takes a while on a first build;
+`-DORBIT_ENABLE_POSTGRES=OFF -DORBIT_ENABLE_MARIADB=OFF -DORBIT_ENABLE_MONGODB=OFF`
+(or the `core` preset) gives a minimal build.
 
 ## 4. Custom protocol parsers
 
