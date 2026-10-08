@@ -5,12 +5,22 @@ current state of `main`; it is updated when a limitation is fixed. For
 security reporting see [SECURITY.md](../SECURITY.md), and for planned work
 see [ROADMAP.md](ROADMAP.md).
 
-## 1. HTTP/3 is experimental
+## 1. HTTP/3 and gRPC are experimental
 
-The QUIC transport (ngtcp2/nghttp3) completes handshakes, but
-`QuicHttp3Session` does not route requests yet: every HTTP/3 request gets a
-fixed placeholder response, and file responses are not supported. Serve
-production traffic over HTTP/1.1 or HTTP/2.
+**HTTP/3 (QUIC).** HTTP/3 requests go through the same router as HTTP/1.1
+and HTTP/2, including files and streamed responses, but HTTP/3 has only been
+tested by Orbit's own test suite (libcurl with HTTP/3). It has not been
+checked against browsers or other HTTP/3 implementations. QUIC runs on the
+first event loop only, the TCP listener sends no `Alt-Svc`, and 0-RTT is off.
+Serve production traffic over HTTP/1.1 or HTTP/2. Details:
+[http3.md](http3.md).
+
+**gRPC.** `server::GrpcServer` (`ORBIT_ENABLE_GRPC`, off by default) is a
+minimal pass-through to `grpc::ServerBuilder` with insecure credentials only,
+checked by a smoke test. It does not share Orbit's event loops, TLS
+configuration or middleware.
+
+Both may change in any release until they are declared stable.
 
 ## 2. Event loops are opt-in, and Linux-only beyond one
 

@@ -2,7 +2,7 @@
   
   <h1>🚀 Orbit Framework</h1>
   
-  <p><b>A fast, asynchronous C++20 web framework with HTTP/3, WebSockets, and a built-in ORM</b></p>
+  <p><b>A fast, asynchronous C++20 web framework with HTTP/2, WebSockets, a built-in ORM, and experimental HTTP/3</b></p>
   
   <p>
     <a href="https://github.com/varuns2903/orbit-framework/actions"><img src="https://img.shields.io/github/actions/workflow/status/varuns2903/orbit-framework/ci.yml?style=for-the-badge&label=CI&logo=github" /></a>
@@ -16,14 +16,14 @@
 
 ---
 
-Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performance (`io_uring` / `epoll` / `kqueue` / `IOCP`) and next-gen protocols (HTTP/3 + QUIC). Write async web servers, REST APIs, and real-time apps — without sacrificing the speed of C++.
+Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performance (`io_uring` / `epoll` / `kqueue` / `IOCP`) and next-gen protocols (HTTP/2, and experimental HTTP/3 + QUIC). Write async web servers, REST APIs, and real-time apps — without sacrificing the speed of C++.
 
 ## ⚡ Why Orbit?
 
 | Feature | Details |
 |---------|---------|
 | **Fast** | ~106k req/s on a trivial keep-alive workload with 6 event loops, about 40% of Drogon and Crow on the same machine ([measured](docs/benchmarks.md); closing the gap is [#163](https://github.com/varuns2903/orbit-framework/issues/163)); asynchronous Proactor pattern over `io_uring`, `epoll`, `kqueue`, and Windows IOCP |
-| **Modern Protocols** | HTTP/1.1, HTTP/2, **HTTP/3 & QUIC** — no external proxy needed |
+| **Modern Protocols** | HTTP/1.1 and HTTP/2, plus **HTTP/3 & QUIC (experimental)** — no external proxy needed |
 | **Express-Style API** | Routing, middleware chains, route groups, and dynamic parameters |
 | **Magic Returns** | Return `std::string`, structs, or `nlohmann::json` from handlers — Orbit auto-serializes |
 | **Built-in ORM** | Expression DSL: `Col("age") >= 18` builds SQL with bound parameters, never spliced values |
@@ -407,7 +407,7 @@ cmake --build build --parallel
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `ORBIT_ENABLE_HTTP3` | `ON` | HTTP/3 and QUIC (needs ngtcp2 + nghttp3) |
+| `ORBIT_ENABLE_HTTP3` | `ON` | HTTP/3 and QUIC, **experimental** (needs ngtcp2 + nghttp3; enable at runtime with `--http-version 3`) |
 | `ORBIT_ENABLE_REDIS` | `ON` | Redis client |
 | `ORBIT_ENABLE_POSTGRES` | `ON` | PostgreSQL client |
 | `ORBIT_ENABLE_MARIADB` | `ON` | MySQL/MariaDB client |
@@ -553,7 +553,7 @@ cmake -B build \
 | [🔀 Proxy & Load Balancing](docs/proxy.md) | Reverse proxy, connection pooling, and load balancing |
 | [🌐 HTTP Client](docs/http-client.md) | Outbound requests with coroutines, timeouts, TLS verification |
 | [🔌 WebSockets](docs/websockets.md) | RFC 6455 WebSockets and EventRouter |
-| [⚡ HTTP/3 & QUIC](docs/http3.md) | Enabling and using HTTP/3 |
+| [⚡ HTTP/3 & QUIC](docs/http3.md) | Enabling and using HTTP/3 (experimental) |
 | [📋 Changelog](CHANGELOG.md) | Release history and breaking changes |
 | [🧭 Migration Guide](docs/migration.md) | Upgrading between releases, with before/after code |
 | [📊 Test Coverage](docs/coverage.md) | Measured coverage, per-file gaps, and how to reproduce |
