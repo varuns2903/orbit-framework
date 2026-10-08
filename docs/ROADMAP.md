@@ -14,7 +14,7 @@ and [CONTRIBUTING.md](../CONTRIBUTING.md).
 - [x] **2. Provide clean `find_package()` support**
 - [x] **3. Export CMake targets** (e.g., `OrbitFramework::core`)
 - [x] **4. Support CMake `FetchContent`** seamlessly
-- [ ] **5. Publish to vcpkg** — a registry port is drafted at `packaging/vcpkg-port/`, but it has not been submitted to the upstream vcpkg registry. `vcpkg install orbit-framework` does not work yet. Consuming Orbit through vcpkg *manifest mode* (the root `vcpkg.json`) does work. **Help wanted: [#20](https://github.com/varuns2903/orbit-framework/issues/20).**
+- [ ] **5. Publish to vcpkg** — the port at `packaging/vcpkg-port/` builds offline with feature flags and is checked in CI by a consumer project, but it is not in the upstream vcpkg registry yet, so `vcpkg install orbit-framework` needs `--overlay-ports`. Consuming Orbit through vcpkg *manifest mode* (the root `vcpkg.json`) does work. **Help wanted: [#20](https://github.com/varuns2903/orbit-framework/issues/20).**
 - [ ] **6. Publish to Conan** — `conanfile.py` builds Orbit locally via `conan install`/`conan create`, but the package has not been submitted to ConanCenter. **Help wanted.**
 - [x] **7. Automatically manage dependencies**
 - [x] **18. Provide prebuilt binaries/releases**

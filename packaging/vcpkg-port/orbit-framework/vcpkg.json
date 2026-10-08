@@ -1,31 +1,26 @@
 {
   "name": "orbit-framework",
-  "version": "1.6.0",
-  "description": "A blazing fast, asynchronous, and middleware-driven C++20 HTTP/3 web framework",
+  "version": "2.0.0",
+  "description": "Asynchronous, middleware-driven C++20 web framework with HTTP/1.1, HTTP/2, HTTP/3 and WebSocket support",
   "homepage": "https://github.com/varuns2903/orbit-framework",
   "license": "MIT",
   "supports": "!uwp",
   "dependencies": [
-    "openssl",
-    "zlib",
-    "libpq",
-    "curl",
-    "libmariadb",
-    "mongo-c-driver",
-    "llhttp",
-    "nghttp2",
-    "nghttp3",
-    "brotli",
-    "zstd",
     {
-      "name": "ngtcp2",
-      "features": ["openssl"]
+      "name": "curl",
+      "features": [
+        "http2"
+      ]
     },
-    "pkgconf",
+    "inja",
     {
       "name": "liburing",
       "platform": "linux"
     },
+    "llhttp",
+    "nghttp2",
+    "openssl",
+    "pkgconf",
     {
       "name": "vcpkg-cmake",
       "host": true
@@ -33,12 +28,65 @@
     {
       "name": "vcpkg-cmake-config",
       "host": true
-    }
+    },
+    "zlib"
+  ],
+  "default-features": [
+    "brotli",
+    "http3",
+    "mariadb",
+    "mongodb",
+    "postgres",
+    "zstd"
   ],
   "features": {
+    "brotli": {
+      "description": "brotli response compression",
+      "dependencies": [
+        "brotli"
+      ]
+    },
     "grpc": {
-      "description": "gRPC support",
-      "dependencies": ["grpc"]
+      "description": "gRPC server wrapper (experimental)",
+      "dependencies": [
+        "grpc"
+      ]
+    },
+    "http3": {
+      "description": "HTTP/3 and QUIC",
+      "dependencies": [
+        "nghttp3",
+        {
+          "name": "ngtcp2",
+          "features": [
+            "openssl"
+          ]
+        }
+      ]
+    },
+    "mariadb": {
+      "description": "MySQL/MariaDB client",
+      "dependencies": [
+        "libmariadb"
+      ]
+    },
+    "mongodb": {
+      "description": "MongoDB client",
+      "dependencies": [
+        "mongo-c-driver"
+      ]
+    },
+    "postgres": {
+      "description": "PostgreSQL client",
+      "dependencies": [
+        "libpq"
+      ]
+    },
+    "zstd": {
+      "description": "zstd response compression",
+      "dependencies": [
+        "zstd"
+      ]
     }
   }
 }
