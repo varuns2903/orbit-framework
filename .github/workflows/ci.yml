@@ -88,7 +88,7 @@ jobs:
 
     - name: Configure CMake
       run: |
-        cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_GRPC=OFF
+        cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_GRPC=OFF -DORBIT_ENABLE_HTTP3=ON
 
     - name: Build Framework
       run: cmake --build build --config Release --parallel 4

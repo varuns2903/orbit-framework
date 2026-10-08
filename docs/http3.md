@@ -12,7 +12,8 @@ and [nghttp3](https://github.com/ngtcp2/nghttp3), next to its HTTP/1.1 and HTTP/
 
 HTTP/3 needs:
 
-- a build with `ORBIT_ENABLE_HTTP3=ON` (the default; with vcpkg, the `http3` feature), and
+- a build with `-DORBIT_ENABLE_HTTP3=ON` (off by default; with vcpkg this also selects the `http3`
+  manifest feature, which brings in ngtcp2 and nghttp3), and
 - a TLS certificate and key, because QUIC always uses TLS 1.3.
 
 Then select HTTP/3 with `--http-version 3`, or `http_version` in code:

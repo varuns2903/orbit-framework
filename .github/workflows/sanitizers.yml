@@ -66,7 +66,7 @@ jobs:
     - name: Configure (Debug)
       run: |
         cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
-          -DCMAKE_BUILD_TYPE=Debug -DORBIT_ENABLE_GRPC=OFF -DORBIT_BUILD_EXAMPLES=OFF \
+          -DCMAKE_BUILD_TYPE=Debug -DORBIT_ENABLE_GRPC=OFF -DORBIT_ENABLE_HTTP3=ON -DORBIT_BUILD_EXAMPLES=OFF \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ${{ matrix.flags }}
 
     - name: Build

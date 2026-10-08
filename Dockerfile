@@ -64,6 +64,7 @@ RUN mkdir -p build && cd build && \
           -DOPENSSL_ROOT_DIR=/usr/local/quictls \
           -DORBIT_BUILD_TESTS=OFF \
           -DENABLE_SANITIZERS=OFF \
+          -DORBIT_ENABLE_HTTP3=ON \
           .. && \
     make -j$(nproc)
 

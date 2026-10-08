@@ -316,8 +316,8 @@ vcpkg install orbit-framework --overlay-ports=packaging/vcpkg-port
 #   target_link_libraries(app PRIVATE OrbitFramework::core)
 ```
 
-Default features: `postgres`, `mariadb`, `mongodb`, `http3`, `brotli`, `zstd`;
-`grpc` is opt-in (`orbit-framework[grpc]`), and `orbit-framework[core]` builds
+Default features: `postgres`, `mariadb`, `mongodb`, `brotli`, `zstd`;
+`http3` and `grpc` are experimental and opt-in (`orbit-framework[http3]`, `orbit-framework[grpc]`), and `orbit-framework[core]` builds
 without any of them.
 
 ---
@@ -399,7 +399,7 @@ sudo apt install build-essential cmake pkg-config libssl-dev zlib1g-dev \
      libcurl4-openssl-dev libnghttp2-dev liburing-dev libpq-dev \
      libmariadb-dev libmongoc-dev
 
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DORBIT_ENABLE_HTTP3=OFF
+cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
 
@@ -407,7 +407,7 @@ cmake --build build --parallel
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `ORBIT_ENABLE_HTTP3` | `ON` | HTTP/3 and QUIC, **experimental** (needs ngtcp2 + nghttp3; enable at runtime with `--http-version 3`) |
+| `ORBIT_ENABLE_HTTP3` | `OFF` | HTTP/3 and QUIC, **experimental** (needs ngtcp2 + nghttp3; enable at runtime with `--http-version 3`) |
 | `ORBIT_ENABLE_REDIS` | `ON` | Redis client |
 | `ORBIT_ENABLE_POSTGRES` | `ON` | PostgreSQL client |
 | `ORBIT_ENABLE_MARIADB` | `ON` | MySQL/MariaDB client |
@@ -530,13 +530,12 @@ Orbit is built as a modular stack of composable layers:
 └─────────────────────────────────────┘
 ```
 
-All features are **modular** — disable what you don't need via CMake flags:
+All features are **modular** — turn subsystems on or off with CMake flags:
 
 ```bash
 cmake -B build \
-  -DORBIT_ENABLE_HTTP3=OFF \
   -DORBIT_ENABLE_MONGODB=OFF \
-  -DORBIT_ENABLE_GRPC=OFF
+  -DORBIT_ENABLE_HTTP3=ON     # experimental, off by default
 ```
 
 ---

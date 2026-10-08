@@ -40,7 +40,7 @@
       ]
     },
     "http3": {
-      "description": "HTTP/3 and QUIC (ORBIT_ENABLE_HTTP3)",
+      "description": "Experimental HTTP/3 and QUIC (ORBIT_ENABLE_HTTP3)",
       "dependencies": [
         "nghttp3",
         {
@@ -85,7 +85,6 @@
     "postgres",
     "mariadb",
     "mongodb",
-    "http3",
     "brotli",
     "zstd"
   ]
