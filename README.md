@@ -415,7 +415,7 @@ cmake --build build --parallel
 | `ORBIT_ENABLE_GRPC` | `OFF` | gRPC server wrapper (**experimental**, see [#22](https://github.com/varuns2903/orbit-framework/issues/22)) |
 | `ORBIT_BUILD_TESTS` | `ON` | Test suite (downloads GoogleTest) |
 | `ORBIT_BUILD_EXAMPLES` | `ON` | Example servers |
-| `ENABLE_SANITIZERS` | `ON` | ASan + UBSan in Debug builds |
+| `ENABLE_SANITIZERS` | `ON` when building Orbit itself, `OFF` as a dependency | ASan + UBSan in Debug builds; when on, applications linking Orbit get the sanitizer runtime too |
 | `ORBIT_ENABLE_COVERAGE` | `OFF` | gcov instrumentation |
 | `BUILD_SHARED_LIBS` | `OFF` | Shared instead of static library |
 | `ENABLE_FUZZING` | `OFF` | libFuzzer targets (requires Clang) |

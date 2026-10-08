@@ -1,0 +1,90 @@
+name: Consumer Build
+
+# Builds an application that pulls Orbit in with FetchContent (the way
+# `orbit new --fetch` sets it up), in Debug, and runs it. Debug is where
+# Orbit's own sanitizer settings used to break consumers' links (#185).
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "CMakeLists.txt"
+      - "OrbitFrameworkConfig.cmake.in"
+      - "vcpkg.json"
+      - "tests/consumer/**"
+      - "packaging/vcpkg-port/test/**"
+      - ".github/workflows/consumer.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "CMakeLists.txt"
+      - "OrbitFrameworkConfig.cmake.in"
+      - "vcpkg.json"
+      - "tests/consumer/**"
+      - "packaging/vcpkg-port/test/**"
+      - ".github/workflows/consumer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetchcontent:
+    name: FetchContent consumer (Debug, sanitizers ${{ matrix.sanitizers }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # default: what a new project gets; ON: an application that opts in.
+        sanitizers: [ default, "ON" ]
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v7
+
+    - name: Cache vcpkg dependencies
+      uses: actions/cache@v6
+      with:
+        path: |
+          consumer/vcpkg_installed
+          vcpkg/downloads
+        key: ${{ runner.os }}-vcpkg-consumer-v1-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-consumer-v1-
+
+    - name: Setup vcpkg (pinned to builtin-baseline)
+      run: |
+        mkdir -p vcpkg
+        cd vcpkg
+        if [ ! -d ".git" ]; then
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+        fi
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
+        ./bootstrap-vcpkg.sh -disableMetrics
+
+    # VCPKG_MANIFEST_DIR: the consumer resolves Orbit's dependencies from
+    # Orbit's own manifest, as a scaffolded project's vcpkg.json would.
+    - name: Configure
+      run: |
+        extra=""
+        if [ "${{ matrix.sanitizers }}" = "ON" ]; then extra="-DENABLE_SANITIZERS=ON"; fi
+        cmake -B consumer -S tests/consumer \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DORBIT_SOURCE_DIR="$GITHUB_WORKSPACE" \
+          -DVCPKG_MANIFEST_DIR="$GITHUB_WORKSPACE" \
+          -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+          $extra
+
+    - name: Build
+      run: cmake --build consumer --parallel 4
+
+    - name: Run
+      env:
+        ASAN_OPTIONS: detect_leaks=0
+      run: timeout 60 ./consumer/consumer
