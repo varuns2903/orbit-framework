@@ -58,8 +58,8 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
     connection_manager_.set_limits(limits);
     websocket_ping_interval_ = config.websocket_ping_interval;
     last_websocket_ping_ = std::chrono::steady_clock::now();
-    
-    do_accept();
+    // Accepting starts in run(): the App may still configure the loop
+    // (share_connection_limit) after constructing it.
 
 #ifdef ORBIT_ENABLE_HTTP3
     if (quic_socket_ && quic_manager_) {
@@ -71,6 +71,7 @@ EventLoop::EventLoop(Listener& listener, const routing::Router& router, const co
 
 void EventLoop::run() {
     LOG_INFO("Event loop started with ConnectionManager (HTTP Keep-Alive enabled)!");
+    if (is_running_ && is_accepting_) do_accept();
 
     while (is_running_) {
         try {
@@ -160,7 +161,65 @@ void EventLoop::stop_accepting() {
     LOG_INFO("Event loop stopped accepting new connections. Waiting for active connections to drain...");
 }
 
+void EventLoop::share_connection_limit(std::atomic<size_t>* open) {
+    shared_open_ = open;
+    connection_manager_.set_on_removed([open] { open->fetch_sub(1); });
+}
+
+// Takes a slot in the shared budget if one is free.
+bool EventLoop::reserve_slot() {
+    size_t open = shared_open_->load();
+    while (open < max_connections_) {
+        if (shared_open_->compare_exchange_weak(open, open + 1)) return true;
+    }
+    return false;
+}
+
+// With a limit shared by several loops, checking the count and then
+// accepting races with the other loops (each sees room and all accept). So
+// wait until the listener is readable, reserve a slot, and only then accept;
+// a connection that finds no slot stays queued in the kernel backlog.
+void EventLoop::wait_and_accept() {
+#ifndef _WIN32
+    proactor_->async_wait_read(listener_.fd(), [this]() {
+        for (int i = 0; i < 64 && is_accepting_ && !accept_paused_; ++i) {
+            if (!reserve_slot()) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_limit_warning_ >= std::chrono::seconds(10)) {
+                    last_limit_warning_ = now;
+                    LOG_WARN("max_connections (" << max_connections_ << ") reached; new connections wait in the backlog");
+                }
+                pause_accepting(now); // resume_accepting_if_ready() checks back
+                return;
+            }
+            sockaddr_in addr{};
+            network::socklen_t len = sizeof(addr);
+            network::socket_t fd = ::accept(listener_.fd(), reinterpret_cast<sockaddr*>(&addr), &len);
+            if (fd < 0) {
+                shared_open_->fetch_sub(1); // nothing was accepted
+                int err = errno;
+                if (err == EMFILE || err == ENFILE) {
+                    LOG_WARN("Accept failed: out of file descriptors; pausing accept for 100 ms");
+                    pause_accepting(std::chrono::steady_clock::now() + std::chrono::milliseconds(100));
+                    return;
+                }
+                break; // EAGAIN: the queue is drained (or another loop took it)
+            }
+            int flags = fcntl(fd, F_GETFL, 0);
+            fcntl(fd, F_SETFL, nonblocking_accepts_ ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK));
+            fcntl(fd, F_SETFD, fcntl(fd, F_GETFD, 0) | FD_CLOEXEC);
+            on_accepted(fd, addr);
+        }
+        if (is_accepting_ && !accept_paused_) wait_and_accept();
+    });
+#endif
+}
+
 void EventLoop::do_accept() {
+    if (shared_open_) {
+        wait_and_accept();
+        return;
+    }
     proactor_->async_accept(listener_.fd(), [this](network::socket_t client_fd, sockaddr_in addr) {
         // Capture errno before anything else (logging included) can change it.
         const int accept_error = static_cast<int>(client_fd) < 0 ? network::get_last_socket_error() : 0;
@@ -189,7 +248,7 @@ void EventLoop::do_accept() {
 
 bool EventLoop::at_connection_limit() const {
     if (max_connections_ == 0) return false;
-    const size_t open = total_connections_ ? total_connections_() : connection_manager_.get_connection_count();
+    const size_t open = shared_open_ ? shared_open_->load() : connection_manager_.get_connection_count();
     return open >= max_connections_;
 }
 

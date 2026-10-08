@@ -332,6 +332,9 @@ private:
     std::unique_ptr<network::TlsContext> tls_context_;
     // event_loops_[0] runs on the thread that called listen() and handles
     // signals, TLS reloads and QUIC; the others run on loop_threads_.
+    // max_connections budget shared by the loops when there are several.
+    // Declared before the loops, which refer to it.
+    std::atomic<size_t> open_connections_{0};
     std::vector<std::unique_ptr<EventLoop>> event_loops_;
     std::vector<std::thread> loop_threads_;
     // Shared by every loop. Declared after the loops so it is destroyed, and

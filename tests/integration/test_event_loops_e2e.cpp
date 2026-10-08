@@ -6,6 +6,7 @@
 #include <orbit/http/HttpResponse.hpp>
 #include "../utils/TestConfig.hpp"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
 #include <chrono>
@@ -178,17 +179,24 @@ TEST(EventLoopsTest, ConnectionsAreSpreadAndAllServed) {
 }
 
 TEST(EventLoopsTest, MaxConnectionsIsOneLimitAcrossLoops) {
+    constexpr int kClients = 32;
     Server s(8162, 4, /*max_connections=*/3);
     std::vector<int> fds;
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < kClients; ++i) {
         int fd = connect_to(s.port()); // beyond the limit these wait in the backlog
         ASSERT_GE(fd, 0);
         fds.push_back(fd);
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    EXPECT_LE(total(s.app().connections_per_event_loop()), 3u);
+    // Four loops accept concurrently; checking the count and then accepting
+    // let them overshoot together. Sample it while they compete.
+    size_t most = 0;
+    for (int i = 0; i < 15; ++i) {
+        most = std::max(most, total(s.app().connections_per_event_loop()));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT_LE(most, 3u);
 
-    // Closing the accepted ones lets the waiting ones in; all get answered.
+    // Each finished connection frees a slot for a waiting one; all get answered.
     int answered = 0;
     for (int fd : fds) {
         send_all(fd, "GET /ping HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n");
@@ -197,7 +205,12 @@ TEST(EventLoopsTest, MaxConnectionsIsOneLimitAcrossLoops) {
         if (read_until(fd, "pong", 1).find("pong") != std::string::npos) ++answered;
         ::close(fd);
     }
-    EXPECT_EQ(answered, 8);
+    EXPECT_EQ(answered, kClients);
+    // Released slots are counted back: the budget is free again.
+    for (int i = 0; i < 50 && total(s.app().connections_per_event_loop()) != 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT_EQ(total(s.app().connections_per_event_loop()), 0u);
 }
 
 TEST(EventLoopsTest, GracefulShutdownDrainsEveryLoop) {

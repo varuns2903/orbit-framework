@@ -294,15 +294,10 @@ void App::listen() {
                 *listeners_[i], router_, config_, *thread_pool_, tls_context_.get(),
                 i == 0 ? pass_quic_socket : nullptr, i == 0 ? pass_quic_manager : nullptr));
         }
-        if (loop_count > 1) {
+        if (loop_count > 1 && config_.max_connections > 0) {
             // max_connections is one limit for the whole App.
-            for (auto& loop : event_loops_) {
-                loop->set_connection_counter([this] {
-                    size_t total = 0;
-                    for (const auto& l : event_loops_) total += l->connection_count();
-                    return total;
-                });
-            }
+            open_connections_ = 0;
+            for (auto& loop : event_loops_) loop->share_connection_limit(&open_connections_);
         }
 
         // Act on signals from the loop thread, where logging and forking are safe.

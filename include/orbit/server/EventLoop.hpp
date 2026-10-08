@@ -81,10 +81,11 @@ public:
      */
     concurrency::ThreadPool& get_thread_pool() { return thread_pool_; }
 
-    /// Counts connections across every loop of the App, so max_connections
-    /// stays one limit when there are several loops. Unset, only this loop's
-    /// connections count.
-    void set_connection_counter(std::function<size_t()> total) { total_connections_ = std::move(total); }
+    /// Makes max_connections one budget shared by the loops of an App: `open`
+    /// counts their connections, and a loop reserves a slot in it before each
+    /// accept, so concurrent loops cannot together exceed the limit. Call
+    /// before run(); `open` must outlive the loop.
+    void share_connection_limit(std::atomic<size_t>* open);
 
     /// Connections this loop currently holds.
     size_t connection_count() const { return connection_manager_.get_connection_count(); }
@@ -96,6 +97,8 @@ private:
     void on_accepted(network::socket_t client_fd, const sockaddr_in& addr);
     // Accepts whatever else is already queued on the listener (POSIX).
     void accept_pending();
+    void wait_and_accept(); // accept with a reserved slot (shared limit)
+    bool reserve_slot();
     // Stops arming accept until `until` (and while at max_connections).
     void pause_accepting(std::chrono::steady_clock::time_point until);
     void resume_accepting_if_ready();
@@ -125,7 +128,7 @@ private:
 
     size_t max_connections_ = 0;
 
-    std::function<size_t()> total_connections_;
+    std::atomic<size_t>* shared_open_ = nullptr; // see share_connection_limit()
     bool nonblocking_accepts_ = true; // accepted sockets must match the proactor's own accept
     // Loop-thread only: accept is not armed while paused (fd limit or
     // max_connections reached); new connections wait in the backlog.
