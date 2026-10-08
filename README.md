@@ -303,15 +303,22 @@ cmake -B build -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
 The dependency set is pinned with `builtin-baseline`, so everyone resolves the
 same versions.
 
-**As a vcpkg port** — a port is drafted under `packaging/vcpkg-port/` but has
-**not** been submitted upstream, so `vcpkg install orbit-framework` does not
-resolve yet. To try the draft as an overlay:
+**As a vcpkg port** — the port in `packaging/vcpkg-port/` builds Orbit the
+way the vcpkg registry would (no network during the build, features mapped to
+`ORBIT_ENABLE_*`) and is checked in CI by building a consumer against it. It is
+not in the upstream registry yet ([#20](https://github.com/varuns2903/orbit-framework/issues/20)),
+so use it as an overlay:
 
 ```bash
 vcpkg install orbit-framework --overlay-ports=packaging/vcpkg-port
+# then, in your CMakeLists.txt:
+#   find_package(OrbitFramework CONFIG REQUIRED)
+#   target_link_libraries(app PRIVATE OrbitFramework::core)
 ```
 
-This path is unvalidated — see [#20](https://github.com/varuns2903/orbit-framework/issues/20).
+Default features: `postgres`, `mariadb`, `mongodb`, `http3`, `brotli`, `zstd`;
+`grpc` is opt-in (`orbit-framework[grpc]`), and `orbit-framework[core]` builds
+without any of them.
 
 ---
 

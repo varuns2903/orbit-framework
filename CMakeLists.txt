@@ -100,7 +100,8 @@ if(ORBIT_ENABLE_MARIADB)
     if(unofficial-libmariadb_FOUND)
         set(MARIADB_LIBRARIES unofficial::libmariadb)
     else()
-        pkg_search_module(MARIADB REQUIRED libmariadb mariadb)
+        pkg_search_module(MARIADB REQUIRED IMPORTED_TARGET libmariadb mariadb)
+        set(MARIADB_LIBRARIES PkgConfig::MARIADB)
     endif()
 endif()
 
@@ -121,7 +122,8 @@ if(ORBIT_ENABLE_MONGODB)
     elseif(TARGET mongoc::mongoc)
         set(MONGOC_LIBRARIES mongoc::mongoc)
     else()
-        pkg_search_module(MONGOC REQUIRED libmongoc-1.0 mongoc-1.0 mongoc2)
+        pkg_search_module(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0 mongoc-1.0 mongoc2)
+        set(MONGOC_LIBRARIES PkgConfig::MONGOC)
     endif()
 endif()
 
@@ -144,15 +146,25 @@ if(ORBIT_ENABLE_HTTP3)
     pkg_check_modules(NGHTTP3 REQUIRED IMPORTED_TARGET libnghttp3)
 endif()
 
-include(FetchContent)
-FetchContent_Declare(
-  inja
-  GIT_REPOSITORY https://github.com/pantor/inja.git
-  GIT_TAG        v3.4.0
-)
-set(INJA_BUILD_TESTS OFF CACHE BOOL "Disable inja tests" FORCE)
-set(BUILD_BENCHMARK OFF CACHE BOOL "Disable inja benchmark" FORCE)
-FetchContent_MakeAvailable(inja)
+# inja (templates in src/http/HttpResponse.cpp) is fetched at configure time by
+# default. Package managers build without network access, so they set
+# ORBIT_USE_SYSTEM_INJA to use an installed inja instead (the vcpkg port does).
+option(ORBIT_USE_SYSTEM_INJA "Use an installed inja (find_package) instead of fetching it" OFF)
+if(ORBIT_USE_SYSTEM_INJA)
+    find_package(inja CONFIG REQUIRED)
+    set(ORBIT_INJA_TARGET pantor::inja)
+else()
+    include(FetchContent)
+    FetchContent_Declare(
+      inja
+      GIT_REPOSITORY https://github.com/pantor/inja.git
+      GIT_TAG        v3.4.0
+    )
+    set(INJA_BUILD_TESTS OFF CACHE BOOL "Disable inja tests" FORCE)
+    set(BUILD_BENCHMARK OFF CACHE BOOL "Disable inja benchmark" FORCE)
+    FetchContent_MakeAvailable(inja)
+    set(ORBIT_INJA_TARGET inja)
+endif()
 
 
 # Core static library
@@ -277,11 +289,11 @@ target_link_libraries(server_core
         # llhttp appears in no public header (Http1Parser uses a pimpl); for a
         # static build it is still part of the export's link interface.
         ${ORBIT_LLHTTP_TARGET}
-        # inja is a FetchContent target used only by src/http/HttpResponse.cpp
-        # and appears in no public header. Linking it PUBLIC put pantor::inja in
+        # inja is header-only, used only by src/http/HttpResponse.cpp, and
+        # appears in no public header. Linking it PUBLIC put pantor::inja in
         # the installed export, where consumers cannot resolve it; BUILD_INTERFACE
         # keeps it out of the exported link interface entirely.
-        $<BUILD_INTERFACE:inja>
+        $<BUILD_INTERFACE:${ORBIT_INJA_TARGET}>
 )
 
 if(ORBIT_ENABLE_POSTGRES)
@@ -299,26 +311,16 @@ if(ORBIT_ENABLE_POSTGRES)
 endif()
 if(ORBIT_ENABLE_MARIADB)
     target_link_libraries(server_core PUBLIC ${MARIADB_LIBRARIES})
-    target_link_directories(server_core PUBLIC $<BUILD_INTERFACE:${MARIADB_LIBRARY_DIRS}>)
-    target_include_directories(server_core PUBLIC $<BUILD_INTERFACE:${MARIADB_INCLUDE_DIRS}>)
 endif()
 if(ORBIT_ENABLE_MONGODB)
     target_link_libraries(server_core PUBLIC ${MONGOC_LIBRARIES})
-    target_link_directories(server_core PUBLIC $<BUILD_INTERFACE:${MONGOC_LIBRARY_DIRS}>)
-    target_include_directories(server_core PUBLIC $<BUILD_INTERFACE:${MONGOC_INCLUDE_DIRS}>)
 endif()
 if(ORBIT_ENABLE_HTTP3)
-    target_link_libraries(server_core PUBLIC ${NGTCP2_LIBRARIES} ${NGTCP2_CRYPTO_LIBRARIES} ${NGHTTP3_LIBRARIES})
-    target_link_directories(server_core PUBLIC 
-        $<BUILD_INTERFACE:${NGTCP2_LIBRARY_DIRS}>
-        $<BUILD_INTERFACE:${NGTCP2_CRYPTO_LIBRARY_DIRS}>
-        $<BUILD_INTERFACE:${NGHTTP3_LIBRARY_DIRS}>
-    )
-    target_include_directories(server_core PUBLIC 
-        $<BUILD_INTERFACE:${NGTCP2_INCLUDE_DIRS}>
-        $<BUILD_INTERFACE:${NGTCP2_CRYPTO_INCLUDE_DIRS}>
-        $<BUILD_INTERFACE:${NGHTTP3_INCLUDE_DIRS}>
-    )
+    # Imported targets, not ${NGTCP2_LIBRARIES}: those are bare names such as
+    # "nghttp3" whose -L directories never reached the installed export, so a
+    # consumer of an installed Orbit failed to link. OrbitFrameworkConfig.cmake
+    # recreates these targets (likewise PkgConfig::MARIADB and ::MONGOC above).
+    target_link_libraries(server_core PUBLIC PkgConfig::NGTCP2 PkgConfig::NGTCP2_CRYPTO PkgConfig::NGHTTP3)
 endif()
 
 if(ORBIT_ENABLE_BROTLI)

@@ -1,0 +1,103 @@
+name: vcpkg Port
+
+# Builds packaging/vcpkg-port the way vcpkg would (no network during the
+# build), from this checkout instead of a release tarball, then builds a
+# consumer project against the installed package (#20).
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "packaging/vcpkg-port/**"
+      - "CMakeLists.txt"
+      - "OrbitFrameworkConfig.cmake.in"
+      - "vcpkg.json"
+      - ".github/workflows/vcpkg-port.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "packaging/vcpkg-port/**"
+      - "CMakeLists.txt"
+      - "OrbitFrameworkConfig.cmake.in"
+      - "vcpkg.json"
+      - ".github/workflows/vcpkg-port.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  port:
+    name: Install port and build a consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-archives
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v7
+
+    - name: Cache vcpkg binaries
+      uses: actions/cache@v6
+      with:
+        path: vcpkg-archives
+        key: ${{ runner.os }}-vcpkg-port-v1-${{ hashFiles('vcpkg.json', 'packaging/vcpkg-port/orbit-framework/vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-port-v1-
+
+    - name: Setup vcpkg (pinned to builtin-baseline)
+      run: |
+        mkdir -p vcpkg vcpkg-archives
+        cd vcpkg
+        git init
+        git remote add origin https://github.com/microsoft/vcpkg.git
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
+        ./bootstrap-vcpkg.sh -disableMetrics
+
+    # The real portfile downloads the release tag and applies patches that
+    # backport later fixes. Here the source is this checkout, which already
+    # contains them, so the download and its patches are swapped out.
+    - name: Point the port at this checkout
+      run: |
+        mkdir -p overlay
+        cp -r packaging/vcpkg-port/orbit-framework overlay/
+        python3 - <<'PY'
+        import os, re
+        path = "overlay/orbit-framework/portfile.cmake"
+        text = open(path).read()
+        text, n = re.subn(r"vcpkg_from_github\(.*?\n\)\n",
+                          'set(SOURCE_PATH "%s")\n' % os.environ["GITHUB_WORKSPACE"],
+                          text, count=1, flags=re.S)
+        assert n == 1, "vcpkg_from_github block not found"
+        open(path, "w").write(text)
+        PY
+        head -3 overlay/orbit-framework/portfile.cmake
+
+    - name: Check the port manifest format
+      run: |
+        cp packaging/vcpkg-port/orbit-framework/vcpkg.json /tmp/port.json
+        ./vcpkg/vcpkg format-manifest /tmp/port.json
+        diff -u packaging/vcpkg-port/orbit-framework/vcpkg.json /tmp/port.json
+
+    - name: Install the port (default features)
+      run: ./vcpkg/vcpkg install orbit-framework --overlay-ports=overlay --triplet x64-linux --disable-metrics
+
+    - name: Print build logs on failure
+      if: failure()
+      run: |
+        for f in vcpkg/buildtrees/orbit-framework/*.log; do
+          echo "::group::$f"; tail -n 200 "$f"; echo "::endgroup::"
+        done
+
+    - name: Build and run the consumer
+      run: |
+        cmake -B consumer -S packaging/vcpkg-port/test \
+          -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+          -DVCPKG_TARGET_TRIPLET=x64-linux \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build consumer
+        timeout 60 ./consumer/consumer

@@ -101,8 +101,9 @@ advisories are published with that version as the patched version.
    changelog section and all artifacts. Download one archive and run the
    verification steps above, then publish the draft.
 4. **Follow-ups**:
-   - update `packaging/vcpkg-port` (version and the `SHA512` of the new tag
-     archive);
+   - update `packaging/vcpkg-port`: the version, the `SHA512` of the tag
+     archive (`curl -sL https://github.com/varuns2903/orbit-framework/archive/vX.Y.Z.tar.gz | sha512sum`),
+     and drop any patch the new tag already contains;
    - publish any security advisories fixed in this release;
    - announce breaking changes where users will see them.
 
