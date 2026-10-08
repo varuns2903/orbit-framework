@@ -5,8 +5,11 @@
 namespace orbit::openapi {
 
 void OpenApiRegistry::register_route(http::HttpMethod method, const std::string& path, const RouteMetadata& meta) {
-    // Convert /api/users/:id to /api/users/{id}
+    // Convert /api/users/:id to /api/users/{id}, and a trailing wildcard
+    // (/files/*rest, /files/*) to /files/{rest} or /files/{path}.
     std::string swagger_path = std::regex_replace(path, std::regex("/:([^/]+)"), "/{$1}");
+    swagger_path = std::regex_replace(swagger_path, std::regex("/\\*([^/]+)$"), "/{$1}");
+    swagger_path = std::regex_replace(swagger_path, std::regex("/\\*$"), "/{path}");
     std::lock_guard<std::mutex> lock(mutex_);
     paths_[swagger_path].methods[method] = meta;
 }

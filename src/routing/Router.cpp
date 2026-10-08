@@ -2,6 +2,7 @@
 #include <orbit/utils/Logger.hpp>
 #include <filesystem>
 #include <sstream>
+#include <stdexcept>
 
 namespace orbit::routing {
 
@@ -31,6 +32,35 @@ std::vector<std::string> Router::split_path(std::string_view path) const {
         }
     }
     return segments;
+}
+
+int Router::match_segments(const std::vector<std::string>& pattern, const std::vector<std::string>& request,
+                           std::unordered_map<std::string, std::string>* params) {
+    int literals = 0;
+    for (size_t i = 0; i < pattern.size(); ++i) {
+        const std::string& seg = pattern[i];
+        if (is_wildcard(seg)) {
+            // The rest of the path, zero or more segments ("" for the prefix itself).
+            if (params) {
+                std::string rest;
+                for (size_t j = i; j < request.size(); ++j) {
+                    if (j > i) rest += '/';
+                    rest += request[j];
+                }
+                (*params)[seg.size() > 1 ? seg.substr(1) : "*"] = std::move(rest);
+            }
+            return literals;
+        }
+        if (i >= request.size()) return -1;
+        if (seg[0] == ':') {
+            if (params) (*params)[seg.substr(1)] = request[i];
+        } else if (seg != request[i]) {
+            return -1;
+        } else {
+            ++literals;
+        }
+    }
+    return pattern.size() == request.size() ? literals : -1;
 }
 
 bool Router::has_ws_route(const std::string& path) const {
@@ -84,7 +114,13 @@ void Router::add_route(http::HttpMethod method, const std::string& path, std::ve
 
 void Router::add_route_with_meta(http::HttpMethod method, const std::string& path, std::vector<Middleware> mws, const openapi::RouteMetadata& meta, RouteHandler handler) {
     std::string full_path = prefix_ + path;
-    
+    auto segments = split_path(full_path);
+    for (size_t i = 0; i < segments.size(); ++i) {
+        if (is_wildcard(segments[i]) && i + 1 != segments.size()) {
+            throw std::invalid_argument("a wildcard (*) must be the last segment of a route: " + full_path);
+        }
+    }
+
     // Register to OpenAPI registry
     openapi_->register_route(method, full_path, meta);
 
@@ -102,10 +138,10 @@ void Router::add_route_with_meta(http::HttpMethod method, const std::string& pat
         h(req, writer);
     };
 
-    if (full_path.find(':') != std::string::npos) {
+    if (full_path.find(':') != std::string::npos || full_path.find('*') != std::string::npos) {
         DynamicRoute dr;
         dr.method = method;
-        dr.path_segments = split_path(full_path);
+        dr.path_segments = std::move(segments);
         dr.handler = std::move(wrapped);
         if (parent_) {
             parent_->dynamic_routes_.push_back(std::move(dr));
@@ -219,19 +255,7 @@ bool Router::is_stream_route(http::HttpMethod method, const std::string& path) c
     
     auto req_segments = split_path(path);
     for (const auto& dr : dynamic_stream_routes_) {
-        if (dr.method != method) continue;
-        if (req_segments.size() != dr.path_segments.size()) continue;
-        
-        bool matches = true;
-        for (size_t i = 0; i < dr.path_segments.size(); ++i) {
-            if (dr.path_segments[i].empty()) continue;
-            if (dr.path_segments[i][0] == ':') continue;
-            if (dr.path_segments[i] != req_segments[i]) {
-                matches = false;
-                break;
-            }
-        }
-        if (matches) return true;
+        if (dr.method == method && match_segments(dr.path_segments, req_segments, nullptr) >= 0) return true;
     }
     
     return false;
@@ -259,6 +283,26 @@ void Router::use(Middleware m) {
     } else {
         middlewares_.push_back(std::move(m));
     }
+}
+
+void Router::use(const std::string& prefix, Middleware m) {
+    if (prefix.empty() || prefix[0] != '/') {
+        throw std::invalid_argument("a middleware prefix must start with '/': " + prefix);
+    }
+    std::string full = prefix_ + prefix;
+    while (full.size() > 1 && full.back() == '/') full.pop_back();
+    use([full, m = std::move(m)](http::HttpRequest& req, std::shared_ptr<http::ResponseWriter> writer) {
+        const std::string& uri = req.uri;
+        bool under = full == "/" ||
+                     (uri.compare(0, full.size(), full) == 0 && (uri.size() == full.size() || uri[full.size()] == '/'));
+        return under ? m(req, writer) : true;
+    });
+}
+
+void Router::not_found(RouteHandler handler) {
+    Router* root = this;
+    while (root->parent_) root = root->parent_;
+    root->not_found_handler_ = std::move(handler);
 }
 
 void Router::on_error(ErrorHandler handler) {
@@ -292,24 +336,34 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
         // routes first, then dynamic ones such as /users/:id.
         auto req_segments = split_path(request.uri);
         auto find_handler = [&](http::HttpMethod method, std::unordered_map<std::string, std::string>& params) -> const RouteHandler* {
+            // Precedence: exact routes, then ":param" routes in registration
+            // order, then wildcards (the one with most literal segments).
             auto it = routes_.find(make_route_key(method, request.uri));
             if (it != routes_.end()) return &it->second;
+            const DynamicRoute* best_wildcard = nullptr;
+            int best_literals = -1;
             for (const auto& dr : dynamic_routes_) {
-                if (dr.method != method || req_segments.size() != dr.path_segments.size()) continue;
-                std::unordered_map<std::string, std::string> extracted;
-                bool matches = true;
-                for (size_t i = 0; i < dr.path_segments.size(); ++i) {
-                    if (dr.path_segments[i][0] == ':') {
-                        extracted[dr.path_segments[i].substr(1)] = req_segments[i];
-                    } else if (dr.path_segments[i] != req_segments[i]) {
-                        matches = false;
-                        break;
+                if (dr.method != method) continue;
+                bool wildcard = !dr.path_segments.empty() && is_wildcard(dr.path_segments.back());
+                if (wildcard) {
+                    int literals = match_segments(dr.path_segments, req_segments, nullptr);
+                    if (literals > best_literals) {
+                        best_literals = literals;
+                        best_wildcard = &dr;
                     }
+                    continue;
                 }
-                if (matches) {
+                std::unordered_map<std::string, std::string> extracted;
+                if (match_segments(dr.path_segments, req_segments, &extracted) >= 0) {
                     params = std::move(extracted);
                     return &dr.handler;
                 }
+            }
+            if (best_wildcard) {
+                std::unordered_map<std::string, std::string> extracted;
+                match_segments(best_wildcard->path_segments, req_segments, &extracted);
+                params = std::move(extracted);
+                return &best_wildcard->handler;
             }
             return nullptr;
         };
@@ -342,6 +396,10 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
                 if (!allow.empty()) allow += ", ";
                 allow += key.substr(0, key.size() - 1); // "GET " -> "GET"
             }
+        }
+        if (allow.empty() && not_found_handler_) {
+            not_found_handler_(request, response_writer);
+            return;
         }
         http::HttpResponse res;
         if (!allow.empty()) {

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wildcard routes** (#189): a trailing `*` or `*name` segment matches the
+  rest of the path (zero or more segments) into `req.params`. Exact routes win
+  over `:param` routes, which win over wildcards (most fixed segments first).
+- **`app.use(prefix, middleware)`** (and `router.use(prefix, ...)` in groups)
+  runs middleware only for a path prefix, before route matching; e.g.
+  `app.use("/api", orbit::middleware::proxy(opts))` proxies everything below
+  `/api`, as `docs/proxy.md` described (#189).
+- **`app.not_found(handler)`** answers requests that match no route (#189).
 - **ORM `create_async(model)`** inserts with `RETURNING *` and resumes with the
   stored row, generated key included; `insert_statement()` shows the SQL;
   `primary_key(column)` / `ORBIT_REGISTER_MODEL_WITH_KEY` for keys other than

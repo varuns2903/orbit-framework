@@ -1,6 +1,6 @@
 # Routing in Orbit
 
-Orbit uses a fast radix-trie and hash-map based router that executes in O(1) for static routes and O(log N) for dynamic routes. The syntax is heavily inspired by Express.js.
+Exact routes are found with one hash-map lookup; routes with `:params` or a wildcard are checked in registration order (a radix tree is planned, see [#179](https://github.com/varuns2903/orbit-framework/issues/179)). The syntax is inspired by Express.js.
 
 ## Basic Routing
 
@@ -25,19 +25,66 @@ app.get("/users/:id", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) 
 });
 ```
 
+## Wildcards
+
+A `*` as the **last** segment matches the rest of the path, zero or more
+segments, and stores it in `req.params["*"]` (or under a name: `*path`):
+
+```cpp
+app.get("/files/*path", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+    // GET /files/docs/a.txt -> req.params["path"] == "docs/a.txt"
+    // GET /files            -> req.params["path"] == ""
+    res->send(HttpResponse().send("file: " + req.params["path"]));
+});
+```
+
+When several routes match, an exact route wins, then a `:param` route, then the
+wildcard route with the most fixed segments (`/files/img/*` before `/files/*`).
+A wildcard anywhere but last (`/a/*/b`) throws `std::invalid_argument` when the
+route is added.
+
+## Middleware for a Path Prefix
+
+`app.use(prefix, middleware)` (or `router.use` inside a group) runs the
+middleware only for the prefix and the paths below it: `/admin` and
+`/admin/...`, not `/administrator`. It runs before route matching, so it can
+answer paths that have no route of their own (a reverse proxy, a static
+directory):
+
+```cpp
+app.use("/admin", require_admin);
+app.use("/api", orbit::middleware::proxy(api_upstream));
+```
+
+## Not Found
+
+`app.not_found(handler)` answers requests that match no route, in place of the
+plain `404 Not Found`. A path that exists under another method still gets
+`405 Method Not Allowed` with an `Allow` header.
+
+```cpp
+app.not_found([](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+    HttpResponse out;
+    out.status(HttpStatus::NotFound).json(nlohmann::json{{"error", "not found"}, {"path", req.uri}});
+    res->send(std::move(out));
+});
+```
+
 ## Route Grouping
 
 To group API endpoints under a common prefix, use `app.group()`. This is useful for versioning your APIs.
 
 ```cpp
-auto api_v1 = app.group("/api/v1");
+app.group("/api/v1", [](orbit::routing::Router& api) {
+    api.use(require_api_key);   // runs for every route in the group
 
-api_v1->get("/status", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
-    res->send(HttpResponse().send("v1 Status OK"));
-});
+    api.get("/status", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+        res->send(HttpResponse().send("v1 Status OK"));
+    });
 
-api_v1->post("/login", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
-    // Login logic
+    api.post("/login", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+        // Login logic
+    });
 });
 ```
 

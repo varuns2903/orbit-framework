@@ -61,6 +61,16 @@ App& App::use(routing::Middleware m) {
     return *this;
 }
 
+App& App::use(const std::string& prefix, routing::Middleware m) {
+    router_.use(prefix, std::move(m));
+    return *this;
+}
+
+App& App::not_found(routing::RouteHandler handler) {
+    router_.not_found(std::move(handler));
+    return *this;
+}
+
 App& App::get(const std::string& path, routing::RouteHandler handler) {
     router_.get(path, std::move(handler));
     return *this;
