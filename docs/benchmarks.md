@@ -60,52 +60,53 @@ with a wide spread, not as the published result.
 
 ## Results
 
-**Not published yet.** The comparison needs a quiet, dedicated machine; the
-figures will be added here, with the full output of the script, once they
-have been run on one. The script was checked end to end on a shared laptop,
-whose numbers are not worth publishing.
+**Orbit currently does about 40% of the throughput of Drogon and Crow on
+this workload** — roughly 106k requests per second against 254k (Drogon) and
+239k (Crow) for plaintext. The gap and the leads for closing it are tracked
+in [#163](https://github.com/varuns2903/orbit-framework/issues/163).
 
-## Earlier figures: Orbit only, ApacheBench (2026-09-17)
-
-Measured before the comparison existed, with a single-threaded load
-generator and without CPU pinning. They are kept for reference; prefer the
-comparison above once it is published.
-
-### Environment
-
-Every figure below was produced on a single machine, with client and server on
-the same host over loopback:
+Run on 2026-10-08 with the script's default settings; the full output,
+including the exact reproduce command, is in
+[`benchmark-results/2026-10-08-ryzen-5500u.md`](benchmark-results/2026-10-08-ryzen-5500u.md).
 
 | | |
 |---|---|
-| CPU | AMD Ryzen 5 5500U (6 cores, 12 threads) |
-| Kernel | Linux 7.1.9 |
-| Compiler | GCC 16.2.1 |
-| Build | `-DCMAKE_BUILD_TYPE=Release`, sanitizers off |
-| Event backend | `io_uring` |
-| Worker threads | 12 (`std::thread::hardware_concurrency()`) |
-| Load generator | ApacheBench 2.3 |
-| Server | `examples/benchmark_server.cpp` |
-| Date | 2026-09-17 |
+| Machine | Laptop, AMD Ryzen 5 5500U (6 cores, 12 threads), on AC power, `performance` governor |
+| CPU split | server on CPUs 0-5, wrk on CPUs 6-11 (separate physical cores) |
+| Kernel / compiler | Linux 7.2.8, GCC 16.2.1 (Orbit built in Release, sanitizers off) |
+| Load | wrk 4.0.2 (Docker, host network), 4 threads, 128 keep-alive connections |
+| Server threads | 6 for every framework |
+| Trials | 5 × 15 s per endpoint after a 5 s warm-up; the table shows the median trial |
 
-### Results
+| Server | `GET /` req/s | `GET /json` req/s | p50 / p99 (`/`) |
+|---|---:|---:|---:|
+| Drogon v1.9.13 | **254,296** | 195,676 | 0.41 / 1.07 ms |
+| Crow v1.3.5 | 239,132 | **223,134** | 0.53 / 0.62 ms |
+| Orbit v2.0.0 — io_uring, 6 event loops | 105,878 | 91,295 | 1.17 / 2.27 ms |
+| Orbit v2.0.0 — epoll, 6 event loops | 104,639 | 94,922 | 0.98 / 5.34 ms |
+| Orbit v2.0.0 — io_uring, 1 event loop | 69,043 | 64,327 | 1.83 / 2.59 ms |
+| Orbit v2.0.0 — epoll, 1 event loop | 50,183 | 47,050 | 2.54 / 2.77 ms |
 
-Eight runs per endpoint, 50,000 requests each at concurrency 100 with
-keep-alive, after a discarded warm-up run.
+No errors in any run. The spread between the slowest and fastest trial was
+under 5% in every row except Orbit on epoll with 6 event loops (`/`: 101k –
+124k).
 
-| Endpoint | Median | Mean | Range | Std dev | p50 | p99 |
-|----------|--------|------|-------|---------|-----|-----|
-| `GET /` — 13-byte plaintext | **61,419 req/s** | 61,209 | 55,756 – 63,889 | 2,432 | 2 ms | 2–3 ms |
-| `GET /json` — small JSON object | **60,458 req/s** | 60,015 | 54,688 – 62,458 | 2,272 | 2 ms | 2 ms |
+What the run shows about Orbit:
 
-Zero failed requests across all keep-alive runs.
+- **Use several event loops.** `--event-loops` equal to the thread count
+  doubles epoll throughput and gives io_uring 1.5×; with one loop, io_uring
+  is clearly ahead of epoll.
+- **io_uring has the steadier tail** with several loops (p99 2.3 ms against
+  5.3 ms on epoll).
+- **Throughput drops under sustained load.** A 3-second trial run minutes
+  earlier measured Orbit noticeably higher (159k on epoll with 6 loops),
+  while Drogon and Crow were within 5% of their full-run figures. This is
+  part of #163.
 
-Without keep-alive — a fresh TCP connection per request, 20,000 requests at
-concurrency 100 — throughput drops to roughly **1,750 req/s**. That figure is
-dominated by connection setup and teardown and by client-side ephemeral port
-pressure, not by request handling. ApacheBench reported 17 length-mismatched
-responses out of 20,000 in that run; the cause has not been isolated and is
-recorded here rather than omitted.
+A laptop with the load generator on the same machine is not an ideal
+benchmark host; a dedicated server would narrow the spread. The ranking
+here is not close, though, and the run is reproducible with the command in
+the full output.
 
 ## What these numbers are not
 
@@ -122,9 +123,9 @@ Read the caveats before quoting any figure.
 - **Docker for the competitors.** Drogon and Crow run in containers with host
   networking. The overhead of that is small, but it is not zero, and Orbit
   runs natively.
-- **The earlier figures** above were measured with ApacheBench, which is
-  single-threaded and often the bottleneck at these rates, with client and
-  server competing for the same CPUs.
+- **The load generator shares the machine.** wrk runs on its own physical
+  cores, but memory bandwidth, caches and power limits are shared with the
+  server.
 
 Results that show Orbit losing on some workload are as welcome as results
 that show it winning: a framework that publishes its weak spots is more
