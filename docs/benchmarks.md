@@ -3,7 +3,69 @@
 Orbit's README calls the framework fast. This page is the evidence, together
 with an honest account of what the numbers do and do not show.
 
-## Environment
+## The comparison
+
+[`benchmarks/run_benchmarks.sh`](../benchmarks/run_benchmarks.sh) measures
+Orbit against [Drogon](https://github.com/drogonframework/drogon) and
+[Crow](https://github.com/CrowCpp/Crow) on the same workload, reproducibly
+([#19](https://github.com/varuns2903/orbit-framework/issues/19)):
+
+- **Identical endpoints.** Every server answers `GET /` with
+  `Hello, World!` (13 bytes, `text/plain`) and `GET /json` with
+  `{"message":"Hello, World!"}`, over HTTP/1.1 keep-alive on 127.0.0.1.
+  Orbit's server is [`examples/benchmark_server.cpp`](../examples/benchmark_server.cpp);
+  the others are in [`benchmarks/competitors/`](../benchmarks/competitors/).
+- **Pinned versions.** Drogon and Crow are built in Docker from pinned
+  releases (`DROGON_VERSION` and `CROW_VERSION` in their Dockerfiles) and run
+  with host networking; Orbit is built from the checkout in Release with
+  sanitizers off. The output names every version.
+- **Same resources.** The server and the load generator are pinned to
+  separate CPU sets (`taskset` and `--cpuset-cpus`), and every framework is
+  given the same number of threads (`SERVER_THREADS`).
+- **Orbit's configurations side by side:** `epoll` and `io_uring`, each with
+  one event loop and with one per server thread (`--event-loops`).
+- **A multi-threaded load generator with percentiles.** [wrk](https://github.com/wg/wrk)
+  with a small Lua reporter ([`benchmarks/wrk_report.lua`](../benchmarks/wrk_report.lua))
+  that records requests per second and p50, p95 and p99 latency for each run.
+- **Several runs, spread reported.** A discarded warm-up per server, then
+  `TRIALS` measured runs per endpoint; the table shows the median, the
+  slowest and fastest trial, and the median of each latency percentile.
+- **Self-describing output.** The result starts with the date, CPU, cores
+  and CPU split, kernel, compiler, load generator settings and trial plan,
+  and ends with the exact command that reproduces it.
+
+### Running it
+
+Requirements: Linux, `wrk` (or Docker plus `WRK_IMAGE=williamyeh/wrk:4.0.2`),
+Docker for Drogon and Crow, and Orbit's build dependencies.
+
+```bash
+benchmarks/run_benchmarks.sh                    # everything, default settings
+FRAMEWORKS="orbit crow" TRIALS=3 benchmarks/run_benchmarks.sh
+```
+
+Every setting (frameworks, Orbit configurations, duration, trials,
+connections, threads, CPU sets, port) is an environment variable, listed at
+the top of the script. Use a quiet, dedicated machine: on a laptop with
+other work running, the spread between trials is larger than the
+differences being measured. Fix the CPU frequency governor to `performance`
+where you can, and keep the defaults for anything you publish so the
+results stay comparable.
+
+## Results
+
+**Not published yet.** The comparison needs a quiet, dedicated machine; the
+figures will be added here, with the full output of the script, once they
+have been run on one. The script was checked end to end on a shared laptop,
+whose numbers are not worth publishing.
+
+## Earlier figures: Orbit only, ApacheBench (2026-09-17)
+
+Measured before the comparison existed, with a single-threaded load
+generator and without CPU pinning. They are kept for reference; prefer the
+comparison above once it is published.
+
+### Environment
 
 Every figure below was produced on a single machine, with client and server on
 the same host over loopback:
@@ -20,7 +82,7 @@ the same host over loopback:
 | Server | `examples/benchmark_server.cpp` |
 | Date | 2026-09-17 |
 
-## Results
+### Results
 
 Eight runs per endpoint, 50,000 requests each at concurrency 100 with
 keep-alive, after a discarded warm-up run.
@@ -39,60 +101,26 @@ pressure, not by request handling. ApacheBench reported 17 length-mismatched
 responses out of 20,000 in that run; the cause has not been isolated and is
 recorded here rather than omitted.
 
-## Reproducing this
-
-```bash
-cmake -B build_bench -S . \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_SANITIZERS=OFF \
-  -DORBIT_BUILD_TESTS=OFF
-
-cmake --build build_bench --target benchmark_server --parallel
-
-./build_bench/benchmark_server --port 8099 &
-
-# warm-up, discarded
-ab -n 20000 -c 100 -k http://127.0.0.1:8099/ > /dev/null
-
-# measured runs
-ab -n 50000 -c 100 -k http://127.0.0.1:8099/
-ab -n 50000 -c 100 -k http://127.0.0.1:8099/json
-```
-
-`benchmarks/run_benchmarks.sh` automates this.
-
 ## What these numbers are not
 
-Read the caveats before quoting the figure.
+Read the caveats before quoting any figure.
 
-- **This is not a comparison.** No other framework was measured, so the numbers
-  say nothing about whether Orbit is faster or slower than Drogon, Crow,
-  uWebSockets, or anything else. A reproducible cross-framework comparison is
-  tracked in [#19](https://github.com/varuns2903/orbit-framework/issues/19) and
-  is the only thing that would justify a competitive claim.
-- **ApacheBench is single-threaded** and is frequently the bottleneck at this
-  request rate. The real ceiling is likely higher than measured. A multi-threaded
-  generator such as `wrk` would give a truer figure.
-- **Loopback removes the network.** No NIC, no driver, no real latency. Numbers
-  over a physical network will be substantially lower.
-- **Client and server share a CPU.** They compete for the same 12 threads, which
-  depresses both.
-- **The workload is trivial.** A 13-byte constant response exercises the
-  accept/parse/route/respond path and nothing else — no database, no TLS, no
-  templating, no middleware chain. Realistic applications are dominated by work
-  Orbit does not do.
-- **Single machine, single configuration.** No comparison across event backends
-  (`io_uring` vs `epoll`), thread counts, or payload sizes.
+- **Loopback removes the network.** No NIC, no driver, no real latency.
+  Numbers over a physical network will be substantially lower.
+- **The workload is trivial.** A constant response exercises the
+  accept/parse/route/respond path and nothing else: no database, no TLS, no
+  templating, no middleware chain. Realistic applications are dominated by
+  work no framework does for them.
+- **One machine, one workload.** Results depend on the CPU, the kernel and
+  the settings; a different machine can rank the frameworks differently.
+- **Docker for the competitors.** Drogon and Crow run in containers with host
+  networking. The overhead of that is small, but it is not zero, and Orbit
+  runs natively.
+- **The earlier figures** above were measured with ApacheBench, which is
+  single-threaded and often the bottleneck at these rates, with client and
+  server competing for the same CPUs.
 
-The honest summary: Orbit handles about 61,000 requests per second on a trivial
-keep-alive workload on this hardware, and that says the core request path is not
-obviously slow. It does not establish that Orbit is faster than its peers.
-
-## Contributing better numbers
-
-[#19](https://github.com/varuns2903/orbit-framework/issues/19) tracks the work:
-comparative measurement against at least one peer framework, a multi-threaded
-load generator, latency percentiles, and a recorded environment. Results that
-show Orbit losing on some workload are as welcome as results that show it
-winning — a framework that publishes its weak spots is more useful than one
-that publishes only wins.
+Results that show Orbit losing on some workload are as welcome as results
+that show it winning: a framework that publishes its weak spots is more
+useful than one that publishes only wins. If Orbit loses somewhere, please
+open an issue with the output.
