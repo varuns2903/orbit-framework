@@ -55,6 +55,16 @@ public:
      */
     App& use(routing::Middleware m);
 
+    /**
+     * @brief Runs @p m only for requests under @p prefix ("/api" and "/api/...").
+     * @details Runs before route matching, so it can handle paths without a
+     *          route, e.g. `app.use("/api", orbit::middleware::proxy(opts))`.
+     */
+    App& use(const std::string& prefix, routing::Middleware m);
+
+    /// Answers requests that match no route instead of "404 Not Found".
+    App& not_found(routing::RouteHandler handler);
+
     // Route Grouping
     /**
      * @brief Creates a route group with a specific prefix.

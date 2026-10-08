@@ -129,6 +129,20 @@ public:
      */
     bool run_ws_middlewares(const std::string& path, http::HttpRequest& request, std::shared_ptr<http::ResponseWriter> response_writer) const;
     void use(Middleware m);
+
+    /**
+     * @brief Runs @p m only for requests under @p prefix: the prefix itself
+     *        and anything below it ("/svc" and "/svc/..."; not "/svcx").
+     *
+     * Runs before route matching, so it can serve paths that have no route,
+     * e.g. `app.use("/api", orbit::middleware::proxy(opts))`.
+     * @throws std::invalid_argument if @p prefix does not start with '/'.
+     */
+    void use(const std::string& prefix, Middleware m);
+
+    /// Answers requests that match no route (instead of "404 Not Found").
+    /// A path that exists under other methods still gets 405 with Allow.
+    void not_found(RouteHandler handler);
     
     // Register global error handler
     void on_error(ErrorHandler handler);
@@ -156,12 +170,20 @@ private:
     std::string make_route_key(http::HttpMethod method, std::string_view path) const;
     void mark_stream_route(http::HttpMethod method, const std::string& full_path);
     std::vector<std::string> split_path(std::string_view path) const;
+
+    // Matches request segments against a route pattern of literal,
+    // ":param" and a trailing "*" / "*name" segment. Fills @p params and
+    // returns the number of literal segments matched, or -1 for no match.
+    static int match_segments(const std::vector<std::string>& pattern, const std::vector<std::string>& request,
+                              std::unordered_map<std::string, std::string>* params);
+    static bool is_wildcard(const std::string& segment) { return !segment.empty() && segment[0] == '*'; }
     
     std::string prefix_;
     Router* parent_{nullptr};
     std::shared_ptr<openapi::OpenApiRegistry> openapi_;
     std::vector<Middleware> local_middlewares_;
     ErrorHandler error_handler_;
+    RouteHandler not_found_handler_;
     
     std::unordered_map<std::string, RouteHandler> routes_;
     std::unordered_map<std::string, WsRoute> ws_routes_;

@@ -7,13 +7,26 @@ Orbit is not just a web framework; it also acts as a high-performance Reverse Pr
 You can proxy any path to an upstream server. Orbit automatically handles chunked transfer encodings, headers (`X-Forwarded-For`), and Keep-Alive multiplexing.
 
 ```cpp
-#include "middleware/Proxy.hpp"
+#include <orbit/middleware/Proxy.hpp>
 
-// Proxy all /api requests to an upstream backend
+// Proxy everything under /api (/api, /api/users/7, ...) to an upstream backend
 orbit::middleware::ProxyOptions proxy_opts;
-proxy_opts.strip_prefix = true; // strips "/api" before forwarding
+proxy_opts.target_host = "localhost";
+proxy_opts.target_port = 8081;
+proxy_opts.strip_prefix = "/api"; // the upstream sees /users/7
 
-app.use("/api", orbit::middleware::Proxy::create("http://localhost:8081", proxy_opts));
+app.use("/api", orbit::middleware::proxy(proxy_opts));
+```
+
+`app.use(prefix, middleware)` runs the proxy for the prefix and every path
+below it, before route matching, so no routes are needed. Inside a group, the
+same works with group middleware and a wildcard route:
+
+```cpp
+app.group("/api", [&](orbit::routing::Router& api) {
+    api.use(orbit::middleware::proxy(proxy_opts));
+    api.get("/*", [](auto&, auto) {}); // matches /api/anything; the proxy answers
+});
 ```
 
 ### Proxy Options
@@ -45,15 +58,14 @@ For distributing traffic across multiple backend servers, use the `LoadBalancer`
 
 ```cpp
 orbit::middleware::LoadBalancerOptions lb_opts;
-lb_opts.strip_prefix = true;
+lb_opts.nodes = {
+    {"localhost", 8081},
+    {"localhost", 8082},
+    {"api.secure-backend.com", 443, true}, // TLS; sessions are reused
+};
+lb_opts.strip_prefix = "/lb-api";
 
-auto lb = orbit::middleware::LoadBalancer::create({
-    "http://localhost:8081",
-    "http://localhost:8082",
-    "https://api.secure-backend.com" // TLS Session Reuse is natively supported!
-}, lb_opts);
-
-app.use("/lb-api", lb);
+app.use("/lb-api", orbit::middleware::load_balancer(lb_opts));
 ```
 
 ## Connection Pooling (Zero-Overhead)

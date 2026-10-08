@@ -197,6 +197,24 @@ protected:
             return true;
         });
 
+        // Mounted under a prefix (#189): every path below it is proxied
+        // without a route, and "/mountedx" is not "/mounted".
+        orbit::middleware::ProxyOptions mounted;
+        mounted.target_host = "127.0.0.1";
+        mounted.target_port = kUpstreamPort;
+        mounted.strip_prefix = "/mounted";
+        proxy_app->use("/mounted", orbit::middleware::proxy(mounted));
+        // The pattern from examples/basic_server.cpp: group middleware plus a
+        // wildcard route, which used to be a literal "/*" and never matched.
+        proxy_app->group("/wild", [](orbit::routing::Router& r) {
+            orbit::middleware::ProxyOptions o;
+            o.target_host = "127.0.0.1";
+            o.target_port = kUpstreamPort;
+            o.strip_prefix = "/wild";
+            r.use(orbit::middleware::proxy(o));
+            r.get("/*", [](orbit::http::HttpRequest&, std::shared_ptr<orbit::http::ResponseWriter>) {});
+        });
+
         t1 = std::thread([] { upstream->listen(); });
         t2 = std::thread([] { tls_upstream->listen(); });
         t3 = std::thread([] { proxy_app->listen(); });
@@ -268,5 +286,18 @@ TEST_F(ProxyE2ETest, UntrustedUpstreamCertificateIsRejected) {
 
 TEST_F(ProxyE2ETest, PinnedCaAllowsUpstream) {
     std::string res = through_proxy("GET /tls-pinned/hello HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", "secure-hello");
+    EXPECT_NE(res.find("secure-hello"), std::string::npos) << res;
+}
+
+TEST_F(ProxyE2ETest, MountedProxyForwardsAnyPathUnderItsPrefix) {
+    std::string res = through_proxy("GET /mounted/hello HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", "secure-hello");
+    EXPECT_NE(res.find("200"), std::string::npos) << res;
+    EXPECT_NE(res.find("secure-hello"), std::string::npos) << res;
+    std::string other = through_proxy("GET /mountedx/hello HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", "\r\n\r\n");
+    EXPECT_NE(other.find("404"), std::string::npos) << "a sibling prefix must not be proxied: " << other;
+}
+
+TEST_F(ProxyE2ETest, WildcardGroupRouteReachesTheProxy) {
+    std::string res = through_proxy("GET /wild/hello HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", "secure-hello");
     EXPECT_NE(res.find("secure-hello"), std::string::npos) << res;
 }
