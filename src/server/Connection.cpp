@@ -102,16 +102,25 @@ void Connection::trigger_read() {
     }
 }
 
-void Connection::on_removed() {
+void Connection::on_removed(bool notify_now) {
     {
         std::lock_guard<std::mutex> lock(io_mutex_);
         removed_ = true;
     }
     // Writers held past this point (SSE subscribers, chunked streams) learn
-    // that the client is gone (#197). Outside io_mutex_: the callbacks may
-    // call back into this writer.
-    if (h2_session_) h2_session_->close_streams();
-    mark_closed();
+    // that the client is gone (#197). Normally on a pool thread: a removal
+    // can come from inside this connection's or its HTTP/2 session's locked
+    // processing (an HTTP/2 session closing itself after GOAWAY does), and
+    // an on_close callback may write to the writer, which takes those locks.
+    auto notify = [](const std::shared_ptr<Connection>& self) {
+        if (self->h2_session_) self->h2_session_->close_streams();
+        self->mark_closed();
+    };
+    if (notify_now) {
+        notify(shared_from_this());
+    } else {
+        thread_pool_.enqueue([self = shared_from_this(), notify] { notify(self); });
+    }
 }
 
 namespace {

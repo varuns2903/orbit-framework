@@ -14,7 +14,8 @@ ConnectionManager::~ConnectionManager() {
         std::lock_guard<std::mutex> lock(map_mutex_);
         remaining.swap(connections_);
     }
-    for (auto& [fd, conn] : remaining) conn->on_removed();
+    // The thread pool may already be gone, and no lock is held here.
+    for (auto& [fd, conn] : remaining) conn->on_removed(/*notify_now=*/true);
 }
 
 void ConnectionManager::add_connection(network::Socket socket, const std::string& client_ip) {
