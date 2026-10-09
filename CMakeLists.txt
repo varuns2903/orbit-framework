@@ -243,6 +243,7 @@ set(SERVER_SOURCES
     src/middleware/SecurityHeaders.cpp
     src/middleware/TrustedProxies.cpp
     src/openapi/OpenApi.cpp
+    src/testing/Client.cpp
 )
 
 if(ORBIT_ENABLE_HTTP3)

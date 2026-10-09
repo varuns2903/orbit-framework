@@ -558,6 +558,7 @@ cmake -B build \
 | [🌐 HTTP Client](docs/http-client.md) | Outbound requests with coroutines, timeouts, TLS verification |
 | [🔌 WebSockets](docs/websockets.md) | RFC 6455 WebSockets and EventRouter |
 | [⚡ HTTP/3 & QUIC](docs/http3.md) | Enabling and using HTTP/3 (experimental) |
+| [🧪 Testing](docs/testing.md) | In-process test client: call routes without a server or sockets |
 | [📋 Changelog](CHANGELOG.md) | Release history and breaking changes |
 | [🧭 Migration Guide](docs/migration.md) | Upgrading between releases, with before/after code |
 | [📊 Test Coverage](docs/coverage.md) | Measured coverage, per-file gaps, and how to reproduce |
