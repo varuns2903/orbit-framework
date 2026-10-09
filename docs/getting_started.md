@@ -111,6 +111,24 @@ curl http://localhost:8080
 curl http://localhost:8080/api/status
 ```
 
+## Command-Line Flags
+
+`ServerConfig::parse(argc, argv)` reads the server's flags (`--port`, `--host`
+/ `--bind`, `--threads`, `--engine`, ...; run with `--help` for the list):
+
+```cpp
+int main(int argc, char* argv[]) {
+    orbit::server::App app(orbit::config::ServerConfig::parse(argc, argv));
+    // ...
+}
+```
+
+A bad value, or a flag missing its value, stops the program with a message.
+An unknown flag is reported with the closest known one (`--hots`: "did you
+mean --host?") and otherwise ignored, so an application can mix in flags of
+its own. If the whole command line is Orbit's, pass
+`ServerConfig::ParseMode::Strict` and unknown flags stop the program too.
+
 ## Upgrading
 
 Moving to a newer Orbit release? The [Migration Guide](migration.md) lists the

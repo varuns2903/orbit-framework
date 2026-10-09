@@ -1,10 +1,12 @@
 #include <orbit/config/Config.hpp>
+#include <algorithm>
 #include <charconv>
 #include <iostream>
 #include <cstdlib>
 #include <limits>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace orbit::config {
 
@@ -29,20 +31,58 @@ constexpr long long kNoLimit = std::numeric_limits<long long>::max();
 
 } // namespace
 
+// Flags that take no value.
+static const char* const kSwitches[] = {"--cpu-affinity", "-h", "--help"};
+
 // Flags that are followed by a value.
-static bool takes_value(const std::string& arg) {
-    static const char* const kFlags[] = {
+static const char* const kValueFlags[] = {
         "-p", "--port", "-b", "--bind", "--host", "--backlog", "--max-connections", "-t", "--threads",
         "--event-loops", "--log-format", "-l", "--log-level", "-s", "--static-dir", "-m", "--max-body-size",
         "-c", "--ssl-cert", "-k", "--ssl-key", "--sni-cert", "--tls-reload-interval", "-e", "--engine",
         "-v", "--http-version"};
-    for (const char* flag : kFlags) {
+
+static bool takes_value(const std::string& arg) {
+    for (const char* flag : kValueFlags) {
         if (arg == flag) return true;
     }
     return false;
 }
 
-ServerConfig ServerConfig::parse(int argc, char* argv[]) {
+// The known long flag closest to @p arg, if it is near enough to be a typo
+// (an edit distance of at most 2, and at most half the flag's name).
+static std::string closest_flag(const std::string& arg) {
+    if (arg.rfind("--", 0) != 0) return "";
+    auto distance = [](const std::string& a, const std::string& b) {
+        std::vector<size_t> row(b.size() + 1);
+        for (size_t j = 0; j <= b.size(); ++j) row[j] = j;
+        for (size_t i = 1; i <= a.size(); ++i) {
+            size_t diagonal = row[0];
+            row[0] = i;
+            for (size_t j = 1; j <= b.size(); ++j) {
+                size_t above = row[j];
+                row[j] = std::min({row[j] + 1, row[j - 1] + 1, diagonal + (a[i - 1] == b[j - 1] ? 0 : 1)});
+                diagonal = above;
+            }
+        }
+        return row[b.size()];
+    };
+    std::string best;
+    size_t best_distance = 3;
+    auto consider = [&](const char* flag) {
+        const std::string candidate = flag;
+        if (candidate.rfind("--", 0) != 0) return;
+        size_t d = distance(arg, candidate);
+        if (d < best_distance && d * 2 <= candidate.size() - 2) {
+            best = candidate;
+            best_distance = d;
+        }
+    };
+    for (const char* flag : kValueFlags) consider(flag);
+    for (const char* flag : kSwitches) consider(flag);
+    return best;
+}
+
+ServerConfig ServerConfig::parse(int argc, char* argv[], ParseMode mode) {
     ServerConfig cfg;
     
     for (int i = 1; i < argc; ++i) {
@@ -137,9 +177,16 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             std::cerr << "Missing value for " << arg << " (see --help)\n";
             std::exit(1);
         } else {
-            // Not fatal: applications may pass their own flags through to
-            // parse() along with Orbit's.
-            std::cerr << "Unknown argument: " << arg << "\n";
+            // Fatal only when the application says the whole command line is
+            // Orbit's: it may pass its own flags through to parse() as well.
+            std::cerr << "Unknown argument: " << arg;
+            const std::string suggestion = closest_flag(arg);
+            if (!suggestion.empty()) std::cerr << " (did you mean " << suggestion << "?)";
+            std::cerr << "\n";
+            if (mode == ParseMode::Strict) {
+                std::cerr << "See --help for the flags this server accepts.\n";
+                std::exit(1);
+            }
         }
     }
     return cfg;
