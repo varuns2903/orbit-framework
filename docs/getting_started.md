@@ -111,6 +111,34 @@ curl http://localhost:8080
 curl http://localhost:8080/api/status
 ```
 
+## Start-Up, Shutdown and Timers
+
+Code that should run once the server is up, or as it stops, goes in hooks;
+periodic work goes in timers. All of it runs on the worker pool.
+
+```cpp
+app.on_start([&](orbit::server::App& app) {
+    auto migrated = orbit::orm::migrate_sync(conninfo, "migrations");
+    if (!migrated.ok()) app.stop();            // abort start-up
+});
+app.on_stop([&](orbit::server::App&) {
+    queue.flush();                             // before connections drain
+});
+
+auto heartbeat = app.run_every(std::chrono::seconds(15), [&] { hub.ping(); });
+app.run_after(std::chrono::minutes(1), [] { warm_caches(); });
+// heartbeat.cancel() stops it.
+```
+
+- `on_start` hooks run once the listeners are bound, in the order added; a
+  hook that throws is logged and the rest still run.
+- `on_stop` hooks run once: at the first `shutdown()` (or SIGTERM/SIGINT)
+  before the drain, at `stop()`, or when `listen()` returns. They run on the
+  thread that stops the server, so keep them short.
+- Timers count from `listen()` (or from now, if the server is running) and
+  stop with the server. Runs of one timer never overlap: a tick that comes
+  while the previous run is still going is skipped. Exceptions are logged.
+
 ## Command-Line Flags
 
 `ServerConfig::parse(argc, argv)` reads the server's flags (`--port`, `--host`

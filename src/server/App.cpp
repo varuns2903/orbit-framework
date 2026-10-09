@@ -1,4 +1,6 @@
 #include <orbit/server/App.hpp>
+#include "Scheduler.hpp"
+#include <stdexcept>
 #include <algorithm>
 #include <orbit/utils/Logger.hpp>
 #include <orbit/utils/PrometheusRegistry.hpp>
@@ -98,7 +100,7 @@ const char* engine_name(config::EventEngine engine) {
 
 } // namespace
 
-App::App(const config::ServerConfig& config) : config_(config) {
+App::App(const config::ServerConfig& config) : config_(config), scheduler_(std::make_unique<Scheduler>()) {
     network::initialize_platform_networking();
     // The logger is process-wide. Only settings that differ from the
     // defaults are applied, so an App with a default config cannot undo an
@@ -113,6 +115,7 @@ App::App(const config::ServerConfig& config) : config_(config) {
 
 App::~App() {
     stop();
+    scheduler_->stop();
     network::cleanup_platform_networking();
 }
 
@@ -467,11 +470,66 @@ void App::listen() {
     LOG_INFO("Orbit: engine " << engine << ", " << loop_count << " event loop(s), "
              << config_.worker_threads << " worker thread(s), " << cpus.size() << " CPU(s) available"
              << (config_.cpu_affinity ? ", event loops pinned" : ""));
+    // Timers and on_start hooks run on the pool, now that it and the
+    // listeners exist (#205).
+    stop_hooks_ran_ = false;
+    started_ = true;
+    concurrency::ThreadPool* pool = thread_pool_.get();
+    scheduler_->start([pool](std::function<void()> job) { pool->enqueue(std::move(job)); });
+    if (!start_hooks_.empty()) {
+        pool->enqueue([this] {
+            for (auto& hook : start_hooks_) {
+                try {
+                    hook(*this);
+                } catch (const std::exception& e) {
+                    LOG_ERROR("on_start hook threw: " << e.what());
+                } catch (...) {
+                    LOG_ERROR("on_start hook threw");
+                }
+            }
+        });
+    }
+
     event_loops_.front()->run();
     // The other loops stop with the first (stop()) or drain on their own
     // (shutdown()); either way, wait for them.
     for (auto& t : loop_threads_) t.join();
     loop_threads_.clear();
+    run_stop_hooks();
+    scheduler_->stop();
+    started_ = false;
+}
+
+App& App::on_start(std::function<void(App&)> hook) {
+    start_hooks_.push_back(std::move(hook));
+    return *this;
+}
+
+App& App::on_stop(std::function<void(App&)> hook) {
+    stop_hooks_.push_back(std::move(hook));
+    return *this;
+}
+
+TimerHandle App::run_every(std::chrono::milliseconds interval, std::function<void()> callback) {
+    if (interval.count() <= 0) throw std::invalid_argument("run_every: the interval must be positive");
+    return scheduler_->add(interval, interval, std::move(callback));
+}
+
+TimerHandle App::run_after(std::chrono::milliseconds delay, std::function<void()> callback) {
+    return scheduler_->add(delay, std::chrono::milliseconds(0), std::move(callback));
+}
+
+void App::run_stop_hooks() {
+    if (!started_ || stop_hooks_ran_.exchange(true)) return;
+    for (auto& hook : stop_hooks_) {
+        try {
+            hook(*this);
+        } catch (const std::exception& e) {
+            LOG_ERROR("on_stop hook threw: " << e.what());
+        } catch (...) {
+            LOG_ERROR("on_stop hook threw");
+        }
+    }
 }
 
 std::vector<size_t> App::connections_per_event_loop() const {
@@ -494,6 +552,7 @@ void App::shutdown() {
 }
 
 void App::shutdown(std::chrono::seconds timeout) {
+    run_stop_hooks(); // before the drain, outside the lock (hooks may call back in)
     std::lock_guard<std::mutex> lock(loop_mutex_);
     draining_ = true;
     if (!event_loops_.empty()) {
@@ -525,6 +584,7 @@ App& App::enable_health_checks(const std::string& liveness, const std::string& r
 }
 
 void App::stop() {
+    run_stop_hooks();
     std::lock_guard<std::mutex> lock(loop_mutex_);
     stop_requested_ = true;
     for (auto& loop : event_loops_) loop->stop();

@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`client.post("/x").json(...).send()`), a cookie jar for sessions,
   coroutine handlers, and chunked/SSE responses collected as chunks. See
   [docs/testing.md](docs/testing.md).
+- **Lifecycle hooks and timers** (#205): `app.on_start(hook)` runs once
+  the server is up (on a worker thread; it may block, `co_await` or call
+  `app.stop()`), `app.on_stop(hook)` once as it stops, before connections
+  drain. `app.run_every(interval, fn)` and `app.run_after(delay, fn)` run
+  callbacks on the worker pool, never overlapping, and return a cancellable
+  `TimerHandle`.
 - **Migrations without HTTP** (#195): `MigrationRunner<Db>::run(db, dir)`
   returns an `Awaitable<MigrationResult>` (applied files, error, summary),
   and `orbit::orm::migrate_sync(conninfo, dir)` migrates at start-up, before
