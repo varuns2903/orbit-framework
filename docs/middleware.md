@@ -133,6 +133,30 @@ triggers a refetch (so key rotation works without a restart), but never more
 often than `jwks_min_refetch` (default 30 s), so forged `kid`s cannot flood the
 provider. If a fetch fails, the previous keys stay in use.
 
+**Issuing tokens.** `orbit::jwt::sign()` creates tokens that `jwt_auth()`
+accepts, for a login endpoint: HS256 with the shared secret, or RS256 / ES256
+with a private key PEM (the key type picks the algorithm, as for verification).
+It sets `iat`, and `exp`, `nbf`, `iss`, `aud` and `sub` from the options; claims
+you pass yourself take precedence.
+
+```cpp
+app.post("/login", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+    // ... check the credentials ...
+    std::string token = orbit::jwt::sign({{"role", "editor"}},
+                                         {.secret = std::getenv("JWT_SECRET")},
+                                         {.expires_in = std::chrono::hours(1),
+                                          .issuer = "https://auth.example.com",
+                                          .subject = user_id});
+    res->send(HttpResponse().json(nlohmann::json{{"token", token}}));
+});
+
+// With a private key, and a "kid" for verifiers that use a key set:
+orbit::jwt::sign({}, {.private_key_pem = read_file("signing-key.pem"), .kid = "2026-10"});
+```
+
+In a handler behind `jwt_auth()`, `orbit::jwt::claim<std::string>(req.user, "sub")`
+reads a claim with its type (`std::nullopt` if it is missing or has another type).
+
 ## Route-Specific Middleware
 
 You can inject middleware into specific routes using an initializer list `vector<Middleware>`:

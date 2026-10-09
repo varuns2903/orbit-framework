@@ -451,3 +451,101 @@ routing::Middleware jwt_auth(const std::string& secret_key) {
 }
 
 } // namespace middleware
+
+namespace orbit::jwt {
+
+namespace {
+
+using middleware::PKey;
+
+std::string b64url(const std::string& data) {
+    return middleware::base64url_encode(reinterpret_cast<const unsigned char*>(data.data()), static_cast<int>(data.size()));
+}
+
+// The JWS signature over @p signing_input with a private key: PKCS#1 v1.5
+// for RS256; for ES256 the raw r || s (32 bytes each) that JWS uses rather
+// than OpenSSL's DER.
+std::string sign_with_private_key(EVP_PKEY* key, const std::string& alg, const std::string& signing_input) {
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) throw std::runtime_error("jwt::sign: out of memory");
+    size_t len = 0;
+    std::string sig;
+    bool ok = EVP_DigestSignInit(ctx, nullptr, EVP_sha256(), nullptr, key) == 1 &&
+              EVP_DigestSign(ctx, nullptr, &len, reinterpret_cast<const unsigned char*>(signing_input.data()),
+                             signing_input.size()) == 1;
+    if (ok) {
+        sig.resize(len);
+        ok = EVP_DigestSign(ctx, reinterpret_cast<unsigned char*>(sig.data()), &len,
+                            reinterpret_cast<const unsigned char*>(signing_input.data()), signing_input.size()) == 1;
+        sig.resize(len);
+    }
+    EVP_MD_CTX_free(ctx);
+    if (!ok) throw std::runtime_error("jwt::sign: signing failed");
+    if (alg != "ES256") return sig;
+
+    const unsigned char* der = reinterpret_cast<const unsigned char*>(sig.data());
+    ECDSA_SIG* es = d2i_ECDSA_SIG(nullptr, &der, static_cast<long>(sig.size()));
+    if (!es) throw std::runtime_error("jwt::sign: bad ECDSA signature");
+    const BIGNUM* r = nullptr;
+    const BIGNUM* s = nullptr;
+    ECDSA_SIG_get0(es, &r, &s);
+    std::string raw(64, '\0');
+    bool fits = BN_bn2binpad(r, reinterpret_cast<unsigned char*>(raw.data()), 32) == 32 &&
+                BN_bn2binpad(s, reinterpret_cast<unsigned char*>(raw.data()) + 32, 32) == 32;
+    ECDSA_SIG_free(es);
+    if (!fits) throw std::runtime_error("jwt::sign: bad ECDSA signature");
+    return raw;
+}
+
+} // namespace
+
+std::string sign(nlohmann::json claims, const SigningKey& key, const SignOptions& options) {
+    if (claims.is_null()) claims = nlohmann::json::object(); // sign({}, key): no claims of its own
+    if (!claims.is_object()) throw std::invalid_argument("jwt::sign: claims must be a JSON object");
+    if (key.secret.empty() == key.private_key_pem.empty()) {
+        throw std::invalid_argument("jwt::sign: set exactly one of secret and private_key_pem");
+    }
+
+    PKey private_key;
+    std::string alg = "HS256";
+    if (!key.private_key_pem.empty()) {
+        BIO* bio = BIO_new_mem_buf(key.private_key_pem.data(), static_cast<int>(key.private_key_pem.size()));
+        EVP_PKEY* raw = bio ? PEM_read_bio_PrivateKey(bio, nullptr, nullptr, nullptr) : nullptr;
+        BIO_free(bio);
+        if (!raw) throw std::invalid_argument("jwt::sign: private_key_pem is not a readable PEM private key");
+        private_key = middleware::wrap(raw);
+        alg = middleware::algorithm_for(raw);
+        if (alg.empty()) {
+            throw std::invalid_argument("jwt::sign: unsupported key; use RSA (>= 2048 bits) or EC P-256");
+        }
+    }
+
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                         std::chrono::system_clock::now().time_since_epoch()).count();
+    if (!claims.contains("iat")) claims["iat"] = now;
+    if (options.expires_in.count() > 0 && !claims.contains("exp")) claims["exp"] = now + options.expires_in.count();
+    if (options.not_before.count() > 0 && !claims.contains("nbf")) claims["nbf"] = now + options.not_before.count();
+    if (!options.issuer.empty() && !claims.contains("iss")) claims["iss"] = options.issuer;
+    if (!options.audience.empty() && !claims.contains("aud")) claims["aud"] = options.audience;
+    if (!options.subject.empty() && !claims.contains("sub")) claims["sub"] = options.subject;
+
+    nlohmann::json header = {{"alg", alg}, {"typ", "JWT"}};
+    if (!key.kid.empty()) header["kid"] = key.kid;
+    const std::string signing_input = b64url(header.dump()) + "." + b64url(claims.dump());
+
+    std::string signature;
+    if (alg == "HS256") {
+        unsigned char mac[EVP_MAX_MD_SIZE];
+        unsigned int mac_len = 0;
+        if (!HMAC(EVP_sha256(), key.secret.data(), static_cast<int>(key.secret.size()),
+                  reinterpret_cast<const unsigned char*>(signing_input.data()), signing_input.size(), mac, &mac_len)) {
+            throw std::runtime_error("jwt::sign: HMAC failed");
+        }
+        signature.assign(reinterpret_cast<char*>(mac), mac_len);
+    } else {
+        signature = sign_with_private_key(private_key.get(), alg, signing_input);
+    }
+    return signing_input + "." + b64url(signature);
+}
+
+} // namespace orbit::jwt

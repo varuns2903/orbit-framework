@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under a URL prefix (`mount = "/files"`: `/files/a.png` is `<dir>/a.png`,
   other paths are not considered), and answer a miss with `404` instead of
   passing it on (`fallthrough = false`).
+- **`orbit::jwt::sign(claims, key, options)`** (#198) issues HS256, RS256
+  and ES256 tokens that `jwt_auth()` accepts, setting `iat` and optionally
+  `exp`, `nbf`, `iss`, `aud`, `sub` and a `kid` header, so login endpoints no
+  longer hand-roll base64url and HMAC. `orbit::jwt::claim<T>(req.user, name)`
+  reads a verified claim with its type.
 - **`benchmarks/probe.sh`**: sustained-load probe that reports, per window,
   throughput, p99, memory, threads, context switches per request and heap
   allocations per request (with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`), and

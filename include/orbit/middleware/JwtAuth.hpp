@@ -2,7 +2,9 @@
 #include <orbit/legacy_namespaces.hpp>
 #include <orbit/routing/Router.hpp>
 #include <chrono>
+#include <optional>
 #include <string>
+#include <orbit/http/json.hpp>
 
 namespace orbit::middleware {
 
@@ -52,3 +54,62 @@ routing::Middleware jwt_auth(JwtOptions options);
 routing::Middleware jwt_auth(const std::string& secret_key);
 
 } // namespace middleware
+
+namespace orbit::jwt {
+
+/**
+ * @brief The key a token is signed with. Set exactly one of `secret` and
+ *        `private_key_pem`.
+ */
+struct SigningKey {
+    std::string secret;          ///< HS256: HMAC-SHA256 key (use at least 32 random bytes)
+    /// RS256 or ES256: a PEM private key ("-----BEGIN PRIVATE KEY-----").
+    /// As for verification, the key type decides the algorithm: RSA
+    /// (>= 2048 bits) means RS256, EC P-256 means ES256.
+    std::string private_key_pem;
+    std::string kid;             ///< If set, the "kid" header, so verifiers can pick the key (JWKS)
+};
+
+/// Registered claims sign() adds. Claims already present in the payload win.
+struct SignOptions {
+    std::chrono::seconds expires_in{0};  ///< "exp" = now + this; zero adds no "exp"
+    std::chrono::seconds not_before{0};  ///< "nbf" = now + this; zero adds no "nbf"
+    std::string issuer;                  ///< "iss", if set
+    std::string audience;                ///< "aud", if set
+    std::string subject;                 ///< "sub", if set
+};
+
+/**
+ * @brief Issues a signed JWT (JWS compact serialisation) that jwt_auth()
+ *        with the matching secret or public key accepts.
+ *
+ * "iat" is set to the current time unless @p claims has one; see
+ * SignOptions for the others. @p claims may be null (`{}`) for none.
+ *
+ * @code
+ * auto token = orbit::jwt::sign({{"role", "admin"}}, {.secret = secret},
+ *                               {.expires_in = std::chrono::hours(1), .subject = user_id});
+ * @endcode
+ *
+ * @throws std::invalid_argument if @p claims is not an object, or the key is
+ *         missing, ambiguous or unusable.
+ */
+std::string sign(nlohmann::json claims, const SigningKey& key, const SignOptions& options = {});
+
+/**
+ * @brief A claim from verified claims (`req.user`), if present with that type:
+ *        `jwt::claim<std::string>(req.user, "sub")`, `claim<int64_t>(req.user, "exp")`.
+ */
+template <typename T>
+std::optional<T> claim(const nlohmann::json& claims, const std::string& name) {
+    if (!claims.is_object()) return std::nullopt;
+    auto it = claims.find(name);
+    if (it == claims.end()) return std::nullopt;
+    try {
+        return it->template get<T>();
+    } catch (const nlohmann::json::exception&) {
+        return std::nullopt;
+    }
+}
+
+} // namespace orbit::jwt
