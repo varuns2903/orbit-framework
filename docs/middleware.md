@@ -158,7 +158,7 @@ Orbit comes with Several high-performance built-in middlewares:
 ### JSON Schema Validation
 Automatically validates request bodies and returns `422 Unprocessable Entity` if the JSON is malformed.
 ```cpp
-#include "middleware/Validation.hpp"
+#include <orbit/middleware/Validation.hpp>
 
 std::vector<SchemaField> user_schema = {
     {"username", JsonType::STRING, true},

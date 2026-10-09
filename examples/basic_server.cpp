@@ -192,8 +192,8 @@ int main(int argc, char* argv[]) {
                 std::cout << "[Error Middleware] Caught exception: " << e.what() << std::endl;
                 orbit::http::HttpResponse response;
                 response.status(orbit::http::HttpStatus::InternalServerError);
-                response.headers["Content-Type"] = "application/json";
-                response.send("{\"error\": \"Custom API Error: " + std::string(e.what()) + "\"}");
+                // Built as JSON, not concatenated: a quote in the message would break it.
+                response.json(nlohmann::json{{"error", std::string("Custom API Error: ") + e.what()}});
                 res->send(std::move(response));
             });
         });

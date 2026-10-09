@@ -29,7 +29,7 @@ Orbit brings **Express.js ergonomics** to C++20, powered by raw kernel performan
 | **Built-in ORM** | Expression DSL: `Col("age") >= 18` builds SQL with bound parameters, never spliced values |
 | **Real-Time** | RFC 6455 WebSockets + Socket.IO-style EventRouter with rooms & sessions |
 | **13+ Middlewares** | CORS, JWT Auth, Rate Limiting, CSRF, Compression, Proxy, OAuth2, and more |
-| **4 Database Clients** | PostgreSQL, MySQL/MariaDB, MongoDB, Redis — all async with C++20 coroutines |
+| **4 Database Clients** | PostgreSQL and MySQL/MariaDB async on the event loop (C++20 coroutines), MongoDB on the thread pool, Redis synchronous |
 | **Cross-Platform CI** | Tested on Ubuntu, macOS, and Windows with Valgrind leak detection |
 
 ---
@@ -524,7 +524,7 @@ Orbit is built as a modular stack of composable layers:
 ├─────────────────────────────────────┤
 │   Middleware Chain (CORS, Auth...)  │
 ├─────────────────────────────────────┤
-│   Router (Radix Trie + Hash Map)    │
+│ Router (hash map + pattern match)   │
 ├─────────────────────────────────────┤
 │  HTTP/1.1 │ HTTP/2 │ HTTP/3 (QUIC)  │
 ├─────────────────────────────────────┤
