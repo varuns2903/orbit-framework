@@ -18,6 +18,15 @@ struct StaticFilesOptions {
     /// Cache-Control max-age. Zero sends "no-cache": browsers revalidate
     /// with the ETag / Last-Modified on every use.
     std::chrono::seconds max_age{0};
+    /// URL prefix to serve the directory under, e.g. "/files": only
+    /// requests below it are considered, and the prefix is stripped before
+    /// the path is resolved (/files/a.png -> <directory>/a.png). Empty
+    /// serves the directory at the site root.
+    std::string mount;
+    /// When no file matches, continue to the next middleware and the routes
+    /// (true), or answer 404 here (false), which suits a mounted directory
+    /// whose prefix no route shares.
+    bool fallthrough = true;
 };
 
 /**
