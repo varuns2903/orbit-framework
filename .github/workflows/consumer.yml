@@ -12,6 +12,7 @@ on:
       - "vcpkg.json"
       - "tests/consumer/**"
       - "packaging/vcpkg-port/test/**"
+      - "tools/cli/**"
       - ".github/workflows/consumer.yml"
   pull_request:
     branches: [ "main" ]
@@ -21,6 +22,7 @@ on:
       - "vcpkg.json"
       - "tests/consumer/**"
       - "packaging/vcpkg-port/test/**"
+      - "tools/cli/**"
       - ".github/workflows/consumer.yml"
   workflow_dispatch:
 
@@ -88,3 +90,70 @@ jobs:
       env:
         ASAN_OPTIONS: detect_leaks=0
       run: timeout 60 ./consumer/consumer
+
+  # What a new user does (#186): `orbit new --fetch`, then `orbit build` with
+  # the generated vcpkg.json. Ubuntu ships none of llhttp, brotli, zstd or
+  # liburing as CMake packages, so an incomplete manifest fails here.
+  scaffold:
+    name: orbit new + orbit build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v7
+
+    - name: The CLI manifest matches vcpkg.json
+      run: python3 tools/cli/check_manifest.py
+
+    - name: Cache vcpkg dependencies
+      uses: actions/cache@v6
+      with:
+        path: |
+          demo/build/vcpkg_installed
+          vcpkg/downloads
+        key: ${{ runner.os }}-vcpkg-scaffold-v1-${{ hashFiles('vcpkg.json', 'tools/cli/orbit') }}
+        restore-keys: |
+          ${{ runner.os }}-vcpkg-scaffold-v1-
+
+    - name: Setup vcpkg (pinned to builtin-baseline)
+      run: |
+        mkdir -p vcpkg
+        cd vcpkg
+        if [ ! -d ".git" ]; then
+          git init
+          git remote add origin https://github.com/microsoft/vcpkg.git
+        fi
+        BASELINE=$(python3 -c "import json; print(json.load(open('../vcpkg.json'))['builtin-baseline'])")
+        git fetch --depth 1 origin "$BASELINE"
+        git checkout --detach FETCH_HEAD
+        ./bootstrap-vcpkg.sh -disableMetrics
+
+    # The scaffold fetches the released tag; point FetchContent at this
+    # checkout so the job tests the code under review.
+    - name: orbit new --fetch demo
+      run: |
+        python3 tools/cli/orbit new --fetch demo
+        cat demo/vcpkg.json
+
+    - name: orbit build (default build type)
+      working-directory: demo
+      env:
+        CMAKE_ARGS: -DFETCHCONTENT_SOURCE_DIR_ORBITFRAMEWORK=${{ github.workspace }}
+      run: |
+        # orbit build has no pass-through for extra CMake flags; seed the
+        # cache with the source override first, as a user trying a fix would.
+        cmake -B build -S . $CMAKE_ARGS -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+        python3 ../tools/cli/orbit build --jobs 4
+
+    - name: The scaffolded server answers
+      working-directory: demo
+      run: |
+        ./build/demo &
+        for i in $(seq 50); do curl -sf http://127.0.0.1:3000/api/status && break; sleep 0.2; done
+        test "$(curl -s http://127.0.0.1:3000/)" = "Hello from Orbit Framework!"
+        kill %1
+

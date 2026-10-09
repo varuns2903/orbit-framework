@@ -178,6 +178,12 @@ else()
     set(INJA_BUILD_TESTS OFF CACHE BOOL "Disable inja tests" FORCE)
     set(BUILD_BENCHMARK OFF CACHE BOOL "Disable inja benchmark" FORCE)
     FetchContent_MakeAvailable(inja)
+    # Third-party headers: Orbit's -Wshadow/-Wconversion must not fire inside
+    # them (about 100 warnings in every build that fetches Orbit, #186).
+    get_target_property(_orbit_inja_includes inja INTERFACE_INCLUDE_DIRECTORIES)
+    if(_orbit_inja_includes)
+        set_target_properties(inja PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_orbit_inja_includes}")
+    endif()
     set(ORBIT_INJA_TARGET inja)
 endif()
 

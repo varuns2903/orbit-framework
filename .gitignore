@@ -75,3 +75,4 @@ Thumbs.db
 # --- Local scratch ---
 load_test.py
 test_git/
+__pycache__/
