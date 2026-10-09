@@ -12,6 +12,12 @@
 #include <orbit/utils/Logger.hpp>
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/http/ResponseWriter.hpp>
+// Migrations use PostgreSQL (advisory locks, transactional DDL).
+#ifdef ORBIT_ENABLE_POSTGRES
+#include <orbit/database/PostgresCoro.hpp>
+#else
+#error "orm::MigrationRunner needs PostgreSQL support, which this build of Orbit leaves out (ORBIT_ENABLE_POSTGRES=OFF)"
+#endif
 
 
 

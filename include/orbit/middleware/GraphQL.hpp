@@ -2,6 +2,7 @@
 #include <orbit/legacy_namespaces.hpp>
 #include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/HttpResponse.hpp>
+#include <orbit/http/ResponseWriter.hpp>
 #include <functional>
 #include <string>
 #include <orbit/http/json.hpp>
@@ -64,7 +65,7 @@ inline std::function<bool(http::HttpRequest&, std::shared_ptr<http::ResponseWrit
         if (query.empty()) {
             http::HttpResponse response;
             response.status_code = http::HttpStatus::BadRequest;
-            response.json(std::string("{\"errors\": [{\"message\": \"GraphQL query is missing\"}]}"));
+            response.json(nlohmann::json{{"errors", nlohmann::json::array({{{"message", "GraphQL query is missing"}}})}});
             res->send(std::move(response));
             return false;
         }
@@ -73,12 +74,14 @@ inline std::function<bool(http::HttpRequest&, std::shared_ptr<http::ResponseWrit
             nlohmann::json result = executor(query, operation_name, variables);
             http::HttpResponse response;
             response.status_code = http::HttpStatus::OK;
-            response.json(std::string(result.dump()));
+            response.json(result);
             res->send(std::move(response));
         } catch (const std::exception& e) {
             http::HttpResponse response;
             response.status_code = http::HttpStatus::InternalServerError;
-            response.json(std::string("{\"errors\": [{\"message\": \"") + e.what() + "\"}]}");
+            // Built as JSON, never by concatenation: a message with a quote,
+            // backslash or newline used to produce an invalid body (#188).
+            response.json(nlohmann::json{{"errors", nlohmann::json::array({{{"message", e.what()}}})}});
             res->send(std::move(response));
         }
 

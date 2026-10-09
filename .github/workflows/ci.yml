@@ -93,6 +93,12 @@ jobs:
     - name: Build Framework
       run: cmake --build build --config Release --parallel 4
 
+    # An application may include any public header first (#188 found one
+    # that only compiled after another include).
+    - name: Public headers compile on their own
+      if: runner.os == 'Linux'
+      run: tools/check_headers.sh build
+
     - name: Run Tests
       working-directory: build
       env:
