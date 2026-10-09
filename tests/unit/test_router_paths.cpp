@@ -223,21 +223,107 @@ TEST(RouterPathsTest, ErrorHandlerReceivesTheException) {
     EXPECT_EQ(w->last().body, "handled: nope at /bad");
 }
 
-// on_error on a group installs the handler on the root router, so it covers
-// every route, not only the group's.
-TEST(RouterPathsTest, ErrorHandlerSetInAGroupIsGlobal) {
+// A handler that answers 500 with a fixed body.
+ErrorHandler answer_with(std::string body) {
+    return [body](const std::exception&, HttpRequest&, std::shared_ptr<ResponseWriter> w) {
+        HttpResponse res;
+        res.status(HttpStatus::ServiceUnavailable).send(body);
+        w->send(std::move(res));
+    };
+}
+
+RouteHandler throws() {
+    return [](HttpRequest&, std::shared_ptr<ResponseWriter>) { throw std::runtime_error("boom"); };
+}
+
+// on_error in a group covers that group's routes only (#218); it used to
+// replace the app's handler for every route.
+TEST(RouterPathsTest, GroupErrorHandlerCoversOnlyItsGroup) {
+    Router r;
+    r.on_error(answer_with("app"));
+    r.group("/api", [](Router& api) {
+        api.on_error(answer_with("api"));
+        api.get("/x", throws());
+        api.get("/items/:id", throws());
+    });
+    r.group("/admin", [](Router& admin) {
+        admin.on_error(answer_with("admin"));
+        admin.get("/x", throws());
+    });
+    r.group("/plain", [](Router& plain) { plain.get("/x", throws()); });
+    r.get("/top", throws());
+
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/api/x")), "api");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/api/items/3")), "api");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/admin/x")), "admin");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/plain/x")), "app");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/top")), "app");
+}
+
+// The innermost handler wins; a nested group without one uses its parent's.
+// Registration order does not matter: on_error after the routes still counts.
+TEST(RouterPathsTest, NestedGroupsFallBackToTheEnclosingHandler) {
     Router r;
     r.group("/api", [](Router& api) {
-        api.on_error([](const std::exception&, HttpRequest&, std::shared_ptr<ResponseWriter> w) {
-            HttpResponse res;
-            res.status(HttpStatus::ServiceUnavailable).send("group handler");
-            w->send(std::move(res));
+        api.get("/x", throws());
+        api.group("/v1", [](Router& v1) { v1.get("/x", throws()); });
+        api.group("/v2", [](Router& v2) {
+            v2.get("/x", throws());
+            v2.on_error(answer_with("v2"));
         });
-        api.get("/x", [](HttpRequest&, std::shared_ptr<ResponseWriter>) { throw std::runtime_error("x"); });
+        api.on_error(answer_with("api"));
     });
-    r.get("/top", [](HttpRequest&, std::shared_ptr<ResponseWriter>) { throw std::runtime_error("top"); });
-    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/api/x")), "group handler");
-    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/top")), "group handler");
+    r.on_error(answer_with("app"));
+    r.get("/top", throws());
+
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/api/x")), "api");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/api/v1/x")), "api");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/api/v2/x")), "v2");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/top")), "app");
+}
+
+// Group middleware runs as part of the route, so its exceptions go to the
+// group's handler; app-level middleware runs before matching and uses the app's.
+TEST(RouterPathsTest, MiddlewareExceptionsUseTheirOwnScope) {
+    Router r;
+    r.on_error(answer_with("app"));
+    r.group("/api", [](Router& api) {
+        api.on_error(answer_with("api"));
+        api.use([](HttpRequest&, std::shared_ptr<ResponseWriter>) -> bool { throw std::runtime_error("group mw"); });
+        api.get("/x", reply("unreached"));
+    });
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/api/x")), "api");
+
+    Router g;
+    g.on_error(answer_with("app"));
+    g.use([](HttpRequest&, std::shared_ptr<ResponseWriter>) -> bool { throw std::runtime_error("app mw"); });
+    g.group("/api", [](Router& api) {
+        api.on_error(answer_with("api"));
+        api.get("/x", reply("unreached"));
+    });
+    EXPECT_EQ(body_of(dispatch(g, HttpMethod::GET, "/api/x")), "app");
+}
+
+// An exception reported later (a coroutine handler failing after a
+// co_await) reaches the same group handler as a synchronous one.
+TEST(RouterPathsTest, AsyncExceptionUsesTheRoutesGroupHandler) {
+    Router r;
+    r.on_error(answer_with("app"));
+    std::shared_ptr<ResponseWriter> kept;
+    r.group("/api", [&kept](Router& api) {
+        api.on_error(answer_with("api"));
+        api.get("/later", [&kept](HttpRequest&, std::shared_ptr<ResponseWriter> w) { kept = w; });
+    });
+
+    HttpRequest req;
+    req.method = HttpMethod::GET;
+    req.uri = "/api/later";
+    auto writer = std::make_shared<RouterPathsMockWriter>();
+    r.route(req, writer);
+    ASSERT_TRUE(writer->sent.empty());
+    ResponseWriter::report_async_exception(kept, writer->request_generation(),
+                                           std::make_exception_ptr(std::runtime_error("late")));
+    EXPECT_EQ(body_of(writer), "api");
 }
 
 // The error handler only sees std::exception; anything else is a plain 500.

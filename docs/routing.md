@@ -88,6 +88,20 @@ app.group("/api/v1", [](orbit::routing::Router& api) {
 });
 ```
 
+A group can have its own error handler. `api.on_error(...)` covers the
+group's routes (and its middleware), including routes registered before the
+call, and nested groups that don't set their own. Every other exception goes
+to `app.on_error`, as do those from app-level middleware, which runs before
+a route is matched.
+
+```cpp
+app.on_error(render_html_error);          // everything else
+app.group("/api", [](orbit::routing::Router& api) {
+    api.on_error(render_json_error);      // only /api/...
+    api.get("/items/:id", get_item);
+});
+```
+
 ## Streaming Responses (Chunked)
 
 Orbit natively supports chunked transfer encoding for streaming large amounts of data without buffering it entirely in memory:

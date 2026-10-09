@@ -104,6 +104,8 @@ void Router::group(const std::string& prefix, std::function<void(Router&)> callb
     while (root->parent_) root = root->parent_;
     Router group_router(prefix_ + prefix, root);
     group_router.local_middlewares_ = local_middlewares_;
+    // Its own error scope, falling back to this group's (#218).
+    group_router.error_scope_ = std::make_shared<ErrorScope>(ErrorScope{nullptr, error_scope_});
     callback(group_router);
 }
 
@@ -143,6 +145,7 @@ void Router::add_route_with_meta(http::HttpMethod method, const std::string& pat
         dr.method = method;
         dr.path_segments = std::move(segments);
         dr.handler = std::move(wrapped);
+        dr.errors = error_scope_;
         if (parent_) {
             parent_->dynamic_routes_.push_back(std::move(dr));
         } else {
@@ -151,9 +154,9 @@ void Router::add_route_with_meta(http::HttpMethod method, const std::string& pat
     } else {
         std::string key = make_route_key(method, full_path);
         if (parent_) {
-            parent_->routes_[key] = std::move(wrapped);
+            parent_->routes_[key] = StaticRoute{std::move(wrapped), error_scope_};
         } else {
-            routes_[key] = std::move(wrapped);
+            routes_[key] = StaticRoute{std::move(wrapped), error_scope_};
         }
     }
 }
@@ -306,8 +309,10 @@ void Router::not_found(RouteHandler handler) {
 }
 
 void Router::on_error(ErrorHandler handler) {
-    if (parent_) {
-        parent_->on_error(std::move(handler));
+    // A group's handler covers only its own routes (#218); it used to
+    // replace the app's for every route.
+    if (error_scope_) {
+        error_scope_->handler = std::move(handler);
     } else {
         error_handler_ = std::move(handler);
     }
@@ -324,6 +329,8 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
             handle_exception(std::move(error), *req, std::move(writer));
         });
     }
+    // The matched route's error scope; null (the app's handler) until then.
+    std::shared_ptr<const ErrorScope> scope;
     try {
         // 1. Run global and route-specific middlewares
         for (auto& mw : middlewares_) {
@@ -335,11 +342,15 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
         // Finds the handler registered for `method` on this path: exact
         // routes first, then dynamic ones such as /users/:id.
         auto req_segments = split_path(request.uri);
-        auto find_handler = [&](http::HttpMethod method, std::unordered_map<std::string, std::string>& params) -> const RouteHandler* {
+        auto find_handler = [&](http::HttpMethod method, std::unordered_map<std::string, std::string>& params,
+                                std::shared_ptr<const ErrorScope>* errors = nullptr) -> const RouteHandler* {
             // Precedence: exact routes, then ":param" routes in registration
             // order, then wildcards (the one with most literal segments).
             auto it = routes_.find(make_route_key(method, request.uri));
-            if (it != routes_.end()) return &it->second;
+            if (it != routes_.end()) {
+                if (errors) *errors = it->second.errors;
+                return &it->second.handler;
+            }
             const DynamicRoute* best_wildcard = nullptr;
             int best_literals = -1;
             for (const auto& dr : dynamic_routes_) {
@@ -356,6 +367,7 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
                 std::unordered_map<std::string, std::string> extracted;
                 if (match_segments(dr.path_segments, req_segments, &extracted) >= 0) {
                     params = std::move(extracted);
+                    if (errors) *errors = dr.errors;
                     return &dr.handler;
                 }
             }
@@ -363,20 +375,28 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
                 std::unordered_map<std::string, std::string> extracted;
                 match_segments(best_wildcard->path_segments, req_segments, &extracted);
                 params = std::move(extracted);
+                if (errors) *errors = best_wildcard->errors;
                 return &best_wildcard->handler;
             }
             return nullptr;
         };
 
         std::unordered_map<std::string, std::string> params;
-        const RouteHandler* handler = find_handler(request.method, params);
+        const RouteHandler* handler = find_handler(request.method, params, &scope);
         if (!handler && request.method == http::HttpMethod::HEAD) {
             // RFC 9110 section 9.3.2: HEAD is GET without the content; the
             // connection drops the body.
-            handler = find_handler(http::HttpMethod::GET, params);
+            handler = find_handler(http::HttpMethod::GET, params, &scope);
         }
         if (handler) {
             request.params = std::move(params);
+            if (scope && response_writer) {
+                // Late exceptions from this route go to its group's handler too.
+                response_writer->set_error_sink([this, req = &request, scope](std::exception_ptr error,
+                                                                            std::shared_ptr<http::ResponseWriter> writer) {
+                    handle_exception(std::move(error), *req, std::move(writer), scope.get());
+                });
+            }
             (*handler)(request, response_writer);
             return;
         }
@@ -411,15 +431,19 @@ void Router::route(http::HttpRequest& request, std::shared_ptr<http::ResponseWri
         response_writer->send(std::move(res));
         
     } catch (...) {
-        handle_exception(std::current_exception(), request, response_writer);
+        handle_exception(std::current_exception(), request, response_writer, scope.get());
     }
 }
 
 void Router::handle_exception(std::exception_ptr error, http::HttpRequest& request,
-                              std::shared_ptr<http::ResponseWriter> response_writer) const {
-    const ErrorHandler* handler = error_handler_ ? &error_handler_
-                                : (parent_ && parent_->error_handler_) ? &parent_->error_handler_
-                                : nullptr;
+                              std::shared_ptr<http::ResponseWriter> response_writer,
+                              const ErrorScope* scope) const {
+    // The innermost group handler set for the route, else the app's.
+    const ErrorHandler* handler = nullptr;
+    for (; scope && !handler; scope = scope->parent.get()) {
+        if (scope->handler) handler = &scope->handler;
+    }
+    if (!handler && error_handler_) handler = &error_handler_;
     try {
         std::rethrow_exception(error);
     } catch (const std::exception& e) {

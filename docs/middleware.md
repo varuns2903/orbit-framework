@@ -277,7 +277,8 @@ app.use(orbit::middleware::distributed_rate_limit("127.0.0.1", 6379, 100, std::c
 ```
 
 ### Global Error Handling
-Catch all unhandled exceptions thrown inside route handlers:
+Catch all unhandled exceptions thrown inside route handlers (a group can
+override this for its own routes; see [Route Grouping](routing.md#route-grouping)):
 ```cpp
 app.on_error([](const std::exception& e, HttpRequest& req, std::shared_ptr<ResponseWriter> writer) {
     writer->send(HttpResponse().status(HttpStatus::InternalServerError).send("Something went wrong!"));

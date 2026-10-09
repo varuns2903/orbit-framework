@@ -114,6 +114,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proxied upstream set is kept. `http::format_http_date` and
   `http::http_date_now` are public.
 
+- **`on_error` in a group applies to that group only** (#218). It used to
+  replace the app's error handler for every route, so the last `on_error`
+  registered anywhere won. A route's exceptions, including late ones from
+  coroutine handlers, now go to its innermost group's handler, else the
+  enclosing group's, else `app.on_error`. Unmatched requests and app-level
+  middleware use `app.on_error`. An app that relied on a group's handler
+  covering every route should register it with `app.on_error` instead.
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1
