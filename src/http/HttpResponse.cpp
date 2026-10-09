@@ -10,6 +10,7 @@
 #include <inja/inja.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <cctype>
+#include <cstdio>
 
 namespace orbit::http {
 
@@ -189,6 +190,10 @@ bool is_valid_header_value(std::string_view value) {
 
 namespace {
 
+constexpr const char* kDays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+constexpr const char* kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
 // Cookie names are tokens; values and attributes must not contain the
 // characters that end the cookie or the header line.
 bool is_safe_cookie_part(std::string_view s) {
@@ -199,6 +204,32 @@ bool is_safe_cookie_part(std::string_view s) {
 }
 
 } // namespace
+
+std::string format_http_date(std::time_t t) {
+    std::tm tm{};
+#ifdef _WIN32
+    gmtime_s(&tm, &t);
+#else
+    gmtime_r(&t, &tm);
+#endif
+    char buf[40];
+    std::snprintf(buf, sizeof(buf), "%s, %02d %s %04d %02d:%02d:%02d GMT", kDays[tm.tm_wday], tm.tm_mday,
+                  kMonths[tm.tm_mon], tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    return buf;
+}
+
+std::string_view http_date_now() {
+    // Per thread, so no locking: every loop and pool thread keeps its own
+    // copy and reformats it only when the second changes (#170).
+    thread_local std::time_t cached_second = -1;
+    thread_local std::string cached;
+    const std::time_t now = std::time(nullptr);
+    if (now != cached_second) {
+        cached = format_http_date(now);
+        cached_second = now;
+    }
+    return cached;
+}
 
 std::string HttpResponse::serialize_headers() const {
     // Not "oss": the LOG_* macros declare their own oss, and MSVC /WX
@@ -213,6 +244,7 @@ std::string HttpResponse::serialize_headers() const {
 
     bool has_content_length = false;
     bool has_transfer_encoding = false;
+    bool has_date = false;
     for (const auto& [key, value] : headers) {
         // A CR or LF from application data would end this header and let the
         // rest of the value become new headers or a new response.
@@ -222,8 +254,13 @@ std::string HttpResponse::serialize_headers() const {
         }
         if (utils::CaseInsensitiveEqual{}(std::string_view(key), std::string_view("Content-Length"))) has_content_length = true;
         if (utils::CaseInsensitiveEqual{}(std::string_view(key), std::string_view("Transfer-Encoding"))) has_transfer_encoding = true;
+        if (utils::CaseInsensitiveEqual{}(std::string_view(key), std::string_view("Date"))) has_date = true;
         out << key << ": " << value << "\r\n";
     }
+
+    // RFC 9110 section 6.6.1: an origin server with a clock sends Date. A
+    // handler (or a proxied upstream) that set its own keeps it.
+    if (!has_date) out << "Date: " << http_date_now() << "\r\n";
 
     for (const auto& cookie : cookies) {
         if (!is_valid_header_name(cookie.name) || !is_safe_cookie_part(cookie.value) ||
