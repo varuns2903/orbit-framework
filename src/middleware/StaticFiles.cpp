@@ -229,11 +229,16 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
     struct State {
         std::string directory;
         StaticFilesOptions options;
+        std::string mount; // normalised: "/files", or empty for the site root
         fs::path base; // canonical directory, resolved once
     };
     auto state = std::make_shared<State>();
     state->directory = directory;
     state->options = std::move(options);
+    std::string mount = state->options.mount;
+    while (!mount.empty() && mount.back() == '/') mount.pop_back();
+    if (!mount.empty() && mount.front() != '/') mount.insert(mount.begin(), '/');
+    state->mount = std::move(mount);
     std::error_code ec;
     state->base = fs::canonical(directory, ec);
     if (ec) {
@@ -247,19 +252,39 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
             return true; // Continue pipeline, only GET and HEAD are served statically
         }
 
+        // Under a mount prefix, only its requests are ours, and the prefix
+        // is not part of the file path (#199).
+        std::string_view path = request.uri;
+        const std::string& mount = state->mount;
+        if (!mount.empty()) {
+            if (path.compare(0, mount.size(), mount) != 0 ||
+                (path.size() > mount.size() && path[mount.size()] != '/')) {
+                return true;
+            }
+            path.remove_prefix(mount.size());
+        }
+        // Nothing to serve: on to the routes, or a 404 here.
+        auto miss = [&]() {
+            if (state->options.fallthrough) return true;
+            http::HttpResponse res;
+            res.status(http::HttpStatus::NotFound).send("404 Not Found");
+            writer->send(std::move(res));
+            return false;
+        };
+
         try {
             fs::path base = state->base;
             if (base.empty()) {
                 std::error_code dir_ec;
                 base = fs::canonical(state->directory, dir_ec);
-                if (dir_ec) return true;
+                if (dir_ec) return miss();
             }
             const StaticFilesOptions& opts = state->options;
 
             // request.uri is already percent-decoded.
-            if (request.uri.find('\0') != std::string::npos) return true;
+            if (path.find('\0') != std::string_view::npos) return miss();
             fs::path requested;
-            switch (resolve(base, base / fs::path(request.uri).relative_path(), opts.serve_dotfiles, requested)) {
+            switch (resolve(base, base / fs::path(std::string(path)).relative_path(), opts.serve_dotfiles, requested)) {
                 case Resolution::Outside: {
                     LOG_WARN("Path traversal attack blocked! Attempted to access: " << request.uri);
                     http::HttpResponse res;
@@ -268,23 +293,23 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
                     return false; // Handled as error, stop pipeline!
                 }
                 case Resolution::Hidden:
-                    return true;
+                    return miss();
                 case Resolution::Inside:
                     break;
             }
 
             auto info = stat_path(requested);
-            if (!info) return true;
+            if (!info) return miss();
             if (info->directory) {
-                if (opts.index.empty()) return true;
+                if (opts.index.empty()) return miss();
                 // The index file may itself be a symlink: check it as well.
                 if (resolve(base, requested / opts.index, opts.serve_dotfiles, requested) != Resolution::Inside) {
-                    return true;
+                    return miss();
                 }
                 info = stat_path(requested);
-                if (!info) return true;
+                if (!info) return miss();
             }
-            if (!info->regular) return true;
+            if (!info->regular) return miss();
 
             auto header = [&request](std::string_view name) -> std::optional<std::string_view> {
                 auto it = request.headers.find(name);
@@ -322,7 +347,7 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
             }
 
             res.send_file(requested.string(), std::string(mime_type_for_extension(requested.extension().string())));
-            if (res.file_fd == -1) return true; // vanished or unreadable
+            if (res.file_fd == -1) return miss(); // vanished or unreadable
 
             auto range_header = header("Range");
             if (range_header && request.method == http::HttpMethod::GET) {
@@ -355,7 +380,7 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
             // Unrepresentable path or filesystem error: fall through to next middleware/route
         }
 
-        return true; // File not found, continue pipeline
+        return miss(); // File not found
     };
 }
 

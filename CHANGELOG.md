@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WebSockets from any Origin. `on_connect` has an overload that also
   receives the handshake request, and `WebSocketConnection::handshake_request()`
   exposes it to `app.ws()` handlers.
+- **`StaticFilesOptions::mount` and `fallthrough`** (#199): serve a directory
+  under a URL prefix (`mount = "/files"`: `/files/a.png` is `<dir>/a.png`,
+  other paths are not considered), and answer a miss with `404` instead of
+  passing it on (`fallthrough = false`).
 - **`benchmarks/probe.sh`**: sustained-load probe that reports, per window,
   throughput, p99, memory, threads, context switches per request and heap
   allocations per request (with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`), and

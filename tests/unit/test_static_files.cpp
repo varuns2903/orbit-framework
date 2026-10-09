@@ -257,3 +257,63 @@ TEST(StaticFilesMimeTest, KnowsCommonWebTypes) {
     EXPECT_EQ(orbit::middleware::mime_type_for_extension(".unknown"), "application/octet-stream");
     EXPECT_EQ(orbit::middleware::mime_type_for_extension(""), "application/octet-stream");
 }
+
+// --- Mounting under a URL prefix (#199) ---
+
+TEST_F(StaticFilesTest, MountServesTheDirectoryUnderItsPrefix) {
+    orbit::middleware::StaticFilesOptions mounted;
+    mounted.mount = "/files/"; // a trailing slash is ignored
+    StaticMockWriter w1;
+    EXPECT_FALSE(run("/files/digits.txt", w1, HttpMethod::GET, {}, mounted));
+    EXPECT_EQ(w1.last.headers.at("Content-Length"), "10"); // digits.txt
+
+    StaticMockWriter w2;
+    EXPECT_FALSE(run("/files", w2, HttpMethod::GET, {}, mounted)) << "the prefix itself is the directory";
+    EXPECT_EQ(w2.last.headers.at("Content-Length"), "13"); // index.html
+
+    StaticMockWriter w3;
+    EXPECT_FALSE(run("/files/docs/", w3, HttpMethod::GET, {}, mounted));
+    EXPECT_EQ(w3.last.headers.at("Content-Length"), "4"); // docs/index.html
+}
+
+TEST_F(StaticFilesTest, MountIgnoresRequestsOutsideThePrefix) {
+    orbit::middleware::StaticFilesOptions mounted;
+    mounted.mount = "/files";
+    for (const char* uri : {"/digits.txt", "/filesdigits.txt", "/other/files/digits.txt", "/"}) {
+        StaticMockWriter w;
+        EXPECT_TRUE(run(uri, w, HttpMethod::GET, {}, mounted)) << uri;
+        EXPECT_EQ(w.sends, 0) << uri;
+    }
+}
+
+TEST_F(StaticFilesTest, MountStillBlocksTraversalAndDotfiles) {
+    orbit::middleware::StaticFilesOptions mounted;
+    mounted.mount = "/files";
+    StaticMockWriter w1;
+    EXPECT_FALSE(run("/files/../secret.txt", w1, HttpMethod::GET, {}, mounted));
+    EXPECT_EQ(w1.last.status_code, HttpStatus::Forbidden);
+
+    StaticMockWriter w2;
+    EXPECT_TRUE(run("/files/.env", w2, HttpMethod::GET, {}, mounted));
+    EXPECT_EQ(w2.sends, 0);
+}
+
+TEST_F(StaticFilesTest, WithoutFallthroughAMissIsA404Here) {
+    orbit::middleware::StaticFilesOptions strict;
+    strict.mount = "/files";
+    strict.fallthrough = false;
+    for (const char* uri : {"/files/missing.txt", "/files/.env", "/files/docs/nope"}) {
+        StaticMockWriter w;
+        EXPECT_FALSE(run(uri, w, HttpMethod::GET, {}, strict)) << uri;
+        EXPECT_EQ(w.last.status_code, HttpStatus::NotFound) << uri;
+        EXPECT_EQ(w.last.body.find("SECRET"), std::string::npos);
+    }
+    // Outside the mount it still steps aside.
+    StaticMockWriter outside;
+    EXPECT_TRUE(run("/api/items", outside, HttpMethod::GET, {}, strict));
+    EXPECT_EQ(outside.sends, 0);
+    // And a found file is served as usual.
+    StaticMockWriter found;
+    EXPECT_FALSE(run("/files/digits.txt", found, HttpMethod::GET, {}, strict));
+    EXPECT_EQ(found.last.headers.at("Content-Length"), "10");
+}

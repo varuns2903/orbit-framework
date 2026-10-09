@@ -182,7 +182,16 @@ opts.max_age = std::chrono::hours(24); // Cache-Control: public, max-age=86400
 opts.index = "index.html";            // served for directory requests; "" disables
 opts.serve_dotfiles = false;          // .env, .git/ ... are hidden (the default)
 app.use(orbit::middleware::static_files("public", opts));
+
+// Uploads under /files/..., away from the routes: /files/a.png -> uploads/a.png
+orbit::middleware::StaticFilesOptions files;
+files.mount = "/files";
+files.fallthrough = false;            // a missing file is a 404 here, not passed to the routes
+app.use(orbit::middleware::static_files("uploads", files));
 ```
+- With `mount`, only requests under the prefix are considered, and the prefix is stripped
+  before the path is resolved. `fallthrough = false` answers `404` for a miss instead of
+  continuing to the next middleware or route.
 - Paths that resolve outside the directory, including through symlinks, get `403`.
 - Responses carry `ETag`, `Last-Modified`, `Cache-Control` and `Accept-Ranges: bytes`.
   `If-None-Match` and `If-Modified-Since` give `304`.
