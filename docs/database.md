@@ -1,16 +1,14 @@
 # Database & C++20 Coroutines
 
-Orbit provides seamless integration with PostgreSQL using raw asynchronous networking (`io_uring`/`epoll`) bridged perfectly into **C++20 Coroutines** via `Task` handlers and `Awaitable<T>` helpers.
-
-This allows you to write non-blocking database queries exactly like Node.js or Python without spanning unnecessary OS threads!
+The PostgreSQL and MySQL/MariaDB clients are asynchronous: queries run on the event loop (`io_uring`/`epoll`/kqueue/IOCP) and are awaited from **C++20 coroutines** (`Task` handlers and `Awaitable<T>` helpers), so a waiting handler holds no thread. The other two are not: `MongoClient` runs the (blocking) MongoDB driver on the thread pool, and `RedisClient` is synchronous, so use it from handlers that may block (they run on the pool) and keep calls short. See [#196](https://github.com/varuns2903/orbit-framework/issues/196).
 
 ## Setup
 
 Include the necessary headers:
 ```cpp
-#include "database/PostgresClient.hpp"
-#include "database/PostgresCoro.hpp"
-#include "concurrency/Task.hpp"
+#include <orbit/database/PostgresClient.hpp>
+#include <orbit/database/PostgresCoro.hpp>
+#include <orbit/concurrency/Task.hpp>
 ```
 
 ## Awaiting Database Queries

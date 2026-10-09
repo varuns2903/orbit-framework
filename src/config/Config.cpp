@@ -29,6 +29,19 @@ constexpr long long kNoLimit = std::numeric_limits<long long>::max();
 
 } // namespace
 
+// Flags that are followed by a value.
+static bool takes_value(const std::string& arg) {
+    static const char* const kFlags[] = {
+        "-p", "--port", "-b", "--bind", "--host", "--backlog", "--max-connections", "-t", "--threads",
+        "--event-loops", "--log-format", "-l", "--log-level", "-s", "--static-dir", "-m", "--max-body-size",
+        "-c", "--ssl-cert", "-k", "--ssl-key", "--sni-cert", "--tls-reload-interval", "-e", "--engine",
+        "-v", "--http-version"};
+    for (const char* flag : kFlags) {
+        if (arg == flag) return true;
+    }
+    return false;
+}
+
 ServerConfig ServerConfig::parse(int argc, char* argv[]) {
     ServerConfig cfg;
     
@@ -38,7 +51,7 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
                       << "  -p, --port <port>             Port to listen on (default: 8080)\n"
-                      << "  -b, --bind <host>             Address to listen on, e.g. 127.0.0.1 or :: (default: 0.0.0.0)\n"
+                      << "  -b, --bind, --host <host>     Address to listen on, e.g. 127.0.0.1 or :: (default: 0.0.0.0)\n"
                       << "      --backlog <num>           Listen backlog (default: SOMAXCONN)\n"
                       << "      --max-connections <num>   Connections served at once, 0 = unlimited (default: 0)\n"
                       << "  -t, --threads <num|auto>      Number of worker threads; auto = one per CPU (default: 4)\n"
@@ -59,7 +72,9 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
             std::exit(0);
         } else if ((arg == "-p" || arg == "--port") && i + 1 < argc) {
             cfg.port = static_cast<uint16_t>(parse_integer(arg, argv[++i], 0, 65535));
-        } else if ((arg == "-b" || arg == "--bind") && i + 1 < argc) {
+        } else if ((arg == "-b" || arg == "--bind" || arg == "--host") && i + 1 < argc) {
+            // --host matches the ServerConfig field; it used to be reported
+            // as unknown and ignored, so the server bound 0.0.0.0 (#194).
             cfg.host = argv[++i];
         } else if (arg == "--backlog" && i + 1 < argc) {
             cfg.backlog = static_cast<int>(parse_integer(arg, argv[++i], 0, std::numeric_limits<int>::max()));
@@ -115,7 +130,15 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                 std::cerr << "Invalid HTTP version: " << version_str << ". Must be '1.1', '2', or '3'\n";
                 std::exit(1);
             }
+        } else if (takes_value(arg)) {
+            // A known flag at the end of the command line, without its value:
+            // a mistake, and silently keeping the default (say, binding every
+            // interface instead of the one asked for) is worse than stopping.
+            std::cerr << "Missing value for " << arg << " (see --help)\n";
+            std::exit(1);
         } else {
+            // Not fatal: applications may pass their own flags through to
+            // parse() along with Orbit's.
             std::cerr << "Unknown argument: " << arg << "\n";
         }
     }

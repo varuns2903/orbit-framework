@@ -160,6 +160,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `recv()` with `SO_RCVTIMEO` failed with `EINTR` instead of restarting.
   The teardown now runs on a thread of its own. This was the cause of the
   intermittent io_uring test failures.
+- **`--host` works on the command line** (#194), as an alias of `--bind`;
+  it used to be reported as unknown and ignored, so the server bound every
+  interface. A known flag given without its value (`--port` at the end)
+  now stops with "Missing value for --port" instead of keeping the default.
+  Unknown flags are still only reported, since applications may pass their
+  own through `ServerConfig::parse()`.
+- **Docs match the API** (#194): the README and database guide no longer
+  call every database client asynchronous (Redis is synchronous, MongoDB
+  runs on the thread pool), the README no longer describes the router as a
+  radix trie, and the remaining `#include "..."` examples use
+  `<orbit/...>` paths.
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1

@@ -168,17 +168,12 @@ TEST(ServerConfigParseTest, UnknownArgumentIsSkipped) {
     EXPECT_NE(err.find("Unknown argument: --frobnicate"), std::string::npos) << err;
 }
 
-// A flag missing its value is not applied, so the default stays.
-TEST(ServerConfigParseTest, FlagWithoutValueLeavesTheDefault) {
-    testing::internal::CaptureStderr();
-    ServerConfig cfg = parse_args({"--port"});
-    testing::internal::GetCapturedStderr();
-    EXPECT_EQ(cfg.port, ServerConfig{}.port);
-
-    testing::internal::CaptureStderr();
-    cfg = parse_args({"--sni-cert", "only-a-cert.pem"});
-    testing::internal::GetCapturedStderr();
-    EXPECT_TRUE(cfg.sni_certificates.empty());
+// --host is the config field's name; it used to be ignored as unknown, so
+// the server bound every interface (#194).
+TEST(ServerConfigParseTest, HostIsAnAliasOfBind) {
+    EXPECT_EQ(parse_args({"--host", "127.0.0.1"}).host, "127.0.0.1");
+    EXPECT_EQ(parse_args({"--bind", "::1"}).host, "::1");
+    EXPECT_EQ(parse_args({"-b", "10.0.0.1"}).host, "10.0.0.1");
 }
 
 class ServerConfigParseDeathTest : public testing::Test {
@@ -189,6 +184,14 @@ protected:
 TEST_F(ServerConfigParseDeathTest, HelpExitsSuccessfully) {
     EXPECT_EXIT(parse_args({"--help"}), testing::ExitedWithCode(0), "");
     EXPECT_EXIT(parse_args({"-p", "1", "-h"}), testing::ExitedWithCode(0), "");
+}
+
+// A known flag without its value is a mistake: stop rather than keep the
+// default (#194).
+TEST_F(ServerConfigParseDeathTest, FlagWithoutValueExits) {
+    EXPECT_EXIT(parse_args({"--port"}), testing::ExitedWithCode(1), "Missing value for --port");
+    EXPECT_EXIT(parse_args({"-p", "80", "--host"}), testing::ExitedWithCode(1), "Missing value for --host");
+    EXPECT_EXIT(parse_args({"--sni-cert", "only-a-cert.pem"}), testing::ExitedWithCode(1), "Missing value for --sni-cert");
 }
 
 TEST_F(ServerConfigParseDeathTest, InvalidEngineExits) {
