@@ -28,6 +28,8 @@ public:
     void remove(socket_t fd) override;
 
 private:
+    // Cancels and reaps everything in flight, then exits the ring (the destructor runs it on its own thread).
+    void teardown();
     struct io_uring ring_;
     std::mutex sq_mutex_;
     // Contexts submitted to the kernel and not yet completed.
