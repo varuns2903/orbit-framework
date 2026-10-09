@@ -153,6 +153,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request (e.g. to log it) saw the next request's data or freed memory. The
   connection now parses the next request into fresh storage while a
   handler still holds the previous one.
+- **Destroying an io_uring App no longer causes spurious `EINTR` on the
+  destroying thread** (#225). The proactor's teardown submitted to and
+  reaped the ring from that thread, which gave it io_uring task state;
+  task work delivered to it later interrupted its blocking calls, and a
+  `recv()` with `SO_RCVTIMEO` failed with `EINTR` instead of restarting.
+  The teardown now runs on a thread of its own. This was the cause of the
+  intermittent io_uring test failures.
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1

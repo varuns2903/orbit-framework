@@ -1,6 +1,7 @@
 #include <orbit/network/IoUringProactor.hpp>
 #include <stdexcept>
 #include <chrono>
+#include <thread>
 #include <iostream>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -31,6 +32,16 @@ IoUringProactor::IoUringProactor(unsigned entries) {
 }
 
 IoUringProactor::~IoUringProactor() {
+    // On a thread of its own (#225). Submitting to the ring and reaping
+    // gives the calling thread io_uring task state, and task work queued to
+    // it later interrupts that thread's blocking syscalls: a recv() with
+    // SO_RCVTIMEO then fails with EINTR instead of being restarted. Whoever
+    // destroys an App (a test's main thread, an application's shutdown
+    // path) must not inherit that.
+    std::thread([this] { teardown(); }).join();
+}
+
+void IoUringProactor::teardown() {
     // Contexts still in flight hold callbacks that may own the last reference
     // to a Connection, and the kernel may still write into that connection's
     // buffers. Cancel every request and reap the completions, so the kernel is
