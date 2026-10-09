@@ -199,6 +199,16 @@ app.use(orbit::middleware::static_files("uploads", files));
   `Content-Range`, or `416` if it starts past the end. `If-Range` is honoured. Multi-range
   requests get the whole file.
 - `orbit::middleware::mime_type_for_extension(".woff2")` exposes the built-in type table.
+- **Compression.** `compress()` does not compress files from `static_files()` (they are
+  sent with `sendfile`, not from memory). Compress them at build time instead and set
+  `precompressed = true`: for `app.js`, an `app.js.br`, `app.js.zst` or `app.js.gz` next
+  to it is served when the client's `Accept-Encoding` takes that coding, with
+  `Content-Encoding`, the original's `Content-Type` and `Vary: Accept-Encoding` (ranges
+  and conditional requests work on the compressed file, which has its own `ETag`).
+  The plain file must exist too; it is served to everyone else.
+  ```bash
+  brotli -k -q 11 dist/*.js dist/*.css && gzip -k -9 dist/*.js dist/*.css
+  ```
 
 ### Compression
 

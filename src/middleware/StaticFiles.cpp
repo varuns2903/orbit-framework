@@ -1,5 +1,6 @@
 #include <orbit/middleware/StaticFiles.hpp>
 #include <orbit/http/HttpResponse.hpp>
+#include <orbit/middleware/Compress.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <sys/stat.h>
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 namespace orbit::middleware {
 
@@ -317,6 +319,48 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
                 return it->second;
             };
 
+            // A precompressed sibling the client accepts, if there is one (#191).
+            const fs::path original = requested;
+            std::string encoding; // Content-Encoding sent; empty for the plain file
+            bool has_variants = false;
+            if (opts.precompressed) {
+                struct Variant {
+                    ContentCoding coding;
+                    const char* suffix;
+                    const char* name;
+                };
+                static const Variant kVariants[] = {{ContentCoding::Brotli, ".br", "br"},
+                                                    {ContentCoding::Zstd, ".zst", "zstd"},
+                                                    {ContentCoding::Gzip, ".gz", "gzip"}};
+                std::vector<ContentCoding> present;
+                for (const Variant& v : kVariants) {
+                    fs::path sibling;
+                    // The sibling goes through the same containment and dotfile checks.
+                    if (resolve(base, fs::path(original.string() + v.suffix), opts.serve_dotfiles, sibling) !=
+                        Resolution::Inside) {
+                        continue;
+                    }
+                    auto sibling_info = stat_path(sibling);
+                    if (sibling_info && sibling_info->regular) present.push_back(v.coding);
+                }
+                has_variants = !present.empty();
+                if (has_variants) {
+                    // Already compressed: whether this build can compress does not matter.
+                    ContentCoding chosen =
+                        negotiate_coding(header("Accept-Encoding").value_or(""), present, /*only_available=*/false);
+                    for (const Variant& v : kVariants) {
+                        if (v.coding != chosen) continue;
+                        fs::path sibling;
+                        resolve(base, fs::path(original.string() + v.suffix), opts.serve_dotfiles, sibling);
+                        if (auto sibling_info = stat_path(sibling)) {
+                            requested = sibling;
+                            info = sibling_info;
+                            encoding = v.name;
+                        }
+                    }
+                }
+            }
+
             char etag_buf[48];
             std::snprintf(etag_buf, sizeof(etag_buf), "\"%llx-%llx\"",
                           static_cast<unsigned long long>(info->mtime),
@@ -331,6 +375,8 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
                 ? "public, max-age=" + std::to_string(opts.max_age.count())
                 : std::string("no-cache");
             res.headers["Accept-Ranges"] = "bytes";
+            if (has_variants) res.headers["Vary"] = "Accept-Encoding";
+            if (!encoding.empty()) res.headers["Content-Encoding"] = encoding;
 
             // If-None-Match takes precedence over If-Modified-Since (RFC 9110 section 13.2.2).
             bool not_modified = false;
@@ -346,7 +392,8 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
                 return false;
             }
 
-            res.send_file(requested.string(), std::string(mime_type_for_extension(requested.extension().string())));
+            // The type of what the file is, not of its compressed form.
+            res.send_file(requested.string(), std::string(mime_type_for_extension(original.extension().string())));
             if (res.file_fd == -1) return miss(); // vanished or unreadable
 
             auto range_header = header("Range");

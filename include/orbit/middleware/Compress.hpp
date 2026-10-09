@@ -53,11 +53,13 @@ routing::Middleware compress(CompressOptions options = {});
  * The acceptable coding with the highest q-value wins; ties go to the first
  * in @p preference. An explicit entry overrides "*", "x-gzip" counts as
  * "gzip", and q=0 refuses a coding (RFC 9110 section 12.5.3). Codings not
- * available in this build are never chosen.
+ * available in this build are never chosen, unless @p only_available is
+ * false (the body is already compressed, e.g. a precompressed file).
  *
  * @return The coding to use, or Identity if none is acceptable.
  */
-ContentCoding negotiate_coding(std::string_view accept_encoding, const std::vector<ContentCoding>& preference);
+ContentCoding negotiate_coding(std::string_view accept_encoding, const std::vector<ContentCoding>& preference,
+                               bool only_available = true);
 
 /// True if this build can produce @p coding.
 bool coding_available(ContentCoding coding);

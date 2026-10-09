@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   WebSockets from any Origin. `on_connect` has an overload that also
   receives the handshake request, and `WebSocketConnection::handshake_request()`
   exposes it to `app.ws()` handlers.
+- **`StaticFilesOptions::precompressed`** (#191): serve `app.js.br`,
+  `app.js.zst` or `app.js.gz` in place of `app.js` when the client accepts
+  that coding, with `Content-Encoding`, the original `Content-Type` and
+  `Vary: Accept-Encoding`. `negotiate_coding()` takes `only_available =
+  false` for bodies that are already compressed.
 - **`StaticFilesOptions::mount` and `fallthrough`** (#199): serve a directory
   under a URL prefix (`mount = "/files"`: `/files/a.png` is `<dir>/a.png`,
   other paths are not considered), and answer a miss with `404` instead of

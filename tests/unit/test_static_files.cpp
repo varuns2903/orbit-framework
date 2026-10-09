@@ -317,3 +317,65 @@ TEST_F(StaticFilesTest, WithoutFallthroughAMissIsA404Here) {
     EXPECT_FALSE(run("/files/digits.txt", found, HttpMethod::GET, {}, strict));
     EXPECT_EQ(found.last.headers.at("Content-Length"), "10");
 }
+
+// --- Precompressed siblings (#191) ---
+
+TEST_F(StaticFilesTest, PrecompressedSiblingIsServedWhenAccepted) {
+    write_file(pub / "app.js", std::string(1000, 'a'));
+    write_file(pub / "app.js.br", "BR");
+    write_file(pub / "app.js.gz", "GZIP");
+    orbit::middleware::StaticFilesOptions opts;
+    opts.precompressed = true;
+
+    StaticMockWriter br;
+    EXPECT_FALSE(run("/app.js", br, HttpMethod::GET, {{"Accept-Encoding", "gzip, br"}}, opts));
+    EXPECT_EQ(br.last.headers.at("Content-Encoding"), "br");
+    EXPECT_EQ(br.last.headers.at("Content-Length"), "2");
+    EXPECT_EQ(br.last.headers.at("Content-Type").find("javascript") != std::string::npos, true)
+        << br.last.headers.at("Content-Type");
+    EXPECT_EQ(br.last.headers.at("Vary"), "Accept-Encoding");
+
+    StaticMockWriter gz;
+    EXPECT_FALSE(run("/app.js", gz, HttpMethod::GET, {{"Accept-Encoding", "gzip"}}, opts));
+    EXPECT_EQ(gz.last.headers.at("Content-Encoding"), "gzip");
+    EXPECT_EQ(gz.last.headers.at("Content-Length"), "4");
+    EXPECT_NE(gz.last.headers.at("ETag"), br.last.headers.at("ETag")) << "an ETag per encoding";
+
+    // Not accepted (or zstd only, which has no sibling): the plain file, still with Vary.
+    for (const char* accept : {"", "identity", "zstd"}) {
+        StaticMockWriter plain;
+        EXPECT_FALSE(run("/app.js", plain, HttpMethod::GET, {{"Accept-Encoding", accept}}, opts)) << accept;
+        EXPECT_EQ(plain.last.headers.count("Content-Encoding"), 0u) << accept;
+        EXPECT_EQ(plain.last.headers.at("Content-Length"), "1000") << accept;
+        EXPECT_EQ(plain.last.headers.at("Vary"), "Accept-Encoding") << accept;
+    }
+}
+
+TEST_F(StaticFilesTest, PrecompressedIsOffByDefaultAndLeavesFilesWithoutSiblingsAlone) {
+    write_file(pub / "app.js", "plain");
+    write_file(pub / "app.js.br", "BR");
+    StaticMockWriter off;
+    EXPECT_FALSE(run("/app.js", off, HttpMethod::GET, {{"Accept-Encoding", "br"}}));
+    EXPECT_EQ(off.last.headers.count("Content-Encoding"), 0u);
+
+    orbit::middleware::StaticFilesOptions opts;
+    opts.precompressed = true;
+    StaticMockWriter none;
+    EXPECT_FALSE(run("/digits.txt", none, HttpMethod::GET, {{"Accept-Encoding", "br, gzip"}}, opts));
+    EXPECT_EQ(none.last.headers.count("Content-Encoding"), 0u);
+    EXPECT_EQ(none.last.headers.count("Vary"), 0u) << "no variants, nothing varies";
+}
+
+// A sibling that is a symlink out of the directory is not served.
+TEST_F(StaticFilesTest, PrecompressedSiblingMustStayInside) {
+    write_file(pub / "app.js", "plain");
+    std::error_code ec;
+    fs::create_symlink(root / "secret.txt", pub / "app.js.gz", ec);
+    if (ec) GTEST_SKIP() << "symlinks unavailable: " << ec.message();
+    orbit::middleware::StaticFilesOptions opts;
+    opts.precompressed = true;
+    StaticMockWriter w;
+    EXPECT_FALSE(run("/app.js", w, HttpMethod::GET, {{"Accept-Encoding", "gzip"}}, opts));
+    EXPECT_EQ(w.last.headers.count("Content-Encoding"), 0u);
+    EXPECT_EQ(w.last.headers.at("Content-Length"), "5");
+}
