@@ -109,15 +109,17 @@ jobs:
     - name: The CLI manifest matches vcpkg.json
       run: python3 tools/cli/check_manifest.py
 
+    # Cached outside demo/: restoring into demo/build would create demo/
+    # before `orbit new demo`, which then refuses an existing directory.
     - name: Cache vcpkg dependencies
       uses: actions/cache@v6
       with:
         path: |
-          demo/build/vcpkg_installed
+          scaffold-cache/vcpkg_installed
           vcpkg/downloads
-        key: ${{ runner.os }}-vcpkg-scaffold-v1-${{ hashFiles('vcpkg.json', 'tools/cli/orbit') }}
+        key: ${{ runner.os }}-vcpkg-scaffold-v2-${{ hashFiles('vcpkg.json', 'tools/cli/orbit') }}
         restore-keys: |
-          ${{ runner.os }}-vcpkg-scaffold-v1-
+          ${{ runner.os }}-vcpkg-scaffold-v2-
 
     - name: Setup vcpkg (pinned to builtin-baseline)
       run: |
@@ -138,6 +140,10 @@ jobs:
       run: |
         python3 tools/cli/orbit new --fetch demo
         cat demo/vcpkg.json
+        if [ -d scaffold-cache/vcpkg_installed ]; then
+          mkdir -p demo/build
+          mv scaffold-cache/vcpkg_installed demo/build/vcpkg_installed
+        fi
 
     - name: orbit build (default build type)
       working-directory: demo
@@ -156,4 +162,14 @@ jobs:
         for i in $(seq 50); do curl -sf http://127.0.0.1:3000/api/status && break; sleep 0.2; done
         test "$(curl -s http://127.0.0.1:3000/)" = "Hello from Orbit Framework!"
         kill %1
+
+    # Back where the cache step saves it from (it saves after the last step).
+    - name: Keep the installed packages for the cache
+      if: always()
+      run: |
+        if [ -d demo/build/vcpkg_installed ]; then
+          mkdir -p scaffold-cache
+          rm -rf scaffold-cache/vcpkg_installed
+          mv demo/build/vcpkg_installed scaffold-cache/vcpkg_installed
+        fi
 
