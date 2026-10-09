@@ -86,7 +86,20 @@ struct ServerConfig {
     // finish before remaining connections are closed. A second signal stops at once.
     std::chrono::seconds shutdown_timeout{30};
     
-    static ServerConfig parse(int argc, char* argv[]);
+    /// How parse() treats a flag it does not know.
+    enum class ParseMode {
+        Lenient, ///< Report it on stderr and carry on: the application may handle its own flags.
+        Strict,  ///< Report it and exit(1): the whole command line is Orbit's.
+    };
+
+    /**
+     * @brief Reads the server's command-line flags (see --help).
+     *
+     * A malformed value, or a known flag without one, is always fatal. An
+     * unknown flag is reported, with the closest known flag when there is
+     * one ("did you mean --host?"), and is fatal only in ParseMode::Strict.
+     */
+    static ServerConfig parse(int argc, char* argv[], ParseMode mode = ParseMode::Lenient);
 };
 
 } // namespace config

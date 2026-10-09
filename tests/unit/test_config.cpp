@@ -176,6 +176,21 @@ TEST(ServerConfigParseTest, HostIsAnAliasOfBind) {
     EXPECT_EQ(parse_args({"-b", "10.0.0.1"}).host, "10.0.0.1");
 }
 
+// A near miss names the flag it probably meant (#194).
+TEST(ServerConfigParseTest, UnknownFlagSuggestsTheClosestOne) {
+    auto err_for = [](std::vector<std::string> args) {
+        testing::internal::CaptureStderr();
+        parse_args(std::move(args));
+        return testing::internal::GetCapturedStderr();
+    };
+    EXPECT_NE(err_for({"--hots", "x"}).find("Unknown argument: --hots (did you mean --host?)"), std::string::npos);
+    EXPECT_EQ(err_for({"--max-body"}).find("did you mean"), std::string::npos) << "too far: no guess";
+    EXPECT_NE(err_for({"--treads", "2"}).find("did you mean --threads?"), std::string::npos);
+    EXPECT_NE(err_for({"--cpu-afinity"}).find("did you mean --cpu-affinity?"), std::string::npos);
+    EXPECT_EQ(err_for({"--frobnicate"}).find("did you mean"), std::string::npos);
+    EXPECT_EQ(err_for({"--app-flag"}).find("did you mean"), std::string::npos);
+}
+
 class ServerConfigParseDeathTest : public testing::Test {
 protected:
     void SetUp() override { GTEST_FLAG_SET(death_test_style, "threadsafe"); }
@@ -192,6 +207,18 @@ TEST_F(ServerConfigParseDeathTest, FlagWithoutValueExits) {
     EXPECT_EXIT(parse_args({"--port"}), testing::ExitedWithCode(1), "Missing value for --port");
     EXPECT_EXIT(parse_args({"-p", "80", "--host"}), testing::ExitedWithCode(1), "Missing value for --host");
     EXPECT_EXIT(parse_args({"--sni-cert", "only-a-cert.pem"}), testing::ExitedWithCode(1), "Missing value for --sni-cert");
+}
+
+// Strict mode: the command line is Orbit's alone, so an unknown flag stops.
+TEST_F(ServerConfigParseDeathTest, StrictModeRejectsUnknownFlags) {
+    auto strict = [](std::vector<std::string> args) {
+        args.insert(args.begin(), "orbit");
+        std::vector<char*> argv;
+        for (auto& a : args) argv.push_back(a.data());
+        return ServerConfig::parse(static_cast<int>(argv.size()), argv.data(), ServerConfig::ParseMode::Strict);
+    };
+    EXPECT_EXIT(strict({"--hots", "127.0.0.1"}), testing::ExitedWithCode(1), "did you mean --host");
+    EXPECT_EQ(strict({"--host", "127.0.0.1", "--cpu-affinity"}).host, "127.0.0.1");
 }
 
 TEST_F(ServerConfigParseDeathTest, InvalidEngineExits) {

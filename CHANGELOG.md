@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `exp`, `nbf`, `iss`, `aud`, `sub` and a `kid` header, so login endpoints no
   longer hand-roll base64url and HMAC. `orbit::jwt::claim<T>(req.user, name)`
   reads a verified claim with its type.
+- **`ServerConfig::parse(argc, argv, ParseMode::Strict)`**: unknown flags
+  stop the program, for servers whose whole command line is Orbit's. In
+  either mode an unknown flag now names the closest known one ("did you mean
+  --host?").
 - **`benchmarks/probe.sh`**: sustained-load probe that reports, per window,
   throughput, p99, memory, threads, context switches per request and heap
   allocations per request (with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`), and
