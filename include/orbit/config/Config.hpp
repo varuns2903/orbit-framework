@@ -100,6 +100,9 @@ struct ServerConfig {
      * one ("did you mean --host?"), and is fatal only in ParseMode::Strict.
      */
     static ServerConfig parse(int argc, char* argv[], ParseMode mode = ParseMode::Lenient);
+    /// parse(), applying the flags on top of @p base (e.g. settings from a
+    /// configuration file) instead of the defaults.
+    static ServerConfig parse(int argc, char* argv[], ServerConfig base, ParseMode mode = ParseMode::Lenient);
 };
 
 } // namespace config

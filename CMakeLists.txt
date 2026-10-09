@@ -204,6 +204,7 @@ set(SERVER_SOURCES
     src/network/TlsContext.cpp
     src/server/Listener.cpp
     src/config/Config.cpp
+    src/config/ConfigFile.cpp
     src/utils/Logger.cpp
     src/server/EventLoop.cpp
     src/server/Connection.cpp
