@@ -14,6 +14,10 @@
 #include <cstdlib>
 #include <orbit/http/json.hpp>
 #include <orbit/database/ResultSet.hpp>
+#ifdef ORBIT_ENABLE_POSTGRES
+// database::query_async, used for every client that is not MySQL/MariaDB.
+#include <orbit/database/PostgresCoro.hpp>
+#endif
 
 namespace orbit::orm {
 
@@ -247,7 +251,12 @@ auto do_query_async(std::shared_ptr<DBClient> client, const std::string& sql, co
     if constexpr (mysql) {
         return client->query_async(detail::inline_literals(rendered, params, [&](const std::string& v) { return client->escape(v); }));
     } else {
+#ifdef ORBIT_ENABLE_POSTGRES
         return database::query_async(client, detail::number_placeholders(rendered), params);
+#else
+        static_assert(!std::is_same_v<DBClient, DBClient>,
+                      "this ORM client needs PostgreSQL support, which this build of Orbit leaves out (ORBIT_ENABLE_POSTGRES=OFF)");
+#endif
     }
 }
 

@@ -101,6 +101,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RelWithDebInfo` (`--debug` and `--release` select the others) and takes
   `--jobs`, defaulting to one job per CPU but at most one per 2 GB of RAM.
   Orbit's warning flags no longer fire inside inja's headers.
+- **GraphQL error responses are valid JSON** (#188). The middleware built
+  them by concatenating the exception message, so a quote, backslash or
+  newline produced an invalid body.
+- **Every public header compiles on its own.** `GraphQL.hpp`,
+  `orm/QueryBuilder.hpp`, `orm/Model.hpp` and `orm/MigrationRunner.hpp` only
+  compiled after other includes; `tools/check_headers.sh` now checks all of
+  them in CI.
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1
