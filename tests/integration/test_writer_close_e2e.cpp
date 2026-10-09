@@ -54,14 +54,15 @@ protected:
             w->send(HttpResponse().send("ok"));
         });
         app->get("/events", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
-            HttpResponse res;
-            res.headers["Content-Type"] = "text/event-stream";
-            res.headers["Cache-Control"] = "no-cache";
-            w->send_headers(res);
-            w->send_sse_event("hello");
+            // Subscribe before writing anything: once the first event is out,
+            // the client may look at the hub (a race seen on Windows).
             std::string version = req.http_version;
             // Capture the writer weakly: the hub owns it, the callback must not.
             std::weak_ptr<ResponseWriter> weak = w;
+            {
+                std::lock_guard<std::mutex> lock(g_mutex);
+                g_subscribers.push_back(w);
+            }
             w->on_close([weak, version] {
                 std::lock_guard<std::mutex> lock(g_mutex);
                 if (auto writer = weak.lock()) {
@@ -70,8 +71,11 @@ protected:
                 g_closed.push_back(version);
                 g_cv.notify_all();
             });
-            std::lock_guard<std::mutex> lock(g_mutex);
-            g_subscribers.push_back(w);
+            HttpResponse res;
+            res.headers["Content-Type"] = "text/event-stream";
+            res.headers["Cache-Control"] = "no-cache";
+            w->send_headers(res);
+            w->send_sse_event("hello");
         });
 
         server_thread = std::thread([] { app->listen(); });
