@@ -91,6 +91,28 @@ app.ws("/chat",
        [](orbit::http::websocket::WebSocketConnection& ws) { /* ... */ });
 ```
 
+`EventRouter::attach()` takes the same middleware list:
+
+```cpp
+#include <orbit/websocket/EventRouter.hpp>
+
+struct Session { std::string user_id; };
+orbit::websocket::EventRouter<Session> events;
+
+// The handshake request, with what the middleware set on it, is readable
+// during on_connect: initialise the session from it rather than from what
+// the client sends later.
+events.on_connect([](orbit::websocket::EventSocket<Session>& socket, const orbit::http::HttpRequest& req) {
+    socket.session().user_id = req.user.value("sub", "");
+});
+events.attach(app, "/ws",
+              {orbit::middleware::require_origin({"https://app.example.com"}),
+               orbit::middleware::jwt_auth(secret)});
+```
+
+For `app.ws()` handlers, `ws.handshake_request()` gives the same request
+while the handler runs (and null afterwards).
+
 Handshakes that are not `GET`, lack `Connection: Upgrade`, carry a malformed
 `Sec-WebSocket-Key`, or request a version other than 13 are answered with
 `400 Bad Request`.

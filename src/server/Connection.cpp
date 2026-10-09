@@ -492,7 +492,13 @@ void Connection::process_request() {
             upgrade_to_websocket(std::move(ws_conn));
             arm_timer(timeouts_.websocket_idle);
             
-            // Call the user callback (this allows them to set up on_message handlers and send initial messages)
+            // Call the user callback (this allows them to set up on_message handlers and send initial messages).
+            // The upgrade request is readable from it for the duration (#193).
+            struct ClearHandshake {
+                http::websocket::WebSocketConnection* ws;
+                ~ClearHandshake() { ws->set_handshake_request(nullptr); }
+            } clear_handshake{ws_connection_.get()};
+            ws_connection_->set_handshake_request(&req);
             handler(*ws_connection_);
             
             // If the client pipelined a WebSocket frame immediately, process it!

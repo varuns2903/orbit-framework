@@ -15,6 +15,7 @@ namespace orbit::server {
 }
 
 namespace orbit::http {
+struct HttpRequest;
 namespace websocket {
 
 namespace detail {
@@ -152,11 +153,25 @@ public:
      */
     void set_max_message_size(size_t bytes) { max_message_size_ = bytes; }
 
+    /**
+     * @brief The HTTP request that opened this WebSocket: path, query,
+     *        headers, cookies, and whatever the route's middleware set on it
+     *        (`user` from jwt_auth(), `session`, ...).
+     *
+     * Available only while the route's handler runs (EventRouter's
+     * on_connect included); null afterwards. Copy what the connection needs
+     * to keep, such as the user id, into its own state.
+     */
+    const HttpRequest* handshake_request() const { return handshake_request_; }
+    /// Set by the server around the handler call.
+    void set_handshake_request(const HttpRequest* request) { handshake_request_ = request; }
+
     // Internal API called by Connection::handle_read when in WEBSOCKET state
     void process_raw_data(std::vector<char>& buffer);
 
 private:
     Transport transport_;
+    const HttpRequest* handshake_request_{nullptr};
     std::function<void(const std::string&)> message_handler_;
     std::function<void(const std::string&)> binary_handler_;
     std::function<void()> close_handler_;

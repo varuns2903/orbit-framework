@@ -112,6 +112,19 @@ public:
      * @brief Registers a connection handler.
      */
     void on_connect(std::function<void(EventSocket<SessionType>&)> handler) {
+        on_connect_ = [handler = std::move(handler)](EventSocket<SessionType>& socket, const http::HttpRequest&) {
+            handler(socket);
+        };
+    }
+
+    /**
+     * @brief Registers a connection handler that also sees the handshake
+     *        request, to initialise the session from authenticated data
+     *        (e.g. `req.user` set by jwt_auth() in attach()'s middleware)
+     *        rather than from what the client sends later. The request is
+     *        valid only during the call.
+     */
+    void on_connect(std::function<void(EventSocket<SessionType>&, const http::HttpRequest&)> handler) {
         on_connect_ = std::move(handler);
     }
 
@@ -124,9 +137,13 @@ public:
 
     /**
      * @brief Attaches this EventRouter to the Orbit App at a specific path.
+     * @param mws Middleware run on the handshake before the upgrade, as for
+     *        app.ws(): require_origin() (browsers do not apply CORS to
+     *        WebSockets), jwt_auth(), rate limits. One that stops the
+     *        request refuses the connection.
      */
-    void attach(server::App& app, const std::string& path) {
-        app.ws(path, [this](http::websocket::WebSocketConnection& raw_ws) {
+    void attach(server::App& app, const std::string& path, std::vector<routing::Middleware> mws = {}) {
+        app.ws(path, std::move(mws), [this](http::websocket::WebSocketConnection& raw_ws) {
             
             // Simple UUID generation using counter and pointer for uniqueness
             static std::atomic<uint64_t> counter = 0;
@@ -139,7 +156,11 @@ public:
                 sockets_[id] = es;
             }
 
-            if (on_connect_) on_connect_(*es);
+            if (on_connect_) {
+                static const http::HttpRequest kNoRequest{};
+                const http::HttpRequest* handshake = raw_ws.handshake_request();
+                on_connect_(*es, handshake ? *handshake : kNoRequest);
+            }
 
             raw_ws.on_message([this, id](const std::string& msg) {
                 try {
@@ -234,7 +255,7 @@ private:
     std::unordered_map<std::string, std::unordered_set<std::string>> rooms_;
     std::unordered_map<std::string, std::function<void(EventSocket<SessionType>&, const nlohmann::json&)>> handlers_;
     
-    std::function<void(EventSocket<SessionType>&)> on_connect_;
+    std::function<void(EventSocket<SessionType>&, const http::HttpRequest&)> on_connect_;
     std::function<void(EventSocket<SessionType>&)> on_disconnect_;
 };
 
