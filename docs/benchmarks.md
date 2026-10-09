@@ -58,6 +58,38 @@ in the run summary and as the `benchmark-results` artifact. A hosted runner
 is a shared 4-vCPU VM, so treat its figures as a reproducible sanity check
 with a wide spread, not as the published result.
 
+## Sustained load and per-request costs
+
+[`benchmarks/probe.sh`](../benchmarks/probe.sh) runs one Orbit server under
+consecutive wrk windows and reports, per window, what a median hides
+([#166](https://github.com/varuns2903/orbit-framework/issues/166)):
+
+| Column | How it is measured |
+|---|---|
+| req/s, p99 | wrk `--latency` for the window |
+| RSS, threads | `/proc/<pid>/status`, `/proc/<pid>/task` after the window |
+| ctx switches / req | voluntary + involuntary context switches of every server thread during the window, divided by the requests |
+| allocations / req | heap allocations during the window divided by the requests; needs a server built with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`, which counts `operator new` and serves the count at `/__stats` |
+| syscalls / req | `SYSCALLS=1`: one extra window under `strace -c -f` (slow, but the count per request is exact) |
+
+```bash
+# A counting build of the benchmark server
+cmake -B build_probe -S . -DCMAKE_BUILD_TYPE=Release -DENABLE_SANITIZERS=OFF \
+      -DORBIT_BUILD_TESTS=OFF -DORBIT_BENCH_COUNT_ALLOCATIONS=ON \
+      -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build_probe --target benchmark_server
+
+ORBIT_BIN=build_probe/benchmark_server ENGINE=iouring WINDOWS=12 benchmarks/probe.sh
+```
+
+Settings (engine, event loops, threads, windows, window length, connections,
+CPU split, path, port) are environment variables listed at the top of the
+script; the table is written to `probe-results.md`. Falling throughput or
+growing memory across windows means something accumulates with load; the
+allocation, context-switch and syscall counts are the per-request budgets
+the performance work in [#183](https://github.com/varuns2903/orbit-framework/issues/183)
+drives down.
+
 ## Results
 
 **Orbit currently does about 40% of the throughput of Drogon and Crow on
