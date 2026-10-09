@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP/1.1 streamed response now notices a client leaving right away, not
   at the next failed write. HTTP/2 requests now report
   `http_version == "HTTP/2"` (it was empty).
+- **`EventRouter::attach(app, path, middleware)`** (#193): EventRouter
+  endpoints can take handshake middleware such as `require_origin()` and
+  `jwt_auth()`, as `app.ws()` routes could; without it they accepted
+  WebSockets from any Origin. `on_connect` has an overload that also
+  receives the handshake request, and `WebSocketConnection::handshake_request()`
+  exposes it to `app.ws()` handlers.
 - **`benchmarks/probe.sh`**: sustained-load probe that reports, per window,
   throughput, p99, memory, threads, context switches per request and heap
   allocations per request (with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`), and
