@@ -25,10 +25,19 @@ struct WsRoute {
     std::vector<Middleware> middlewares; // Group and route middleware, outermost first
 };
 
+/// A group's on_error handler, linked to the enclosing group's. A route
+/// keeps the scope of the group it was registered in; its exceptions go to
+/// the innermost handler set along the chain, else the app's.
+struct ErrorScope {
+    ErrorHandler handler;
+    std::shared_ptr<const ErrorScope> parent;
+};
+
 struct DynamicRoute {
     http::HttpMethod method;
     std::vector<std::string> path_segments;
     RouteHandler handler;
+    std::shared_ptr<const ErrorScope> errors; // null: the app's handler
 };
 
 /**
@@ -144,7 +153,10 @@ public:
     /// A path that exists under other methods still gets 405 with Allow.
     void not_found(RouteHandler handler);
     
-    // Register global error handler
+    /// Handles exceptions from routes. On the app (root router) it covers
+    /// every route, unmatched requests and app-level middleware; in a group
+    /// it covers that group's routes and nested groups, before or after
+    /// they are registered.
     void on_error(ErrorHandler handler);
 
     // Route an incoming request to the correct handler
@@ -156,7 +168,13 @@ private:
     // Error handling for an exception from a route, middleware or (later,
     // through the writer's error sink) an asynchronous handler.
     void handle_exception(std::exception_ptr error, http::HttpRequest& request,
-                          std::shared_ptr<http::ResponseWriter> response_writer) const;
+                          std::shared_ptr<http::ResponseWriter> response_writer,
+                          const ErrorScope* scope = nullptr) const;
+
+    struct StaticRoute {
+        RouteHandler handler;
+        std::shared_ptr<const ErrorScope> errors; // null: the app's handler
+    };
 
 public:
     WsHandler get_ws_route(const std::string& path) const;
@@ -183,9 +201,10 @@ private:
     std::shared_ptr<openapi::OpenApiRegistry> openapi_;
     std::vector<Middleware> local_middlewares_;
     ErrorHandler error_handler_;
+    std::shared_ptr<ErrorScope> error_scope_; // groups only
     RouteHandler not_found_handler_;
     
-    std::unordered_map<std::string, RouteHandler> routes_;
+    std::unordered_map<std::string, StaticRoute> routes_;
     std::unordered_map<std::string, WsRoute> ws_routes_;
     std::vector<DynamicRoute> dynamic_routes_;
     std::vector<Middleware> middlewares_;
