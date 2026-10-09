@@ -167,6 +167,7 @@ Http2Session::~Http2Session() {
         nghttp2_session_del(session_);
     }
     for (auto& [id, ctx] : streams_) {
+        if (auto writer = ctx->writer.lock()) writer->mark_closed();
         if (ctx->file_fd != -1) {
             utils::file::close(ctx->file_fd);
             ctx->file_fd = -1;
@@ -295,9 +296,25 @@ int Http2Session::on_stream_close(nghttp2_session* session, int32_t stream_id, u
         if (it->second->file_fd != -1) {
             utils::file::close(it->second->file_fd);
         }
+        // On a pool thread: nghttp2 calls this with session_mutex_ held,
+        // and an on_close callback may well write to the session (#197).
+        if (auto writer = it->second->writer.lock()) {
+            self->thread_pool_.enqueue([writer] { writer->mark_closed(); });
+        }
         self->streams_.erase(it);
     }
     return 0;
+}
+
+void Http2Session::close_streams() {
+    std::vector<std::shared_ptr<Http2ResponseWriter>> writers;
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        for (auto& [id, ctx] : streams_) {
+            if (auto writer = ctx->writer.lock()) writers.push_back(std::move(writer));
+        }
+    }
+    for (auto& writer : writers) writer->mark_closed();
 }
 
 ssize_t Http2Session::send_callback(nghttp2_session* session, const uint8_t* data, size_t length, int flags, void* user_data) {
@@ -342,12 +359,14 @@ void Http2Session::dispatch_request(std::shared_ptr<StreamContext> stream_ctx) {
         return;
     }
     
+    req.http_version = "HTTP/2"; // as HTTP/3 sets "HTTP/3"; it was left empty
     req.client_ip = client_ip_;
     req.peer_ip = client_ip_;
     auto writer = std::make_shared<Http2ResponseWriter>(weak_from_this(), stream_ctx->stream_id,
                                                         req.method == http::HttpMethod::HEAD);
     writer->body_owner_ = stream_ctx;
     writer->body_ = stream_ctx->backing_body;
+    stream_ctx->writer = writer;
     
     // The task owns the session and stream context, so both outlive the
     // handler even if the client disconnects meanwhile.

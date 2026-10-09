@@ -31,6 +31,7 @@ Connection::Connection(network::Socket socket, const std::string& client_ip, net
 }
 
 Connection::~Connection() {
+    mark_closed(); // usually done already, by on_removed()
     if (current_timer_id_ != 0) {
         timer_manager_.cancel_timer(current_timer_id_);
     }
@@ -102,8 +103,15 @@ void Connection::trigger_read() {
 }
 
 void Connection::on_removed() {
-    std::lock_guard<std::mutex> lock(io_mutex_);
-    removed_ = true;
+    {
+        std::lock_guard<std::mutex> lock(io_mutex_);
+        removed_ = true;
+    }
+    // Writers held past this point (SSE subscribers, chunked streams) learn
+    // that the client is gone (#197). Outside io_mutex_: the callbacks may
+    // call back into this writer.
+    if (h2_session_) h2_session_->close_streams();
+    mark_closed();
 }
 
 namespace {
@@ -601,6 +609,11 @@ void Connection::send_headers(http::HttpResponse& response) {
     
     std::string serialized = response.serialize_headers();
     send_data(serialized);
+    // A streamed response can last indefinitely (SSE). Keep a read armed so
+    // that a client leaving is noticed now, not at the next failed write,
+    // which an idle stream may never make (#197). Bytes that arrive
+    // meanwhile stay buffered for the next request, as they always have.
+    if (state_ == ConnectionState::HTTP) trigger_read();
 }
 
 void Connection::send(http::HttpResponse&& response) {

@@ -118,6 +118,36 @@ app.get("/stream", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
 });
 ```
 
+### When the Client Leaves
+
+A writer kept after the handler returns (an SSE subscriber, a long chunked
+stream) can find out that its client is gone: `is_open()` turns false, and
+callbacks registered with `on_close()` run once, when the connection
+(HTTP/1.1) or stream (HTTP/2, HTTP/3) closes, because the client left, a
+timeout fired or the server is shutting down. Writes after that are dropped.
+
+```cpp
+std::mutex mu;
+std::vector<std::shared_ptr<ResponseWriter>> subscribers;
+
+app.get("/events", [&](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
+    HttpResponse res;
+    res.headers["Content-Type"] = "text/event-stream";
+    w->send_headers(res);
+
+    std::weak_ptr<ResponseWriter> weak = w;   // the list owns it, not the callback
+    w->on_close([&, weak] {
+        std::lock_guard<std::mutex> lock(mu);
+        if (auto gone = weak.lock()) std::erase(subscribers, gone);
+    });
+    std::lock_guard<std::mutex> lock(mu);
+    subscribers.push_back(w);
+});
+```
+
+The callback runs on a server thread: keep it short, and do not block in it.
+A callback registered after the close runs right away.
+
 ## Request Bodies
 
 ### Forms

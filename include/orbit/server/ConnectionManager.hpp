@@ -29,6 +29,9 @@ public:
      * @param tls_context The TLS context (optional).
      */
     ConnectionManager(network::Proactor& proactor, const routing::Router& router, concurrency::ThreadPool& thread_pool, TimerManager& timer_manager, size_t max_body_size, network::TlsContext* tls_context = nullptr);
+    /// Connections still open (the server is going away) are closed for
+    /// anyone still holding one as a ResponseWriter.
+    ~ConnectionManager();
 
     /**
      * @brief Sets the timeouts applied to connections accepted from now on.

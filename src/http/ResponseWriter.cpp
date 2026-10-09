@@ -60,4 +60,41 @@ void ResponseWriter::report_async_exception(const std::shared_ptr<ResponseWriter
     }
 }
 
+void ResponseWriter::on_close(std::function<void()> callback) {
+    if (!callback) return;
+    {
+        std::lock_guard<std::mutex> lock(close_mutex_);
+        if (!closed_.load()) {
+            close_callbacks_.push_back(std::move(callback));
+            return;
+        }
+    }
+    try {
+        callback();
+    } catch (const std::exception& e) {
+        LOG_ERROR("on_close callback threw: " << e.what());
+    } catch (...) {
+        LOG_ERROR("on_close callback threw");
+    }
+}
+
+void ResponseWriter::mark_closed() noexcept {
+    std::vector<std::function<void()>> callbacks;
+    {
+        std::lock_guard<std::mutex> lock(close_mutex_);
+        if (closed_.exchange(true)) return;
+        callbacks.swap(close_callbacks_);
+    }
+    // Outside the lock: a callback may well call on_close() or is_open().
+    for (auto& callback : callbacks) {
+        try {
+            callback();
+        } catch (const std::exception& e) {
+            LOG_ERROR("on_close callback threw: " << e.what());
+        } catch (...) {
+            LOG_ERROR("on_close callback threw");
+        }
+    }
+}
+
 } // namespace http

@@ -79,7 +79,8 @@ as a parameter until it finishes. Other callbacks (a lambda handed to the
 thread pool, a subscriber list) must capture the
 `std::shared_ptr<ResponseWriter>` (and any request data they need) by value;
 references to the `HttpRequest` or to locals are dangling once the handler
-has returned.
+has returned. A writer kept for later can check `is_open()` or register
+`on_close()` to learn that its client has gone.
 
 ## 6. Platform coverage is uneven
 
