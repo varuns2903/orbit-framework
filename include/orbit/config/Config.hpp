@@ -9,7 +9,10 @@ namespace orbit::config {
 
 enum class EventEngine {
     Epoll,
-    IoUring
+    IoUring,
+    // io_uring when the kernel supports it (Linux 5.7+, fast poll),
+    // otherwise epoll; decided once when the App starts listening.
+    Auto
 };
 
 enum class HttpVersion {
@@ -33,12 +36,18 @@ struct ServerConfig {
     // Open connections served at once; 0 = unlimited. Beyond it, new
     // connections wait in the listen backlog until a slot frees up.
     size_t max_connections{0};
+    // Threads running handlers. 0 = one per CPU this process may run on
+    // (its affinity mask, so containers and taskset are respected).
     size_t worker_threads{4};
     // Event loops (reactors), each on its own thread with its own listening
     // socket (SO_REUSEPORT; the kernel spreads connections across them).
     // A connection stays on the loop that accepted it, TLS included. Handlers
     // still run on the worker_threads pool. Linux only: elsewhere 1 is used.
+    // 0 = one per CPU in the process's affinity mask.
     size_t event_loops{1};
+    // Pin event loop i to the i-th CPU of the affinity mask (Linux). The
+    // first loop runs on the thread that called listen(), which is pinned too.
+    bool cpu_affinity{false};
     // Logging is process-wide (utils::Logger). An App applies these only when
     // they differ from the defaults, so creating an App never resets a level
     // or format set earlier by Logger::init()/set_format() or by another App.

@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   throughput, p99, memory, threads, context switches per request and heap
   allocations per request (with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`), and
   optionally syscalls per request (#166).
+- **`auto` for event loops, worker threads and the engine** (#173):
+  `--event-loops auto` / `event_loops = 0` and `--threads auto` /
+  `worker_threads = 0` use one per CPU in the process's affinity mask;
+  `--engine auto` / `EventEngine::Auto` picks io_uring when the kernel has fast
+  poll (Linux 5.7+), else epoll; `--cpu-affinity` pins each event loop to its
+  own CPU. The effective configuration is logged at start-up and returned by
+  `App::effective_config()`. Defaults are unchanged.
 - **Wildcard routes** (#189): a trailing `*` or `*name` segment matches the
   rest of the path (zero or more segments) into `req.params`. Exact routes win
   over `:param` routes, which win over wildcards (most fixed segments first).

@@ -230,6 +230,13 @@ public:
      */
     std::vector<size_t> connections_per_event_loop() const;
 
+    /**
+     * @brief The configuration in effect: once listen() has started, "auto"
+     *        settings (event_loops = 0, worker_threads = 0, EventEngine::Auto)
+     *        show what they resolved to.
+     */
+    const config::ServerConfig& effective_config() const { return config_; }
+
     concurrency::ThreadPool& get_thread_pool() {
         std::lock_guard<std::mutex> lock(loop_mutex_);
         if (!thread_pool_) throw std::runtime_error("Server not started");

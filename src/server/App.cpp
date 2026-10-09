@@ -14,6 +14,12 @@
 #endif
 #include <fcntl.h>
 #include <vector>
+#include <thread>
+#ifdef __linux__
+#include <liburing.h>
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 namespace orbit::server {
 
@@ -33,6 +39,64 @@ void signal_handler(int signum) {
     g_last_signal.store(signum, std::memory_order_relaxed);
     g_signal_seq.fetch_add(1, std::memory_order_release);
 }
+
+namespace {
+
+// CPUs this process may run on: its affinity mask on Linux (containers,
+// taskset, cgroups), otherwise all of them.
+std::vector<int> allowed_cpus() {
+    std::vector<int> cpus;
+#ifdef __linux__
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (sched_getaffinity(0, sizeof(set), &set) == 0) {
+        for (size_t c = 0; c < CPU_SETSIZE; ++c) {
+            if (CPU_ISSET(c, &set)) cpus.push_back(static_cast<int>(c));
+        }
+    }
+#endif
+    if (cpus.empty()) {
+        unsigned n = std::max(1u, std::thread::hardware_concurrency());
+        for (unsigned c = 0; c < n; ++c) cpus.push_back(static_cast<int>(c));
+    }
+    return cpus;
+}
+
+// io_uring with fast poll (Linux 5.7+): what EventEngine::Auto requires.
+bool io_uring_usable() {
+#ifdef __linux__
+    struct io_uring ring;
+    struct io_uring_params params{};
+    if (io_uring_queue_init_params(4, &ring, &params) < 0) return false;
+    bool ok = (params.features & IORING_FEAT_FAST_POLL) != 0;
+    io_uring_queue_exit(&ring);
+    return ok;
+#else
+    return false;
+#endif
+}
+
+void pin_current_thread([[maybe_unused]] int cpu) {
+#ifdef __linux__
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(static_cast<size_t>(cpu), &set);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(set), &set) != 0) {
+        LOG_WARN("Could not pin an event loop to CPU " << cpu);
+    }
+#endif
+}
+
+const char* engine_name(config::EventEngine engine) {
+    switch (engine) {
+        case config::EventEngine::Epoll: return "epoll";
+        case config::EventEngine::IoUring: return "io_uring";
+        case config::EventEngine::Auto: return "auto";
+    }
+    return "?";
+}
+
+} // namespace
 
 App::App(const config::ServerConfig& config) : config_(config) {
     network::initialize_platform_networking();
@@ -252,6 +316,14 @@ void App::listen() {
     signal(SIGTERM, signal_handler);
 #endif
 
+    // "auto" settings become concrete here, once, before anything uses them.
+    const std::vector<int> cpus = allowed_cpus();
+    if (config_.event_loops == 0) config_.event_loops = cpus.size();
+    if (config_.worker_threads == 0) config_.worker_threads = cpus.size();
+    if (config_.engine == config::EventEngine::Auto) {
+        config_.engine = io_uring_usable() ? config::EventEngine::IoUring : config::EventEngine::Epoll;
+    }
+
     size_t loop_count = std::max<size_t>(1, config_.event_loops);
 #ifndef __linux__
     // Only Linux spreads connections across SO_REUSEPORT sockets; elsewhere
@@ -261,6 +333,7 @@ void App::listen() {
         loop_count = 1;
     }
 #endif
+    config_.event_loops = loop_count; // what effective_config() reports
     {
         std::lock_guard<std::mutex> lock(loop_mutex_);
         event_loops_.clear();
@@ -358,12 +431,27 @@ void App::listen() {
         }
         for (size_t i = 1; i < event_loops_.size(); ++i) {
             EventLoop* loop = event_loops_[i].get();
-            loop_threads_.emplace_back([loop] { loop->run(); });
+            const bool pin = config_.cpu_affinity;
+            const int cpu = cpus[i % cpus.size()];
+            loop_threads_.emplace_back([loop, pin, cpu] {
+                if (pin) pin_current_thread(cpu);
+                loop->run();
+            });
         }
     }
+    if (config_.cpu_affinity) pin_current_thread(cpus.front());
 
     LOG_INFO("App started listening on port " << listeners_.front()->port()
              << (loop_count > 1 ? " with " + std::to_string(loop_count) + " event loops" : std::string()));
+#ifdef __linux__
+    const std::string engine = engine_name(config_.engine);
+#else
+    // epoll/io_uring apply to Linux; elsewhere the platform's proactor runs.
+    const std::string engine = std::string("platform default (configured: ") + engine_name(config_.engine) + ")";
+#endif
+    LOG_INFO("Orbit: engine " << engine << ", " << loop_count << " event loop(s), "
+             << config_.worker_threads << " worker thread(s), " << cpus.size() << " CPU(s) available"
+             << (config_.cpu_affinity ? ", event loops pinned" : ""));
     event_loops_.front()->run();
     // The other loops stop with the first (stop()) or drain on their own
     // (shutdown()); either way, wait for them.
