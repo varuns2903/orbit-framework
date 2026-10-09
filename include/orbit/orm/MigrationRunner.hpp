@@ -7,6 +7,8 @@
 #include <fstream>
 #include <iostream>
 #include <algorithm>
+#include <chrono>
+#include <memory>
 #include <orbit/database/ResultSet.hpp>
 #include <orbit/concurrency/Task.hpp>
 #include <orbit/utils/Logger.hpp>
@@ -15,6 +17,13 @@
 // Migrations use PostgreSQL (advisory locks, transactional DDL).
 #ifdef ORBIT_ENABLE_POSTGRES
 #include <orbit/database/PostgresCoro.hpp>
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <orbit/network/KqueueProactor.hpp>
+#elif defined(_WIN32)
+#include <orbit/network/IocpProactor.hpp>
+#else
+#include <orbit/network/EpollProactor.hpp>
+#endif
 #else
 #error "orm::MigrationRunner needs PostgreSQL support, which this build of Orbit leaves out (ORBIT_ENABLE_POSTGRES=OFF)"
 #endif
@@ -24,7 +33,7 @@
 namespace orbit::orm {
 
 /**
- * @brief Simple Database Migration Runner for C++ Coroutines (PostgreSQL)
+ * @brief Database migration runner (PostgreSQL)
  * 
  * Scans a directory for .sql files, checks which have been applied 
  * against the `orbit_migrations` table, and applies any pending files in
@@ -36,39 +45,60 @@ namespace orbit::orm {
  * Statements that cannot run inside a transaction (such as
  * CREATE INDEX CONCURRENTLY) are not supported.
  */
+/// The outcome of a migration run.
+struct MigrationResult {
+    std::vector<std::string> applied; ///< Files applied by this run, in order.
+    std::string error;                ///< Why the run stopped; empty on success.
+    bool directory_missing = false;   ///< The migrations directory does not exist (not an error).
+
+    bool ok() const { return error.empty(); }
+
+    /// "Database is up to date", "Successfully applied N migrations.",
+    /// "Migrations skipped - no directory" or the error.
+    std::string summary() const {
+        if (!ok()) return error;
+        if (directory_missing) return "Migrations skipped - no directory";
+        if (applied.empty()) return "Database is up to date";
+        return "Successfully applied " + std::to_string(applied.size()) + " migrations.";
+    }
+};
+
 template <typename DbClient>
 class MigrationRunner {
 public:
     static constexpr long long kAdvisoryLockKey = 0x6f72626974; // "orbit"
 
+    /**
+     * @brief Applies the pending migrations in @p migrations_dir over a
+     *        connected client, with no HTTP involved: for start-up code, a
+     *        `migrate` command or tests.
+     *
+     * A missing directory is not an error (nothing to apply).
+     */
     // Parameters are taken by value: a coroutine outlives its caller's temporaries.
-    static concurrency::Task run_migrations(std::shared_ptr<DbClient> db, std::string migrations_dir, std::shared_ptr<http::ResponseWriter> res) {
-        auto fail = [res](const std::string& message) {
-            LOG_ERROR("[Migrations] " << message);
-            res->send(http::HttpResponse().status(http::HttpStatus::InternalServerError).send("Migrations failed; see server log"));
-        };
-
-        auto lock = co_await database::query_async(db, "SELECT pg_advisory_lock(" + std::to_string(kAdvisoryLockKey) + ");");
+    static concurrency::Awaitable<MigrationResult> run(std::shared_ptr<DbClient> db, std::string migrations_dir) {
+        MigrationResult result;
+        // Awaiters are named locals: GCC 13 hits an internal compiler error on
+        // co_await expressions holding non-trivial temporaries.
+        auto lock_query = database::query_async(db, "SELECT pg_advisory_lock(" + std::to_string(kAdvisoryLockKey) + ");");
+        auto lock = co_await lock_query;
         if (!lock.ok()) {
-            fail("Could not take the migration lock: " + lock.error());
-            co_return;
+            result.error = "Could not take the migration lock: " + lock.error();
+            co_return result;
         }
 
-        // "error:<details>" on failure, otherwise the message for the client.
-        std::string outcome;
         do {
-            auto created = co_await database::query_async(db, 
+            auto create_query = database::query_async(db,
                 "CREATE TABLE IF NOT EXISTS orbit_migrations ("
                 "id SERIAL PRIMARY KEY, "
                 "version VARCHAR(255) UNIQUE NOT NULL, "
-                "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);"
-            );
-            if (!created.ok()) { outcome = "error:Could not create orbit_migrations: " + created.error(); break; }
+                "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);");
+            auto created = co_await create_query;
+            if (!created.ok()) { result.error = "Could not create orbit_migrations: " + created.error(); break; }
 
-            database::ResultSet applied_res = co_await database::query_async(db, 
-                "SELECT version FROM orbit_migrations ORDER BY version ASC;"
-            );
-            if (!applied_res.ok()) { outcome = "error:Could not read orbit_migrations: " + applied_res.error(); break; }
+            auto applied_query = database::query_async(db, "SELECT version FROM orbit_migrations ORDER BY version ASC;");
+            database::ResultSet applied_res = co_await applied_query;
+            if (!applied_res.ok()) { result.error = "Could not read orbit_migrations: " + applied_res.error(); break; }
 
             std::vector<std::string> applied_versions;
             for (size_t i = 0; i < applied_res.size(); ++i) {
@@ -77,7 +107,7 @@ public:
 
             if (!std::filesystem::exists(migrations_dir)) {
                 LOG_INFO("[Migrations] Directory '" << migrations_dir << "' not found. Skipping migrations.");
-                outcome = "Migrations skipped - no directory";
+                result.directory_missing = true;
                 break;
             }
 
@@ -89,7 +119,6 @@ public:
             }
             std::sort(pending_files.begin(), pending_files.end());
 
-            int executed = 0;
             for (const auto& filepath : pending_files) {
                 std::string filename = std::filesystem::path(filepath).filename().string();
                 if (std::find(applied_versions.begin(), applied_versions.end(), filename) != applied_versions.end()) {
@@ -97,46 +126,98 @@ public:
                 }
 
                 std::ifstream ifs(filepath);
-                if (!ifs.is_open()) { outcome = "error:Failed to open " + filepath; break; }
+                if (!ifs.is_open()) { result.error = "Failed to open " + filepath; break; }
                 std::string sql((std::istreambuf_iterator<char>(ifs)), (std::istreambuf_iterator<char>()));
 
                 LOG_INFO("[Migrations] Applying " << filename << "...");
-                auto begin = co_await database::query_async(db, "BEGIN;");
-                if (!begin.ok()) { outcome = "error:BEGIN failed: " + begin.error(); break; }
+                auto begin_query = database::query_async(db, "BEGIN;");
+                auto begin = co_await begin_query;
+                if (!begin.ok()) { result.error = "BEGIN failed: " + begin.error(); break; }
 
-                auto run = co_await database::query_async(db, sql);
-                database::ResultSet track = run;
-                if (run.ok()) {
-                    // A named vector, not a braced list: GCC 13 crashes on braced
-                    // initializer lists inside co_await expressions.
+                auto run_query = database::query_async(db, sql);
+                auto ran = co_await run_query;
+                database::ResultSet track;
+                if (ran.ok()) {
                     std::vector<std::optional<std::string>> tracking_params;
                     tracking_params.emplace_back(filename);
-                    track = co_await database::query_async(db, "INSERT INTO orbit_migrations (version) VALUES ($1);", tracking_params);
+                    auto track_query = database::query_async(db, "INSERT INTO orbit_migrations (version) VALUES ($1);", tracking_params);
+                    track = co_await track_query;
                 }
-                if (!run.ok() || !track.ok()) {
-                    co_await database::query_async(db, "ROLLBACK;");
-                    outcome = "error:" + filename + " failed and was rolled back: " + (run.ok() ? track.error() : run.error());
+                if (!ran.ok() || !track.ok()) {
+                    auto rollback_query = database::query_async(db, "ROLLBACK;");
+                    co_await rollback_query;
+                    result.error = filename + " failed and was rolled back: " + (ran.ok() ? track.error() : ran.error());
                     break;
                 }
 
-                auto commit = co_await database::query_async(db, "COMMIT;");
-                if (!commit.ok()) { outcome = "error:COMMIT of " + filename + " failed: " + commit.error(); break; }
-                executed++;
+                auto commit_query = database::query_async(db, "COMMIT;");
+                auto commit = co_await commit_query;
+                if (!commit.ok()) { result.error = "COMMIT of " + filename + " failed: " + commit.error(); break; }
+                result.applied.push_back(filename);
             }
-            if (!outcome.empty()) break;
-
-            outcome = executed == 0 ? "Database is up to date"
-                                    : "Successfully applied " + std::to_string(executed) + " migrations.";
         } while (false);
 
-        co_await database::query_async(db, "SELECT pg_advisory_unlock(" + std::to_string(kAdvisoryLockKey) + ");");
+        auto unlock_query = database::query_async(db, "SELECT pg_advisory_unlock(" + std::to_string(kAdvisoryLockKey) + ");");
+        co_await unlock_query;
+        if (!result.ok()) LOG_ERROR("[Migrations] " << result.error);
+        co_return result;
+    }
 
-        if (outcome.rfind("error:", 0) == 0) {
-            fail(outcome.substr(6));
+    /**
+     * @brief run(), answered over HTTP: 200 with the summary, or a 500 whose
+     *        details go to the log only.
+     */
+    static concurrency::Task run_migrations(std::shared_ptr<DbClient> db, std::string migrations_dir, std::shared_ptr<http::ResponseWriter> res) {
+        auto running = run(std::move(db), std::move(migrations_dir));
+        MigrationResult result = co_await running;
+        if (result.ok()) {
+            res->send(http::HttpResponse().status(http::HttpStatus::OK).send(result.summary()));
         } else {
-            res->send(http::HttpResponse().status(http::HttpStatus::OK).send(outcome));
+            res->send(http::HttpResponse().status(http::HttpStatus::InternalServerError).send("Migrations failed; see server log"));
         }
     }
 };
+
+/**
+ * @brief Connects to PostgreSQL and applies the pending migrations in
+ *        @p migrations_dir, blocking until done: for start-up, before
+ *        App::listen(), or a separate `migrate` command.
+ *
+ * Runs its own short-lived event loop on the calling thread, so it needs no
+ * App or server. Gives up after @p timeout with an error result.
+ */
+inline MigrationResult migrate_sync(const std::string& conninfo, const std::string& migrations_dir,
+                                    std::chrono::milliseconds timeout = std::chrono::minutes(5)) {
+#if defined(__APPLE__) || defined(__FreeBSD__)
+    network::KqueueProactor proactor;
+#elif defined(_WIN32)
+    network::IocpProactor proactor;
+#else
+    network::EpollProactor proactor;
+#endif
+    auto db = std::make_shared<database::PostgresClient>(&proactor, conninfo);
+    auto done = std::make_shared<std::optional<MigrationResult>>();
+    [](std::shared_ptr<database::PostgresClient> client, std::string dir,
+       std::shared_ptr<std::optional<MigrationResult>> out) -> concurrency::Task {
+        auto connecting = database::connect_async(client);
+        if (!co_await connecting) {
+            MigrationResult failed;
+            failed.error = "Could not connect to the database";
+            *out = std::move(failed);
+            co_return;
+        }
+        auto running = MigrationRunner<database::PostgresClient>::run(client, std::move(dir));
+        *out = co_await running;
+    }(db, migrations_dir, done);
+
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!*done && std::chrono::steady_clock::now() < deadline) proactor.run_once(50);
+    if (*done) return std::move(**done);
+    // The coroutine stays suspended on an operation this loop will never
+    // complete; it is abandoned with the loop.
+    MigrationResult timed_out;
+    timed_out.error = "Migrations did not finish within the timeout";
+    return timed_out;
+}
 
 } // namespace orm
