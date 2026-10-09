@@ -74,9 +74,12 @@ Orbit has **not** had a third-party security audit or penetration test.
 ## 5. Asynchronous lifetimes
 
 Handlers may finish after they return (database coroutines, thread-pool
-work, SSE streams). Capture the `std::shared_ptr<ResponseWriter>` (and any
-request data you need) by value in such callbacks; references to the
-`HttpRequest` or to locals are dangling once the handler has returned.
+work, SSE streams). A coroutine handler can use the `HttpRequest&` it takes
+as a parameter until it finishes. Other callbacks (a lambda handed to the
+thread pool, a subscriber list) must capture the
+`std::shared_ptr<ResponseWriter>` (and any request data they need) by value;
+references to the `HttpRequest` or to locals are dangling once the handler
+has returned.
 
 ## 6. Platform coverage is uneven
 

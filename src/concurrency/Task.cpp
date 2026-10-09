@@ -1,10 +1,15 @@
 #include <orbit/concurrency/Task.hpp>
+#include <orbit/http/HttpRequest.hpp>
 #include <orbit/http/ResponseWriter.hpp>
 
 namespace orbit::concurrency::detail {
 
 uint64_t writer_generation(const std::shared_ptr<http::ResponseWriter>& writer) noexcept {
     return writer ? writer->request_generation() : 0;
+}
+
+std::shared_ptr<void> keep_request_alive(const http::HttpRequest& request) noexcept {
+    return request.keep_alive();
 }
 
 void report_task_exception(const std::shared_ptr<http::ResponseWriter>& writer, uint64_t generation,

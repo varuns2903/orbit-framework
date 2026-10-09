@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -172,6 +173,50 @@ TEST(Http1ParserTest, HeadersLiveInTheRequestNotTheInput) {
     input.assign(input.size(), '#'); // the caller reuses its buffer
     EXPECT_EQ(p.request().headers.at("Host"), "owned");
     EXPECT_EQ(p.request().uri, "/x");
+}
+
+// A coroutine handler holds the request's storage (keep_alive()) past
+// next(), while the connection parses the following request (#200).
+TEST(Http1ParserTest, AHeldRequestSurvivesNext) {
+    Http1Parser p;
+    std::string input = "POST /first HTTP/1.1\r\nHost: one\r\nContent-Length: 5\r\n\r\nalpha"
+                        "POST /second HTTP/1.1\r\nHost: two\r\nContent-Length: 4\r\n\r\nbeta";
+    size_t used = 0;
+    ASSERT_EQ(p.feed(input, used), Event::HeadersComplete);
+    size_t more = 0;
+    ASSERT_EQ(p.feed(std::string_view(input).substr(used), more), Event::MessageComplete);
+    used += more;
+
+    const orbit::http::HttpRequest& first = p.request();
+    std::shared_ptr<void> held = first.keep_alive();
+    ASSERT_TRUE(held);
+
+    p.next();
+    ASSERT_EQ(p.feed(std::string_view(input).substr(used), more), Event::HeadersComplete);
+    used += more;
+    ASSERT_EQ(p.feed(std::string_view(input).substr(used), more), Event::MessageComplete);
+
+    EXPECT_NE(&p.request(), &first) << "the next request gets fresh storage";
+    EXPECT_EQ(first.uri, "/first");
+    EXPECT_EQ(first.headers.at("Host"), "one");
+    EXPECT_EQ(first.body, "alpha");
+    EXPECT_EQ(p.request().uri, "/second");
+    EXPECT_EQ(p.request().headers.at("Host"), "two");
+    EXPECT_EQ(p.request().body, "beta");
+}
+
+// Without a holder the storage is reused, as before.
+TEST(Http1ParserTest, AnUnheldRequestIsReusedInPlace) {
+    Http1Parser p;
+    std::string input = "GET /a HTTP/1.1\r\nHost: h\r\n\r\nGET /b HTTP/1.1\r\nHost: h\r\n\r\n";
+    size_t used = 0;
+    ASSERT_EQ(p.feed(input, used), Event::MessageComplete);
+    const orbit::http::HttpRequest* first = &p.request();
+    p.next();
+    size_t more = 0;
+    ASSERT_EQ(p.feed(std::string_view(input).substr(used), more), Event::MessageComplete);
+    EXPECT_EQ(&p.request(), first);
+    EXPECT_EQ(p.request().uri, "/b");
 }
 
 // --- Bodies ---
