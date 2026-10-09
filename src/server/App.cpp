@@ -318,7 +318,8 @@ void App::listen() {
 
     // "auto" settings become concrete here, once, before anything uses them.
     const std::vector<int> cpus = allowed_cpus();
-    if (config_.event_loops == 0) config_.event_loops = cpus.size();
+    const bool auto_loops = config_.event_loops == 0;
+    if (auto_loops) config_.event_loops = cpus.size();
     if (config_.worker_threads == 0) config_.worker_threads = cpus.size();
     if (config_.engine == config::EventEngine::Auto) {
         config_.engine = io_uring_usable() ? config::EventEngine::IoUring : config::EventEngine::Epoll;
@@ -329,7 +330,8 @@ void App::listen() {
     // Only Linux spreads connections across SO_REUSEPORT sockets; elsewhere
     // the last socket bound would take them all.
     if (loop_count > 1) {
-        LOG_WARN("event_loops = " << loop_count << " is supported on Linux only; using 1");
+        // "auto" (the default) quietly means one loop here.
+        if (!auto_loops) LOG_WARN("event_loops = " << loop_count << " is supported on Linux only; using 1");
         loop_count = 1;
     }
 #endif

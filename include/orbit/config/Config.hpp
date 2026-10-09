@@ -43,8 +43,8 @@ struct ServerConfig {
     // socket (SO_REUSEPORT; the kernel spreads connections across them).
     // A connection stays on the loop that accepted it, TLS included. Handlers
     // still run on the worker_threads pool. Linux only: elsewhere 1 is used.
-    // 0 = one per CPU in the process's affinity mask.
-    size_t event_loops{1};
+    // 0 (the default) = one per CPU in the process's affinity mask.
+    size_t event_loops{0};
     // Pin event loop i to the i-th CPU of the affinity mask (Linux). The
     // first loop runs on the thread that called listen(), which is pinned too.
     bool cpu_affinity{false};

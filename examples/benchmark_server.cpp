@@ -71,7 +71,8 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Starting Orbit Benchmark Server on port " << config.port
               << " with " << config.worker_threads << " worker threads and "
-              << config.event_loops << " event loop(s)...\n";
+              << (config.event_loops == 0 ? std::string("auto") : std::to_string(config.event_loops))
+              << " event loop(s)...\n";
     app.listen();
 
     return 0;

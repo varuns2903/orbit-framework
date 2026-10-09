@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Event loops default to one per CPU** (#173). `ServerConfig::event_loops`
+  now defaults to `0` (`--event-loops auto`): one loop per CPU in the
+  process's affinity mask, on Linux. One loop was the default, which capped a
+  plain server at ~50k req/s on a 6-CPU machine where one loop per CPU gives
+  ~140k. Set `--event-loops 1` (or `event_loops = 1`) for the previous
+  behaviour. Elsewhere than Linux, one loop is still used, without a warning.
 - **ORM queries that fail throw `orbit::orm::DatabaseError`** (#187). They used
   to resume with 0 rows or an empty list, which looked like success. Catch
   `DatabaseError` where a failure is expected (a duplicate key); elsewhere it
