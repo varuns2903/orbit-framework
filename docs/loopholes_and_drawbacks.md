@@ -36,6 +36,14 @@ setting falls back to one loop, because other systems do not balance
 `SO_REUSEPORT` sockets; run several processes instead. HTTP/3 (QUIC) stays on
 the first loop.
 
+`--event-loops auto` (`event_loops = 0`) runs one loop per CPU this process
+may use (its affinity mask, so containers and `taskset` are respected), and
+`--threads auto` sizes the handler pool the same way. `--cpu-affinity` pins
+each loop to its own CPU, and `--engine auto` picks io_uring when the kernel
+supports it (Linux 5.7+) and epoll otherwise. The server logs what it chose at
+start-up, and `App::effective_config()` returns it. These stay opt-in for now;
+the defaults are one loop, four worker threads and epoll.
+
 ## 3. Large default dependency set
 
 PostgreSQL, MariaDB, MongoDB, Redis, brotli and zstd are enabled by default;

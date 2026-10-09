@@ -41,8 +41,10 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                       << "  -b, --bind <host>             Address to listen on, e.g. 127.0.0.1 or :: (default: 0.0.0.0)\n"
                       << "      --backlog <num>           Listen backlog (default: SOMAXCONN)\n"
                       << "      --max-connections <num>   Connections served at once, 0 = unlimited (default: 0)\n"
-                      << "  -t, --threads <num>           Number of worker threads (default: 4)\n"
-                      << "      --event-loops <num>       Event loops accepting and serving connections, Linux only (default: 1)\n"
+                      << "  -t, --threads <num|auto>      Number of worker threads; auto = one per CPU (default: 4)\n"
+                      << "      --event-loops <num|auto>  Event loops accepting and serving connections, Linux only;\n"
+                      << "                                auto = one per CPU (default: 1)\n"
+                      << "      --cpu-affinity            Pin each event loop to its own CPU (Linux)\n"
                       << "  -l, --log-level <level>       Log level (DEBUG, INFO, WARN, ERROR) (default: INFO)\n"
                       << "      --log-format <format>     text or json (default: text)\n"
                       << "  -s, --static-dir <dir>        Directory for static files\n"
@@ -51,7 +53,7 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                       << "  -k, --ssl-key <file>          SSL private key file\n"
                       << "      --sni-cert <cert> <key>   Another certificate, chosen by SNI (repeatable)\n"
                       << "      --tls-reload-interval <s> Check certificate files for changes every s seconds (default: 0, off)\n"
-                      << "  -e, --engine <engine>         Event loop engine (epoll, iouring) (default: epoll)\n"
+                      << "  -e, --engine <engine>         Event loop engine (epoll, iouring, auto) (default: epoll)\n"
                       << "  -v, --http-version <version>  HTTP version to enable (1.1, 2, 3) (default: 1.1)\n"
                       << "  -h, --help                    Show this help message\n";
             std::exit(0);
@@ -64,9 +66,13 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
         } else if (arg == "--max-connections" && i + 1 < argc) {
             cfg.max_connections = static_cast<size_t>(parse_integer(arg, argv[++i], 0, kNoLimit));
         } else if ((arg == "-t" || arg == "--threads") && i + 1 < argc) {
-            cfg.worker_threads = static_cast<size_t>(parse_integer(arg, argv[++i], 1, kNoLimit));
+            const std::string value = argv[++i];
+            cfg.worker_threads = value == "auto" ? 0 : static_cast<size_t>(parse_integer(arg, value, 1, kNoLimit));
         } else if (arg == "--event-loops" && i + 1 < argc) {
-            cfg.event_loops = static_cast<size_t>(parse_integer(arg, argv[++i], 1, 1024));
+            const std::string value = argv[++i];
+            cfg.event_loops = value == "auto" ? 0 : static_cast<size_t>(parse_integer(arg, value, 1, 1024));
+        } else if (arg == "--cpu-affinity") {
+            cfg.cpu_affinity = true;
         } else if (arg == "--log-format" && i + 1 < argc) {
             cfg.log_format = argv[++i];
         } else if ((arg == "-l" || arg == "--log-level") && i + 1 < argc) {
@@ -91,8 +97,10 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                 cfg.engine = EventEngine::Epoll;
             } else if (engine_str == "iouring") {
                 cfg.engine = EventEngine::IoUring;
+            } else if (engine_str == "auto") {
+                cfg.engine = EventEngine::Auto;
             } else {
-                std::cerr << "Invalid engine: " << engine_str << ". Must be 'epoll' or 'iouring'\n";
+                std::cerr << "Invalid engine: " << engine_str << ". Must be 'epoll', 'iouring' or 'auto'\n";
                 std::exit(1);
             }
         } else if ((arg == "-v" || arg == "--http-version") && i + 1 < argc) {

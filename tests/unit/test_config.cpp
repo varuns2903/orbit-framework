@@ -228,3 +228,19 @@ TEST_F(ServerConfigParseDeathTest, ZeroEventLoopsIsRejected) {
 TEST_F(ServerConfigParseDeathTest, ZeroWorkerThreadsIsRejected) {
     EXPECT_EXIT(parse_args({"-t", "0"}), testing::ExitedWithCode(1), "Invalid value for -t: '0'");
 }
+
+// --- "auto" settings (#173) ---
+
+TEST(ServerConfigParseTest, AutoValues) {
+    auto cfg = parse_args({"--threads", "auto", "--event-loops", "auto", "--engine", "auto", "--cpu-affinity"});
+    EXPECT_EQ(cfg.worker_threads, 0u);
+    EXPECT_EQ(cfg.event_loops, 0u);
+    EXPECT_EQ(cfg.engine, EventEngine::Auto);
+    EXPECT_TRUE(cfg.cpu_affinity);
+}
+
+TEST(ServerConfigParseTest, AffinityIsOffByDefault) {
+    auto cfg = parse_args({});
+    EXPECT_FALSE(cfg.cpu_affinity);
+    EXPECT_EQ(cfg.event_loops, 1u) << "the default stays one event loop";
+}
