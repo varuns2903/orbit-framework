@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <orbit/http/json.hpp>
 #include <orbit/utils/CaseInsensitive.hpp>
 
@@ -70,6 +71,21 @@ bool is_valid_header_name(std::string_view name);
  *        contains no CR, LF or NUL, so it cannot start a new header line.
  */
 bool is_valid_header_value(std::string_view value);
+
+/**
+ * @brief Formats @p t as an IMF-fixdate (RFC 9110 section 5.6.7), e.g.
+ *        "Sun, 06 Nov 1994 08:49:37 GMT", independent of the C locale.
+ */
+std::string format_http_date(std::time_t t);
+
+/**
+ * @brief The current time as an IMF-fixdate, for the Date header.
+ *
+ * Formatted at most once per second per thread and cached, so a response
+ * costs one clock read rather than a gmtime and a format. The view stays
+ * valid until the calling thread's next call.
+ */
+std::string_view http_date_now();
 
 /**
  * @brief Represents an HTTP cookie.

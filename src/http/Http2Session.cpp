@@ -56,8 +56,8 @@ HeaderBlock build_response_headers(const http::HttpResponse& response) {
     // Reserve up front so the strings never move: nghttp2_nv borrows pointers
     // into this storage, and a reallocation would invalidate every entry
     // already pushed.
-    block.storage.reserve(1 + response.headers.size() * 2);
-    block.nvs.reserve(1 + response.headers.size());
+    block.storage.reserve(3 + response.headers.size() * 2);
+    block.nvs.reserve(2 + response.headers.size());
 
     block.storage.push_back(std::to_string(static_cast<int>(response.status_code)));
     const std::string& status_str = block.storage.back();
@@ -88,6 +88,20 @@ HeaderBlock build_response_headers(const http::HttpResponse& response) {
             reinterpret_cast<uint8_t*>(const_cast<char*>(value.data())),
             name.size(),
             value.size(),
+            NGHTTP2_NV_FLAG_NONE
+        });
+    }
+
+    // RFC 9110 section 6.6.1, as on HTTP/1.1 (#170).
+    if (response.headers.find("Date") == response.headers.end()) {
+        static constexpr std::string_view kDate = "date";
+        block.storage.emplace_back(http::http_date_now());
+        const std::string& date = block.storage.back();
+        block.nvs.push_back({
+            reinterpret_cast<uint8_t*>(const_cast<char*>(kDate.data())),
+            reinterpret_cast<uint8_t*>(const_cast<char*>(date.data())),
+            kDate.size(),
+            date.size(),
             NGHTTP2_NV_FLAG_NONE
         });
     }

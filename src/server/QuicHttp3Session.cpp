@@ -55,8 +55,8 @@ void SentChunks::ack(uint64_t bytes) {
 Http3HeaderBlock build_response_headers(const http::HttpResponse& response) {
     Http3HeaderBlock block;
     // Reserved up front: the nv entries point into these strings.
-    block.storage.reserve(2 + response.headers.size() * 2); // name and value each
-    block.nvs.reserve(1 + response.headers.size());
+    block.storage.reserve(4 + response.headers.size() * 2); // name and value each
+    block.nvs.reserve(2 + response.headers.size());
     auto add = [&block](std::string name, std::string value) {
         block.storage.push_back(std::move(name));
         const std::string& n = block.storage.back();
@@ -75,6 +75,8 @@ Http3HeaderBlock build_response_headers(const http::HttpResponse& response) {
         for (char c : k) name.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
         add(std::move(name), v);
     }
+    // RFC 9110 section 6.6.1, as on HTTP/1.1 (#170).
+    if (response.headers.find("Date") == response.headers.end()) add("date", std::string(http::http_date_now()));
     return block;
 }
 

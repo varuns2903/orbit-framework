@@ -131,3 +131,36 @@ TEST(ResponseSerializationTest, ExplicitLengthIsNotDuplicated) {
     std::string out = res.serialize_headers();
     EXPECT_EQ(out.find("Content-Length"), out.rfind("Content-Length"));
 }
+
+// RFC 9110 section 6.6.1 (#170): an origin server with a clock sends Date.
+TEST(ResponseSerializationTest, EveryResponseCarriesDate) {
+    for (auto status : {orbit::http::HttpStatus::OK, orbit::http::HttpStatus::NoContent,
+                        orbit::http::HttpStatus::NotFound, orbit::http::HttpStatus::InternalServerError}) {
+        orbit::http::HttpResponse res;
+        res.status(status);
+        const std::string out = res.serialize_headers();
+        const size_t at = out.find("\r\nDate: ");
+        ASSERT_NE(at, std::string::npos) << out;
+        const size_t end = out.find("\r\n", at + 2);
+        EXPECT_EQ(out.substr(at + 8, end - at - 8), orbit::http::http_date_now());
+    }
+}
+
+TEST(ResponseSerializationTest, HandlerDateIsKeptNotDoubled) {
+    orbit::http::HttpResponse res;
+    res.headers["date"] = "Sun, 06 Nov 1994 08:49:37 GMT";
+    const std::string out = res.serialize_headers();
+    EXPECT_NE(out.find("date: Sun, 06 Nov 1994 08:49:37 GMT\r\n"), std::string::npos) << out;
+    EXPECT_EQ(out.find("Date: "), std::string::npos) << out;
+}
+
+TEST(ResponseSerializationTest, HttpDateIsImfFixdate) {
+    EXPECT_EQ(orbit::http::format_http_date(784111777), "Sun, 06 Nov 1994 08:49:37 GMT");
+    EXPECT_EQ(orbit::http::format_http_date(0), "Thu, 01 Jan 1970 00:00:00 GMT");
+
+    // The cached value is the current second, formatted the same way.
+    const std::time_t before = std::time(nullptr);
+    const std::string now(orbit::http::http_date_now());
+    const std::time_t after = std::time(nullptr);
+    EXPECT_TRUE(now == orbit::http::format_http_date(before) || now == orbit::http::format_http_date(after)) << now;
+}

@@ -158,7 +158,7 @@ TEST(Http2ResponseHeadersTest, DropsConnectionSpecificHeaders) {
     EXPECT_FALSE(has_header(block, "transfer-encoding"));
     EXPECT_FALSE(has_header(block, "keep-alive"));
     EXPECT_TRUE(has_header(block, "content-type"));
-    EXPECT_EQ(block.nvs.size(), 2u); // :status + content-type
+    EXPECT_EQ(block.nvs.size(), 3u); // :status + content-type + date
 }
 
 TEST(Http2ResponseHeadersTest, NamePointersStayValidAfterConstruction) {
@@ -174,13 +174,13 @@ TEST(Http2ResponseHeadersTest, NamePointersStayValidAfterConstruction) {
 
     HeaderBlock block = h2::detail::build_response_headers(res);
 
-    ASSERT_EQ(block.nvs.size(), 33u);
+    ASSERT_EQ(block.nvs.size(), 34u); // :status, 32 headers, date
     for (size_t i = 0; i < block.nvs.size(); ++i) {
         auto [name, value] = nv_at(block, i);
         EXPECT_FALSE(name.empty());
         EXPECT_EQ(name.size(), block.nvs[i].namelen);
         EXPECT_EQ(value.size(), block.nvs[i].valuelen);
-        if (name != ":status") {
+        if (name != ":status" && name != "date") {
             EXPECT_EQ(name.rfind("x-header-", 0), 0u) << "corrupted name: " << name;
             EXPECT_EQ(value.rfind("value-", 0), 0u) << "corrupted value: " << value;
         }
@@ -206,8 +206,24 @@ TEST(Http2ResponseHeadersTest, HandlesResponseWithNoHeaders) {
 
     HeaderBlock block = h2::detail::build_response_headers(res);
 
-    ASSERT_EQ(block.nvs.size(), 1u);
+    ASSERT_EQ(block.nvs.size(), 2u);
     EXPECT_EQ(value_of(block, ":status"), "204");
+    EXPECT_TRUE(has_header(block, "date"));
+}
+
+// RFC 9110 section 6.6.1 (#170): every response carries Date, and one the
+// handler set is kept rather than doubled.
+TEST(Http2ResponseHeadersTest, AddsDateUnlessTheHandlerSetOne) {
+    HttpResponse res;
+    HeaderBlock block = h2::detail::build_response_headers(res);
+    EXPECT_EQ(value_of(block, "date").size(), std::string("Sun, 06 Nov 1994 08:49:37 GMT").size());
+
+    res.headers["Date"] = "Sun, 06 Nov 1994 08:49:37 GMT";
+    block = h2::detail::build_response_headers(res);
+    size_t dates = 0;
+    for (size_t i = 0; i < block.nvs.size(); ++i) dates += nv_at(block, i).first == "date";
+    EXPECT_EQ(dates, 1u);
+    EXPECT_EQ(value_of(block, "date"), "Sun, 06 Nov 1994 08:49:37 GMT");
 }
 
 TEST(Http2ResponseHeadersTest, EncodesServerErrorStatus) {

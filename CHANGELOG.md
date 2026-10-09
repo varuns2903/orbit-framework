@@ -108,6 +108,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `orm/QueryBuilder.hpp`, `orm/Model.hpp` and `orm/MigrationRunner.hpp` only
   compiled after other includes; `tools/check_headers.sh` now checks all of
   them in CI.
+- **Every response carries a `Date` header** (#170), as RFC 9110 section
+  6.6.1 requires of an origin server, on HTTP/1.1, HTTP/2 and HTTP/3. Each
+  thread formats it at most once per second; a `Date` the handler or a
+  proxied upstream set is kept. `http::format_http_date` and
+  `http::http_date_now` are public.
+
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1

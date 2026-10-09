@@ -215,7 +215,7 @@ TEST(Http3ResponseHeadersTest, StatusFirstAndNamesLowercased) {
     res.headers["X-Custom-Header"] = "MixedCase Value";
 
     auto block = orbit::server::quic::detail::build_response_headers(res);
-    ASSERT_EQ(block.nvs.size(), 3u);
+    ASSERT_EQ(block.nvs.size(), 4u); // :status, two headers, date
     EXPECT_EQ(nv_name(block.nvs[0]), ":status");
     EXPECT_EQ(nv_value(block.nvs[0]), "404");
     std::vector<std::pair<std::string, std::string>> rest;
@@ -234,8 +234,9 @@ TEST(Http3ResponseHeadersTest, ConnectionSpecificFieldsAreDropped) {
     res.headers["Vary"] = "Accept";
 
     auto block = orbit::server::quic::detail::build_response_headers(res);
-    ASSERT_EQ(block.nvs.size(), 2u);
+    ASSERT_EQ(block.nvs.size(), 3u);
     EXPECT_EQ(nv_name(block.nvs[1]), "vary");
+    EXPECT_EQ(nv_name(block.nvs[2]), "date");
 }
 
 TEST(Http3ResponseHeadersTest, EntriesPointIntoLiveStorage) {
@@ -245,10 +246,11 @@ TEST(Http3ResponseHeadersTest, EntriesPointIntoLiveStorage) {
         orbit::http::HttpResponse res;
         for (size_t i = 0; i < count; ++i) res.headers["H" + std::to_string(i)] = "v" + std::to_string(i);
         auto block = orbit::server::quic::detail::build_response_headers(res);
-        ASSERT_EQ(block.nvs.size(), count + 1);
+        ASSERT_EQ(block.nvs.size(), count + 2); // :status, the headers, date
         EXPECT_EQ(nv_name(block.nvs[0]), ":status");
         EXPECT_EQ(nv_value(block.nvs[0]), "200");
-        for (size_t i = 1; i < block.nvs.size(); ++i) {
+        EXPECT_EQ(nv_name(block.nvs.back()), "date");
+        for (size_t i = 1; i + 1 < block.nvs.size(); ++i) {
             std::string name = nv_name(block.nvs[i]);
             ASSERT_EQ(name[0], 'h') << "count " << count;
             EXPECT_EQ(nv_value(block.nvs[i]), "v" + name.substr(1));

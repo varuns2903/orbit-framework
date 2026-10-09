@@ -1,4 +1,5 @@
 #include <orbit/middleware/StaticFiles.hpp>
+#include <orbit/http/HttpResponse.hpp>
 #include <orbit/utils/Logger.hpp>
 #include <sys/stat.h>
 #include <algorithm>
@@ -42,23 +43,8 @@ std::optional<FileInfo> stat_path(const fs::path& path) {
     return info;
 }
 
-constexpr const char* kDays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 constexpr const char* kMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-
-// IMF-fixdate (RFC 9110 section 5.6.7), independent of the C locale.
-std::string format_http_date(std::time_t t) {
-    std::tm tm{};
-#ifdef _WIN32
-    gmtime_s(&tm, &t);
-#else
-    gmtime_r(&t, &tm);
-#endif
-    char buf[40];
-    std::snprintf(buf, sizeof(buf), "%s, %02d %s %04d %02d:%02d:%02d GMT", kDays[tm.tm_wday], tm.tm_mday,
-                  kMonths[tm.tm_mon], tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
-    return buf;
-}
 
 // Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant's algorithm).
 int64_t days_from_civil(int64_t y, unsigned m, unsigned d) {
@@ -311,7 +297,7 @@ routing::Middleware static_files(const std::string& directory, StaticFilesOption
                           static_cast<unsigned long long>(info->mtime),
                           static_cast<unsigned long long>(info->size));
             const std::string etag = etag_buf;
-            const std::string last_modified = format_http_date(info->mtime);
+            const std::string last_modified = http::format_http_date(info->mtime);
 
             http::HttpResponse res;
             res.headers["ETag"] = etag;
