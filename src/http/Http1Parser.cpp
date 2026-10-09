@@ -24,14 +24,20 @@ struct Http1Parser::Impl {
         settings.on_message_complete = on_message_complete;
         llhttp_init(&parser, HTTP_REQUEST, &settings);
         parser.data = this;
+        message->request.storage_owner = message;
     }
 
     Limits limits;
     llhttp_t parser{};
     llhttp_settings_t settings{};
 
-    HttpRequest request;
-    std::string body;
+    // The request and the body its string_view points into, kept together
+    // so that a coroutine handler can hold both past next() (#200).
+    struct Message {
+        HttpRequest request;
+        std::string body;
+    };
+    std::shared_ptr<Message> message = std::make_shared<Message>();
     std::function<void(std::string_view)> body_handler;
     std::function<size_t(const HttpRequest&)> body_limit_for;
     size_t body_limit = 0; // for the current message
@@ -68,8 +74,15 @@ struct Http1Parser::Impl {
     }
 
     void reset_message() {
-        request = HttpRequest{};
-        body.clear();
+        if (message.use_count() > 1) {
+            // A coroutine handler still holds the previous request: leave it
+            // to the handler and parse the next one into fresh storage.
+            message = std::make_shared<Message>();
+        } else {
+            message->request = HttpRequest{};
+            message->body.clear();
+        }
+        message->request.storage_owner = message;
         body_handler = nullptr;
         method.clear();
         url.clear();
@@ -148,7 +161,7 @@ struct Http1Parser::Impl {
         Impl& self = of(p);
         self.headers_done = true;
 
-        HttpRequest& req = self.request;
+        HttpRequest& req = self.message->request;
         req.method = HttpParser::parse_method(self.method);
         req.target = self.url;
         const size_t q = self.url.find('?');
@@ -192,7 +205,7 @@ struct Http1Parser::Impl {
         if (self.body_handler) {
             self.body_handler(std::string_view(at, len));
         } else {
-            self.body.append(at, len);
+            self.message->body.append(at, len);
         }
         return 0;
     }
@@ -204,7 +217,7 @@ struct Http1Parser::Impl {
         // Only a buffered body is attached. With a body handler the request
         // may already be in a handler's hands on another thread, and the
         // body went to the handler anyway.
-        if (!self.body_handler) self.request.body = self.body;
+        if (!self.body_handler) self.message->request.body = self.message->body;
         return HPE_PAUSED;
     }
 
@@ -281,7 +294,7 @@ void Http1Parser::next() {
     s.reset_message();
 }
 
-HttpRequest& Http1Parser::request() { return impl_->request; }
+HttpRequest& Http1Parser::request() { return impl_->message->request; }
 
 void Http1Parser::set_body_handler(std::function<void(std::string_view)> handler) {
     impl_->body_handler = std::move(handler);

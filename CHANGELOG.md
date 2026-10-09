@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`orbit::concurrency::Awaitable<T>`** (#200): a lazy coroutine that a
+  handler `co_await`s for a result, so database access and other async work
+  can live in helpers (`co_return` a value, exceptions rethrown at the
+  `co_await`). Included by `Task.hpp`.
 - **`benchmarks/probe.sh`**: sustained-load probe that reports, per window,
   throughput, p99, memory, threads, context switches per request and heap
   allocations per request (with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`), and
@@ -125,6 +129,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Swagger UI bootstrap was an inline `<script>`, so a policy without
   `'unsafe-inline'` (as set through `security_headers()`) left the page
   blank. It is now served at `<docs_path>/init.js`.
+- **A coroutine handler's `HttpRequest&` stays valid until the coroutine
+  ends** (#200), on every protocol. On HTTP/1.1 the request was reset as soon
+  as the response was sent, so a handler that answered and then read the
+  request (e.g. to log it) saw the next request's data or freed memory. The
+  connection now parses the next request into fresh storage while a
+  handler still holds the previous one.
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1

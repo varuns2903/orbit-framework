@@ -55,6 +55,22 @@ struct HttpRequest {
     std::deque<std::string> owned_header_storage;
 
     /**
+     * @brief Whatever owns this request's storage, when it is shared.
+     *
+     * Set by the HTTP/1.1 connection. A coroutine handler that takes the
+     * request as a parameter holds it (see keep_alive()), so the request,
+     * its headers and its body stay valid until the coroutine finishes,
+     * even after the response is sent and the connection has moved on to
+     * the next request. Empty when the request is owned another way (HTTP/2
+     * and HTTP/3 streams are kept alive by their ResponseWriter).
+     */
+    std::weak_ptr<void> storage_owner;
+
+    /// A reference that keeps this request's storage alive; null if
+    /// storage_owner is empty or already gone.
+    std::shared_ptr<void> keep_alive() const { return storage_owner.lock(); }
+
+    /**
      * @brief Sets a header, copying the name and value into storage owned by
      *        this request.
      *

@@ -1,6 +1,6 @@
 # Database & C++20 Coroutines
 
-Orbit provides seamless integration with PostgreSQL using raw asynchronous networking (`io_uring`/`epoll`) bridged perfectly into **C++20 Coroutines** via `Task<T>`.
+Orbit provides seamless integration with PostgreSQL using raw asynchronous networking (`io_uring`/`epoll`) bridged perfectly into **C++20 Coroutines** via `Task` handlers and `Awaitable<T>` helpers.
 
 This allows you to write non-blocking database queries exactly like Node.js or Python without spanning unnecessary OS threads!
 
@@ -169,6 +169,54 @@ After a failed statement, PostgreSQL rolls the whole transaction back on `COMMIT
 `set_statement_timeout()` (before `connect()`) limits how long each statement may run on the server; a longer one fails with "canceling statement due to statement timeout". To detect an unreachable server, add libpq's `connect_timeout`, `keepalives_idle` or `tcp_user_timeout` to the connection string.
 
 `is_healthy()` reports whether the connection is usable. After the server drops it (a restart, a failover, `pg_terminate_backend`), queries fail, `is_healthy()` turns false, and `connect()` / `reconnect()` (or `co_await connect_async(db)`) establish a new session, with the statement timeout applied again.
+
+## Request Lifetime in Coroutine Handlers
+
+A coroutine handler can use its `HttpRequest&` (headers, body, params,
+`req.json()`) for as long as it runs: across every `co_await`, on whichever
+thread it resumes, and even after it has sent the response. On HTTP/1.1 the
+connection then parses the next request into fresh storage while the handler
+still holds the old one. No copying is needed.
+
+This holds for the request the coroutine takes as a **parameter**. A
+coroutine started from a plain handler gets the same guarantee when the
+request is passed on as a parameter too:
+
+```cpp
+app.get("/items/:id", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
+    show_item(req, w);  // Task show_item(HttpRequest&, std::shared_ptr<ResponseWriter>)
+});
+```
+
+A request captured by reference in a lambda coroutine (`[&req]() -> Task`)
+is not covered: the coroutine cannot see it.
+
+## Helpers that Return Values
+
+`orbit::concurrency::Awaitable<T>` is a coroutine a handler can `co_await`
+for a result, so database access can live in small helpers:
+
+```cpp
+using orbit::concurrency::Awaitable;
+
+Awaitable<std::optional<Item>> find_item(std::shared_ptr<PostgresClient> db, int id) {
+    auto items = co_await query_Item(db).where(orbit::orm::Col("id") == id).get_async();
+    if (items.empty()) co_return std::nullopt;
+    co_return items.front();
+}
+
+Task show_item(HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
+    auto item = co_await find_item(db, std::stoi(req.params.at("id")));
+    HttpResponse res;
+    if (item) res.json(nlohmann::json(*item)); else res.status(HttpStatus::NotFound);
+    w->send(std::move(res));
+}
+```
+
+An `Awaitable` starts only when awaited and resumes its caller when it
+finishes. An exception thrown inside it is rethrown at the `co_await`;
+uncaught there, it is handled like any handler exception (`on_error`, else a
+500). Handlers themselves keep returning `Task`.
 
 ## Hooking into Router
 
