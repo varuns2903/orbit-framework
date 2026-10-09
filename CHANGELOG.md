@@ -66,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applies `log_level` / `log_format` only when they differ from the defaults,
   so a default-configured App (or a second App in the process) cannot undo an
   earlier `Logger::init()` or `--log-level`.
+- **io_uring no longer runs ~100 kernel worker threads, and is faster than
+  epoll with several event loops** (#169). Every recv, send and accept was
+  forced onto io-wq workers (`IOSQE_ASYNC`); with fast poll (Linux 5.7+) the
+  flag is no longer set. Requests from threads other than the loop's (handlers
+  on the worker pool, user threads) are now queued and submitted by the loop
+  in one batch, which also fixes responses written from a short-lived thread
+  being lost (#220). Measured with 6 event loops: 12 threads instead of ~100,
+  ~161k req/s instead of ~106k (epoll: ~143k).
 
 ## [v2.0.0] - 2026-10-08
 

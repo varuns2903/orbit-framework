@@ -5,6 +5,8 @@
 #include <atomic>
 #include <mutex>
 #include <functional>
+#include <thread>
+#include <vector>
 
 namespace orbit::network {
 
@@ -30,8 +32,29 @@ private:
     std::mutex sq_mutex_;
     // Contexts submitted to the kernel and not yet completed.
     std::atomic<long> inflight_{0};
+    // IORING_FEAT_FAST_POLL (Linux 5.7+): a recv/send/accept that cannot
+    // complete yet arms an internal poll instead of blocking an io-wq worker
+    // thread. Without it, operations are punted to workers (IOSQE_ASYNC) so
+    // they never stall the submitting thread (#169).
+    bool fast_poll_{false};
+    unsigned io_flags() const;
+
+    // Only the loop thread (the one calling run_once) touches the ring.
+    // Other threads -- handlers on the worker pool, user threads -- queue
+    // their operation and wake the loop through an eventfd; the loop submits
+    // the queue in one batch. Submitting from those threads made io_uring
+    // run the operation's follow-up work on them (a sleeping pool worker),
+    // and a thread that exits can have its I/O cancelled (#169, #220).
+    // Set by the first run_once(), which also arms the wake-up read: a
+    // request is driven by the thread that submitted it, so even that read
+    // must come from the loop thread.
+    std::atomic<std::thread::id> owner_{};
+    int wake_fd_{-1};
+    uint64_t wake_value_{0};
+    std::mutex pending_mutex_;
 
     enum class OpType {
+        WAKE,
         READ,
         WRITE,
         WAIT_READ,
@@ -60,6 +83,22 @@ private:
     };
 
     struct io_uring_sqe* get_sqe_safe();
+
+    using Prep = std::function<void(struct io_uring_sqe*)>;
+    struct Pending {
+        IoContext* ctx; // nullptr for requests without a completion (cancel)
+        Prep prep;
+        unsigned flags;
+    };
+    std::vector<Pending> pending_;
+    IoContext wake_ctx_; // type set to WAKE in the constructor
+
+    // Submits now on the loop thread, otherwise queues and wakes the loop.
+    void submit(IoContext* ctx, Prep prep, unsigned flags = 0);
+    // With sq_mutex_ held: prepares one request (no io_uring_submit).
+    void prepare_locked(IoContext* ctx, const Prep& prep, unsigned flags);
+    void arm_wake_locked();
+    void drain_pending();
 };
 
 } // namespace network
