@@ -8,6 +8,16 @@ namespace orbit::server {
 ConnectionManager::ConnectionManager(network::Proactor& proactor, const routing::Router& router, concurrency::ThreadPool& thread_pool, TimerManager& timer_manager, size_t max_body_size, network::TlsContext* tls_context)
     : proactor_(proactor), router_(router), thread_pool_(thread_pool), timer_manager_(timer_manager), max_body_size_(max_body_size), tls_context_(tls_context) {}
 
+ConnectionManager::~ConnectionManager() {
+    std::unordered_map<int, std::shared_ptr<Connection>> remaining;
+    {
+        std::lock_guard<std::mutex> lock(map_mutex_);
+        remaining.swap(connections_);
+    }
+    // The thread pool may already be gone, and no lock is held here.
+    for (auto& [fd, conn] : remaining) conn->on_removed(/*notify_now=*/true);
+}
+
 void ConnectionManager::add_connection(network::Socket socket, const std::string& client_ip) {
     int fd = socket.fd();
     auto connection = std::make_shared<Connection>(

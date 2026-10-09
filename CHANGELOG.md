@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handler `co_await`s for a result, so database access and other async work
   can live in helpers (`co_return` a value, exceptions rethrown at the
   `co_await`). Included by `Task.hpp`.
+- **`ResponseWriter::is_open()` and `on_close(callback)`** (#197): a writer
+  kept after the handler returns (an SSE subscriber, a chunked stream)
+  learns that its client has gone, on HTTP/1.1, HTTP/2 and HTTP/3, so a hub
+  can drop it instead of writing to it for the life of the process. An
+  HTTP/1.1 streamed response now notices a client leaving right away, not
+  at the next failed write. HTTP/2 requests now report
+  `http_version == "HTTP/2"` (it was empty).
 - **`benchmarks/probe.sh`**: sustained-load probe that reports, per window,
   throughput, p99, memory, threads, context switches per request and heap
   allocations per request (with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`), and

@@ -93,6 +93,9 @@ QuicHttp3Session::~QuicHttp3Session() {
     if (httpconn_) {
         nghttp3_conn_del(httpconn_);
     }
+    for (auto& [id, stream] : streams_) {
+        if (auto writer = stream->writer.lock()) writer->mark_closed();
+    }
 }
 
 bool QuicHttp3Session::init() {
@@ -146,7 +149,14 @@ int QuicHttp3Session::on_acked_stream_data(nghttp3_conn *, int64_t, uint64_t dat
 
 int QuicHttp3Session::on_stream_close(nghttp3_conn * /*conn*/, int64_t stream_id, uint64_t /*app_error_code*/, void *conn_user_data, void * /*stream_user_data*/) {
     auto session = static_cast<QuicHttp3Session*>(conn_user_data);
-    session->streams_.erase(stream_id);
+    auto it = session->streams_.find(stream_id);
+    if (it == session->streams_.end()) return 0;
+    // On a pool thread: this runs with the connection's mutex held, and an
+    // on_close callback may write to the connection (#197).
+    if (auto writer = it->second->writer.lock()) {
+        session->quic_conn_.manager().http_context().thread_pool->enqueue([writer] { writer->mark_closed(); });
+    }
+    session->streams_.erase(it);
     return 0;
 }
 
@@ -257,6 +267,7 @@ void QuicHttp3Session::handle_request(std::shared_ptr<Http3Stream> stream) {
                                                         req.method == http::HttpMethod::HEAD);
     writer->body_owner_ = stream;
     writer->body_ = stream->body;
+    stream->writer = writer;
 
     // Handlers may block; run them off the event loop. The task owns the
     // stream, so the request outlives the handler even if the client leaves.

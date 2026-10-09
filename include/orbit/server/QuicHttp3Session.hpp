@@ -14,6 +14,7 @@
 namespace orbit::server {
 
 class QuicConnection;
+class Http3ResponseWriter;
 
 namespace quic::detail {
 
@@ -73,6 +74,7 @@ struct Http3Stream {
     int file_fd = -1;       // file body: bytes [file_offset, file_end)
     int64_t file_offset = 0;
     int64_t file_end = 0;
+    std::weak_ptr<Http3ResponseWriter> writer; // for is_open() / on_close() (#197)
 
     explicit Http3Stream(int64_t id) : stream_id(id) {}
     ~Http3Stream();

@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <vector>
 #include <orbit/http/json.hpp>
 
 namespace orbit::network { class Proactor; }
@@ -134,6 +135,26 @@ public:
     static void report_async_exception(const std::shared_ptr<ResponseWriter>& writer, uint64_t generation,
                                        std::exception_ptr error) noexcept;
 
+    /**
+     * @brief False once the client can no longer receive anything: the
+     *        connection (HTTP/1.1) or stream (HTTP/2, HTTP/3) closed, because
+     *        the client left, a timeout fired or the server shut down.
+     *
+     * Writes after that are dropped. A long-lived writer (an SSE subscriber,
+     * a chunked stream) can check it, or use on_close(), to stop producing.
+     */
+    bool is_open() const { return !closed_.load(); }
+
+    /**
+     * @brief Runs @p callback once when the writer closes (see is_open()),
+     *        or right away if it already has.
+     *
+     * Typically used to drop a subscriber from a hub. It runs on a server
+     * thread, so keep it short and do not block. Every registered callback
+     * runs; one that throws is logged.
+     */
+    void on_close(std::function<void()> callback);
+
 protected:
     /// Implementations call this whenever they write part of a response.
     void mark_responded() { responded_ = true; }
@@ -145,12 +166,18 @@ protected:
         std::lock_guard<std::mutex> lock(error_sink_mutex_);
         error_sink_ = nullptr;
     }
+    /// Implementations call this when the client is gone for good. Runs the
+    /// on_close() callbacks the first time; later calls do nothing.
+    void mark_closed() noexcept;
 
 private:
     std::atomic<bool> responded_{false};
     std::atomic<uint64_t> generation_{0};
     std::mutex error_sink_mutex_;
     ErrorSink error_sink_;
+    std::atomic<bool> closed_{false};
+    std::mutex close_mutex_;
+    std::vector<std::function<void()>> close_callbacks_;
 };
 
 } // namespace http

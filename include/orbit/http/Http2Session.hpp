@@ -92,6 +92,8 @@ void parse_cookies(std::string_view cookies, http::HttpRequest& req);
  * The session is therefore shared (writers and in-flight handlers keep it
  * alive) and refers to its connection only weakly.
  */
+class Http2ResponseWriter;
+
 class Http2Session : public std::enable_shared_from_this<Http2Session> {
 public:
     Http2Session(std::weak_ptr<server::Connection> connection, network::Proactor& proactor,
@@ -106,6 +108,8 @@ public:
     void begin_shutdown();
     /// True if no stream is open.
     bool idle();
+    /// The connection is gone: every open stream's writer reports closed.
+    void close_streams();
     
     /**
      * @brief Thread-safe API to submit an HTTP/2 response.
@@ -156,6 +160,9 @@ private:
         off_t file_offset{0};
 
         bool body_too_large{false};
+
+        // For is_open() / on_close() once the stream closes (#197).
+        std::weak_ptr<Http2ResponseWriter> writer;
     };
 
     std::unordered_map<int32_t, std::shared_ptr<StreamContext>> streams_;

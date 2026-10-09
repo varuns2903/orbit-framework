@@ -91,7 +91,10 @@ public:
 
     /// Called by ConnectionManager when the connection is dropped, before
     /// its pending I/O is cancelled. No new I/O is submitted afterwards.
-    void on_removed();
+    /// Writers held elsewhere then report closed (on_close callbacks): on a
+    /// pool thread, or right away when @p notify_now (the server is going
+    /// away and the pool with it).
+    void on_removed(bool notify_now = false);
 
     /**
      * @brief Sets the timeouts used for this connection. Call before start().
