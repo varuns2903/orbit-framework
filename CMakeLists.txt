@@ -455,6 +455,13 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
         # No optional subsystems: core HTTP, routing, WebSockets, templating.
         orbit_add_example(benchmark_server)
+        # Counts heap allocations and serves the count at /__stats, for
+        # benchmarks/probe.sh (allocations per request). Off by default: the
+        # counting operator new adds an atomic increment to every allocation.
+        option(ORBIT_BENCH_COUNT_ALLOCATIONS "benchmark_server: count heap allocations (for benchmarks/probe.sh)" OFF)
+        if(ORBIT_BENCH_COUNT_ALLOCATIONS)
+            target_compile_definitions(benchmark_server PRIVATE ORBIT_BENCH_COUNT_ALLOCATIONS=1)
+        endif()
         orbit_add_example(chat_server)
         orbit_add_example(fastapi_server)
         orbit_add_example(graphql_server)

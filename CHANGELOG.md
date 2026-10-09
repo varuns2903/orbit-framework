@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`benchmarks/probe.sh`**: sustained-load probe that reports, per window,
+  throughput, p99, memory, threads, context switches per request and heap
+  allocations per request (with `-DORBIT_BENCH_COUNT_ALLOCATIONS=ON`), and
+  optionally syscalls per request (#166).
 - **Wildcard routes** (#189): a trailing `*` or `*name` segment matches the
   rest of the path (zero or more segments) into `req.params`. Exact routes win
   over `:param` routes, which win over wildcards (most fixed segments first).
