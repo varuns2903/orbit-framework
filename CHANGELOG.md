@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Migrations without HTTP** (#195): `MigrationRunner<Db>::run(db, dir)`
+  returns an `Awaitable<MigrationResult>` (applied files, error, summary),
+  and `orbit::orm::migrate_sync(conninfo, dir)` migrates at start-up, before
+  `listen()`, on its own short-lived event loop. `run_migrations(db, dir,
+  writer)` is now a thin HTTP wrapper over `run()`.
 - **`orbit::concurrency::Awaitable<T>`** (#200): a lazy coroutine that a
   handler `co_await`s for a result, so database access and other async work
   can live in helpers (`co_return` a value, exceptions rethrown at the

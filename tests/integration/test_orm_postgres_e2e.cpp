@@ -361,6 +361,79 @@ TEST_F(OrmPostgresTest, ErrorsNullsAndTransactionalMigrations) {
     running = false;
     loop.join();
 }
+namespace {
+
+orbit::concurrency::Task run_directly(std::shared_ptr<orbit::database::PostgresClient> db, std::string dir,
+                                      orbit::orm::MigrationResult* out, std::promise<void>* done) {
+    auto connecting = orbit::database::connect_async(db);
+    if (co_await connecting) {
+        auto running = orbit::orm::MigrationRunner<orbit::database::PostgresClient>::run(db, dir);
+        *out = co_await running;
+        // Leave orbit_migrations as the other tests expect it.
+        auto cleanup = orbit::database::query_async(
+            db, "DELETE FROM orbit_migrations WHERE version LIKE '%_startup_%'; DROP TABLE IF EXISTS startup_a;");
+        co_await cleanup;
+    }
+    done->set_value();
+}
+
+} // namespace
+
+// Migrations without an HTTP request (#195): run() as a coroutine, and
+// migrate_sync() for start-up code, with its own event loop.
+TEST_F(OrmPostgresTest, MigrationsRunWithoutAResponseWriter) {
+    const std::string info = "host=" + socket_dir + " port=" + std::to_string(kPgPort) + " user=postgres dbname=postgres";
+    auto dir = std::filesystem::temp_directory_path() / ("orbit_startup_migrations_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "101_startup_a.sql") << "CREATE TABLE startup_a (x int);";
+    std::ofstream(dir / "102_startup_b.sql") << "INSERT INTO startup_a VALUES (1);";
+
+    orbit::orm::MigrationResult first = orbit::orm::migrate_sync(info, dir.string());
+    EXPECT_TRUE(first.ok()) << first.error;
+    EXPECT_EQ(first.applied, (std::vector<std::string>{"101_startup_a.sql", "102_startup_b.sql"}));
+    EXPECT_EQ(first.summary(), "Successfully applied 2 migrations.");
+
+    orbit::orm::MigrationResult again = orbit::orm::migrate_sync(info, dir.string());
+    EXPECT_TRUE(again.ok()) << again.error;
+    EXPECT_TRUE(again.applied.empty());
+    EXPECT_EQ(again.summary(), "Database is up to date");
+
+    orbit::orm::MigrationResult missing = orbit::orm::migrate_sync(info, (dir / "nope").string());
+    EXPECT_TRUE(missing.ok()) << missing.error;
+    EXPECT_TRUE(missing.directory_missing);
+
+    // Nothing listens on this port.
+    orbit::orm::MigrationResult unreachable = orbit::orm::migrate_sync(
+        "host=" + socket_dir + " port=1 user=postgres dbname=postgres connect_timeout=2", dir.string(),
+        std::chrono::seconds(10));
+    EXPECT_FALSE(unreachable.ok());
+    EXPECT_EQ(unreachable.error, "Could not connect to the database");
+
+    // The coroutine form, on an event loop the caller runs.
+    std::ofstream(dir / "103_startup_c.sql") << "SELECT * FROM no_such_table_here;";
+    {
+        orbit::network::EpollProactor proactor;
+        std::atomic<bool> running{true};
+        std::thread loop([&] {
+            while (running) proactor.run_once(50);
+        });
+        auto db = std::make_shared<orbit::database::PostgresClient>(&proactor, info);
+        orbit::orm::MigrationResult result;
+        std::promise<void> done;
+        auto finished = done.get_future();
+        run_directly(db, dir.string(), &result, &done);
+        bool completed = finished.wait_for(std::chrono::seconds(20)) == std::future_status::ready;
+        running = false;
+        loop.join();
+        ASSERT_TRUE(completed);
+        EXPECT_FALSE(result.ok());
+        EXPECT_TRUE(result.applied.empty());
+        EXPECT_NE(result.error.find("103_startup_c.sql failed and was rolled back"), std::string::npos) << result.error;
+    }
+
+    std::filesystem::remove_all(dir);
+}
+
 TEST_F(OrmPostgresTest, UpdateDeleteOrderLimitCountAndQuoting) {
     orbit::network::EpollProactor proactor;
     std::atomic<bool> running{true};

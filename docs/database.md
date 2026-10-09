@@ -170,6 +170,43 @@ After a failed statement, PostgreSQL rolls the whole transaction back on `COMMIT
 
 `is_healthy()` reports whether the connection is usable. After the server drops it (a restart, a failover, `pg_terminate_backend`), queries fail, `is_healthy()` turns false, and `connect()` / `reconnect()` (or `co_await connect_async(db)`) establish a new session, with the statement timeout applied again.
 
+## Schema Migrations
+
+`orbit::orm::MigrationRunner` (`<orbit/orm/MigrationRunner.hpp>`, PostgreSQL)
+applies the `.sql` files in a directory in name order (`001_users.sql`,
+`002_index.sql`, ...) and records each in an `orbit_migrations` table, so
+every file runs once. Each file runs in a transaction together with its
+tracking row: a failing file leaves nothing behind and stops the run. An
+advisory lock keeps several instances starting at once from applying the
+same file twice. Statements that cannot run in a transaction (such as
+`CREATE INDEX CONCURRENTLY`) are not supported.
+
+At start-up, before serving, `migrate_sync` connects, migrates and returns,
+using its own short-lived event loop:
+
+```cpp
+#include <orbit/orm/MigrationRunner.hpp>
+
+int main() {
+    auto result = orbit::orm::migrate_sync("host=localhost dbname=app user=app", "migrations");
+    if (!result.ok()) {
+        std::cerr << "migrations failed: " << result.error << "\n";
+        return 1;
+    }
+    std::cout << result.summary() << "\n";   // e.g. "Successfully applied 2 migrations."
+
+    orbit::server::App app;
+    // ... routes ...
+    app.listen();
+}
+```
+
+From a coroutine, with a connected client, `co_await
+MigrationRunner<PostgresClient>::run(db, "migrations")` gives the same
+`MigrationResult` (`applied` files, `error`, `summary()`).
+`run_migrations(db, dir, writer)` answers it over HTTP (200 with the
+summary, or a 500 whose details go only to the log), for an admin endpoint.
+
 ## Request Lifetime in Coroutine Handlers
 
 A coroutine handler can use its `HttpRequest&` (headers, body, params,
