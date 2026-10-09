@@ -157,12 +157,13 @@ std::string_view coding_name(ContentCoding coding) {
     return "";
 }
 
-ContentCoding negotiate_coding(std::string_view accept_encoding, const std::vector<ContentCoding>& preference) {
+ContentCoding negotiate_coding(std::string_view accept_encoding, const std::vector<ContentCoding>& preference,
+                               bool only_available) {
     Acceptance a = parse_accept_encoding(accept_encoding);
     ContentCoding best = ContentCoding::Identity;
     double best_q = 0;
     for (ContentCoding coding : preference) {
-        if (coding == ContentCoding::Identity || !coding_available(coding)) continue;
+        if (coding == ContentCoding::Identity || (only_available && !coding_available(coding))) continue;
         double explicit_q = coding == ContentCoding::Gzip ? a.gzip : coding == ContentCoding::Brotli ? a.br : a.zstd;
         // An explicit entry wins over the wildcard.
         double q = explicit_q >= 0 ? explicit_q : std::max(a.star, 0.0);

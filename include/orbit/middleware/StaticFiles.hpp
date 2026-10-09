@@ -27,6 +27,11 @@ struct StaticFilesOptions {
     /// (true), or answer 404 here (false), which suits a mounted directory
     /// whose prefix no route shares.
     bool fallthrough = true;
+    /// Serve a precompressed sibling when the client accepts its coding:
+    /// app.js.br, app.js.zst or app.js.gz for app.js, with Content-Encoding,
+    /// the original's Content-Type and Vary: Accept-Encoding. The plain file
+    /// is served otherwise, and must exist.
+    bool precompressed = false;
 };
 
 /**
