@@ -75,6 +75,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   being lost (#220). Measured with 6 event loops: 12 threads instead of ~100,
   ~161k req/s instead of ~106k (epoll: ~143k).
 
+- **`orbit new` scaffolds a project that builds anywhere** (#186). The
+  generated `vcpkg.json` lacked `llhttp`, `pkgconf`, `liburing`, `brotli`,
+  `zstd`, `curl[http2]` and a `builtin-baseline`, so it only configured where
+  the system happened to provide them. It now lists everything Orbit and its
+  default features need, at Orbit's baseline (kept in sync by
+  `tools/cli/check_manifest.py` in CI). `orbit build` defaults to
+  `RelWithDebInfo` (`--debug` and `--release` select the others) and takes
+  `--jobs`, defaulting to one job per CPU but at most one per 2 GB of RAM.
+  Orbit's warning flags no longer fire inside inja's headers.
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1

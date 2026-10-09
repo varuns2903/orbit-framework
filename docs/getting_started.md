@@ -24,7 +24,7 @@ git clone https://github.com/microsoft/vcpkg.git
 # Build Orbit Framework with vcpkg toolchain
 mkdir build && cd build
 cmake -DCMAKE_TOOLCHAIN_FILE=../vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
+cmake --build . --parallel 4   # about 2 GB of RAM per job
 ```
 
 ### Build with Conan (Alternative to vcpkg)
@@ -38,7 +38,7 @@ conan install . --output-folder=build --build=missing
 # Build the framework
 cd build
 cmake .. -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+cmake --build . --parallel 4   # about 2 GB of RAM per job
 ```
 
 ### Manual Build (Without vcpkg)
@@ -47,7 +47,7 @@ If you prefer using system packages, install the prerequisites manually:
 ```bash
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
+cmake --build . --parallel 4   # about 2 GB of RAM per job
 ```
 
 ### Integrating via CMake FetchContent (Recommended)

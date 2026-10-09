@@ -196,13 +196,18 @@ Available once the installer has run.
 orbit new myapp          # scaffold main.cpp, CMakeLists.txt, vcpkg.json
 orbit new myapp --fetch  # scaffold using FetchContent instead of find_package
 cd myapp
-orbit build              # Debug
+orbit build              # RelWithDebInfo (optimized, with debug symbols)
+orbit build --debug      # Debug
 orbit build --release    # Release with LTO
+orbit build -j 2         # limit parallel compile jobs
 orbit run
 ```
 
 `orbit build` picks up `VCPKG_ROOT` if set, otherwise a `vcpkg/` directory beside
-your project, and warns if it finds neither.
+your project, and warns if it finds neither. It compiles with one job per CPU
+but at most one per 2 GB of RAM, since Orbit's sources are large to compile.
+The generated `vcpkg.json` lists every library Orbit and its default features
+need, pinned to the same `builtin-baseline` as Orbit.
 
 ---
 

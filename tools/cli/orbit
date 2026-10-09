@@ -1,9 +1,56 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import subprocess
 import sys
 import shutil
+
+# The vcpkg manifest a new project needs: Orbit's dependencies, including
+# those of its default features, at the same builtin-baseline. Kept equal to
+# the repository's vcpkg.json by tools/cli/check_manifest.py (run in CI).
+ORBIT_BUILTIN_BASELINE = "a1cae005c39be7b18ba319fced856b68d7276271"
+ORBIT_DEPENDENCIES = [
+    "brotli",
+    {"name": "curl", "features": ["http2"]},
+    "libmariadb",
+    "libpq",
+    {"name": "liburing", "platform": "linux"},
+    "llhttp",
+    "mongo-c-driver",
+    "nghttp2",
+    "openssl",
+    "pkgconf",
+    "zlib",
+    "zstd",
+]
+
+
+def project_manifest(project_name):
+    return {
+        "name": project_name.lower().replace("_", "-"),
+        "version": "0.1.0",
+        "builtin-baseline": ORBIT_BUILTIN_BASELINE,
+        "dependencies": ORBIT_DEPENDENCIES,
+    }
+
+
+def default_jobs():
+    """Parallel compile jobs: one per CPU, but at most one per 2 GB of RAM.
+
+    Orbit's translation units (nlohmann/json, inja, coroutines) take up to
+    ~1.5 GB each in Debug builds, so one job per CPU can exhaust memory.
+    """
+    cpus = os.cpu_count() or 2
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    mem_gb = int(line.split()[1]) / (1024 * 1024)
+                    return max(1, min(cpus, int(mem_gb // 2)))
+    except OSError:
+        pass
+    return max(1, min(cpus, 4))
 
 def run_command(cmd, cwd=None):
     print(f"🚀 Running: {' '.join(cmd)}")
@@ -76,25 +123,10 @@ target_link_libraries({project_name} PRIVATE OrbitFramework::core)
     with open(os.path.join(project_name, "CMakeLists.txt"), "w") as f:
         f.write(cmake_lists)
 
-    # 3. vcpkg.json
-    vcpkg_json = """{
-  "name": "%s",
-  "version": "0.1.0",
-  "dependencies": [
-    "openssl",
-    "zlib",
-    "libpq",
-    "curl",
-    "libmariadb",
-    "mongo-c-driver",
-    "nghttp2",
-    "nghttp3",
-    "ngtcp2"
-  ]
-}
-""" % project_name.lower()
+    # 3. vcpkg.json: every library Orbit needs, pinned to Orbit's baseline.
     with open(os.path.join(project_name, "vcpkg.json"), "w") as f:
-        f.write(vcpkg_json)
+        json.dump(project_manifest(project_name), f, indent=2)
+        f.write("\n")
 
     print(f"✅ Successfully created Orbit project: {project_name}")
     print(f"👉 Next steps:")
@@ -102,24 +134,23 @@ target_link_libraries({project_name} PRIVATE OrbitFramework::core)
     print(f"   orbit build")
     print(f"   orbit run")
 
-def build_project(release):
+def build_project(build_type, jobs):
     if not os.path.exists("CMakeLists.txt"):
         print("❌ Error: No CMakeLists.txt found in the current directory.")
         sys.exit(1)
         
-    print("🔨 Building project...")
+    print(f"🔨 Building project ({build_type}, {jobs} parallel jobs)...")
     
     # Try to find vcpkg root
     vcpkg_root = os.environ.get("VCPKG_ROOT", "")
     
-    build_type = "Release" if release else "Debug"
     cmake_cmd = ["cmake", "-B", "build", "-S", ".", f"-DCMAKE_BUILD_TYPE={build_type}"]
     
-    if release:
-        print("🚀 Compiling with Release mode and Interprocedural Optimization (LTO) enabled...")
+    if build_type == "Release":
+        print("🚀 Release mode with interprocedural optimization (LTO).")
         cmake_cmd.append("-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON")
-    else:
-        print("🐛 Compiling in Debug mode. Use `orbit build --release` for production.")
+    elif build_type == "Debug":
+        print("🐛 Debug mode: no optimization. Use `orbit build --release` for production.")
         
     if vcpkg_root:
         toolchain = os.path.join(vcpkg_root, "scripts", "buildsystems", "vcpkg.cmake")
@@ -132,9 +163,9 @@ def build_project(release):
         else:
             print("⚠️ VCPKG_ROOT not set and local vcpkg folder not found. Building without vcpkg toolchain...")
             print("⚠️ If you are missing dependencies, please configure vcpkg.")
-            
+
     run_command(cmake_cmd)
-    run_command(["cmake", "--build", "build", "-j", str(os.cpu_count() or 4)])
+    run_command(["cmake", "--build", "build", "--parallel", str(jobs)])
     print("✅ Build completed successfully!")
 
 def run_project():
@@ -175,7 +206,11 @@ def main():
 
     # Command: build
     parser_build = subparsers.add_parser("build", help="Build the current Orbit project")
-    parser_build.add_argument("--release", action="store_true", help="Compile an optimized release build (LTO enabled)")
+    mode = parser_build.add_mutually_exclusive_group()
+    mode.add_argument("--release", action="store_true", help="Optimized release build (LTO enabled)")
+    mode.add_argument("--debug", action="store_true", help="Unoptimized debug build")
+    parser_build.add_argument("-j", "--jobs", type=int, default=None,
+                              help="Parallel compile jobs (default: one per CPU, at most one per 2 GB of RAM)")
 
     # Command: run
     parser_run = subparsers.add_parser("run", help="Run the current Orbit project")
@@ -185,7 +220,9 @@ def main():
     if args.command == "new":
         create_project(args.project_name, args.fetch)
     elif args.command == "build":
-        build_project(args.release)
+        build_type = "Release" if args.release else "Debug" if args.debug else "RelWithDebInfo"
+        jobs = args.jobs if args.jobs and args.jobs > 0 else default_jobs()
+        build_project(build_type, jobs)
     elif args.command == "run":
         run_project()
     else:
