@@ -230,7 +230,8 @@ std::string html_attribute(const std::string& in) {
     return out;
 }
 
-// Escapes a value for a single-quoted JavaScript string inside <script>.
+// Escapes a value for a single-quoted JavaScript string. "<" is escaped
+// too, so the result is also safe inside an HTML <script> element.
 std::string js_string(const std::string& in) {
     std::string out;
     for (char c : in) {
@@ -261,8 +262,13 @@ App& App::enable_openapi(const std::string& title, const std::string& version, c
 
     std::string base = assets_url;
     while (!base.empty() && base.back() == '/') base.pop_back();
+    std::string init_path = docs_path;
+    while (!init_path.empty() && init_path.back() == '/') init_path.pop_back();
+    init_path += "/init.js";
 
-    // Built once: the page only depends on the arguments above.
+    // Built once: the page only depends on the arguments above. It has no
+    // inline script, so it works under a Content-Security-Policy whose
+    // script-src allows only 'self' and the asset origin (#192).
     const std::string html = R"(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -276,21 +282,28 @@ App& App::enable_openapi(const std::string& title, const std::string& version, c
     <div id="swagger-ui"></div>
     <script src=")" + html_attribute(base + "/swagger-ui-bundle.js") + R"("
             integrity=")" + kSwaggerBundleIntegrity + R"(" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script>
-    window.onload = () => {
-        window.ui = SwaggerUIBundle({
-            url: ')" + js_string(json_path) + R"(',
-            dom_id: '#swagger-ui',
-        });
-    };
-    </script>
+    <script src=")" + html_attribute(init_path) + R"("></script>
 </body>
 </html>)";
+
+    const std::string init_js = R"(window.onload = () => {
+    window.ui = SwaggerUIBundle({
+        url: ')" + js_string(json_path) + R"(',
+        dom_id: '#swagger-ui',
+    });
+};
+)";
 
     this->get(docs_path, [html](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
         http::HttpResponse response;
         response.status(http::HttpStatus::OK);
         response.set_body(html, "text/html");
+        res->send(std::move(response));
+    });
+    this->get(init_path, [init_js](const http::HttpRequest&, std::shared_ptr<http::ResponseWriter> res) {
+        http::HttpResponse response;
+        response.status(http::HttpStatus::OK);
+        response.set_body(init_js, "text/javascript");
         res->send(std::move(response));
     });
     

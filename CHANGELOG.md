@@ -121,6 +121,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enclosing group's, else `app.on_error`. Unmatched requests and app-level
   middleware use `app.on_error`. An app that relied on a group's handler
   covering every route should register it with `app.on_error` instead.
+- **The `/docs` page works under a Content-Security-Policy** (#192). Its
+  Swagger UI bootstrap was an inline `<script>`, so a policy without
+  `'unsafe-inline'` (as set through `security_headers()`) left the page
+  blank. It is now served at `<docs_path>/init.js`.
 ## [v2.0.0] - 2026-10-08
 
 Major release: the public API moves under `namespace orbit`, HTTP/1.1

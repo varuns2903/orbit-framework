@@ -278,7 +278,10 @@ public:
      * @return Reference to the App instance for chaining.
      *
      * The docs page is only registered when this is called; enable it only
-     * in environments where the API description may be public.
+     * in environments where the API description may be public. Its
+     * bootstrap script is served at `docs_path + "/init.js"`, never inline,
+     * so the page works under a Content-Security-Policy that allows scripts
+     * from 'self' and the asset origin.
      */
     App& enable_openapi(const std::string& title = "Orbit Framework API", 
                         const std::string& version = "1.0.0", 

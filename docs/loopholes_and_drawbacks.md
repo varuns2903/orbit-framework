@@ -103,6 +103,19 @@ have thinner coverage.
 
 ## 9. Swagger UI loads from a CDN
 
-`App::enable_openapi()` serves a Swagger UI page that loads its scripts from
-unpkg without Subresource Integrity (#41). Enable it only where you trust
-that CDN, or not in production.
+`App::enable_openapi()` serves a Swagger UI page that loads its CSS and
+script from unpkg by default, pinned with Subresource Integrity hashes. Pass
+`assets_url` (e.g. `"/swagger-ui"` served by `static_files`, with the files
+from `swagger-ui-dist` 5.11.0) to keep the page off third-party origins.
+
+The page has no inline script: its bootstrap is served at
+`<docs_path>/init.js`. Under a Content-Security-Policy it needs
+`script-src 'self'` plus the asset origin, and Swagger UI's own styling needs
+`style-src` with that origin and `'unsafe-inline'`, for example:
+
+```
+default-src 'self'; script-src 'self' https://unpkg.com;
+style-src 'self' https://unpkg.com 'unsafe-inline'; img-src 'self' data:
+```
+
+Enable the docs page only where the API description may be public.
