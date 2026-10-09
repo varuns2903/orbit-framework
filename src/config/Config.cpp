@@ -43,7 +43,7 @@ ServerConfig ServerConfig::parse(int argc, char* argv[]) {
                       << "      --max-connections <num>   Connections served at once, 0 = unlimited (default: 0)\n"
                       << "  -t, --threads <num|auto>      Number of worker threads; auto = one per CPU (default: 4)\n"
                       << "      --event-loops <num|auto>  Event loops accepting and serving connections, Linux only;\n"
-                      << "                                auto = one per CPU (default: 1)\n"
+                      << "                                auto = one per CPU (default: auto)\n"
                       << "      --cpu-affinity            Pin each event loop to its own CPU (Linux)\n"
                       << "  -l, --log-level <level>       Log level (DEBUG, INFO, WARN, ERROR) (default: INFO)\n"
                       << "      --log-format <format>     text or json (default: text)\n"

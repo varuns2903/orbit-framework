@@ -132,7 +132,7 @@ TEST(ServerConfigParseTest, ShortFlags) {
 }
 
 TEST(ServerConfigParseTest, EventLoops) {
-    EXPECT_EQ(parse_args({}).event_loops, 1u);
+    EXPECT_EQ(parse_args({}).event_loops, 0u) << "auto (one per CPU) by default";
     EXPECT_EQ(parse_args({"--event-loops", "8"}).event_loops, 8u);
 }
 
@@ -242,5 +242,5 @@ TEST(ServerConfigParseTest, AutoValues) {
 TEST(ServerConfigParseTest, AffinityIsOffByDefault) {
     auto cfg = parse_args({});
     EXPECT_FALSE(cfg.cpu_affinity);
-    EXPECT_EQ(cfg.event_loops, 1u) << "the default stays one event loop";
+    EXPECT_EQ(cfg.event_loops, 0u) << "event loops default to auto";
 }

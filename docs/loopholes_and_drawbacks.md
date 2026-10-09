@@ -22,27 +22,26 @@ configuration or middleware.
 
 Both may change in any release until they are declared stable.
 
-## 2. Event loops are opt-in, and Linux-only beyond one
+## 2. Several event loops need Linux
 
-By default an `App` runs a single event-loop thread that accepts connections
-and performs all socket I/O and TLS; handlers run on a worker thread pool
-(`ServerConfig::worker_threads`). I/O-heavy workloads saturate that one
-thread before the CPU does.
+An event loop is the thread that accepts connections and performs socket I/O
+and TLS; handlers run on a worker thread pool (`ServerConfig::worker_threads`).
+By default (`event_loops = 0`, `--event-loops auto`) an `App` runs **one loop
+per CPU** this process may use (its affinity mask, so containers and
+`taskset` are respected). Each loop has its own `SO_REUSEPORT` listening
+socket; the kernel spreads new connections across them and a connection stays
+on its loop. `--event-loops N` sets the number; `--event-loops 1` gives the
+single-loop behaviour of 2.0.
 
-On Linux, `ServerConfig::event_loops` (or `--event-loops N`) runs N loops,
-each with its own `SO_REUSEPORT` listening socket; the kernel spreads new
-connections across them and a connection stays on its loop. Elsewhere the
-setting falls back to one loop, because other systems do not balance
-`SO_REUSEPORT` sockets; run several processes instead. HTTP/3 (QUIC) stays on
-the first loop.
+That is Linux only. Elsewhere one loop is used, because other systems do not
+balance `SO_REUSEPORT` sockets; run several processes instead. HTTP/3 (QUIC)
+stays on the first loop.
 
-`--event-loops auto` (`event_loops = 0`) runs one loop per CPU this process
-may use (its affinity mask, so containers and `taskset` are respected), and
-`--threads auto` sizes the handler pool the same way. `--cpu-affinity` pins
-each loop to its own CPU, and `--engine auto` picks io_uring when the kernel
-supports it (Linux 5.7+) and epoll otherwise. The server logs what it chose at
-start-up, and `App::effective_config()` returns it. These stay opt-in for now;
-the defaults are one loop, four worker threads and epoll.
+`--threads auto` sizes the handler pool by the same CPU count,
+`--cpu-affinity` pins each loop to its own CPU, and `--engine auto` picks
+io_uring when the kernel supports it (Linux 5.7+) and epoll otherwise; those
+three are opt-in, and the engine defaults to epoll. The server logs what it
+chose at start-up, and `App::effective_config()` returns it.
 
 ## 3. Large default dependency set
 

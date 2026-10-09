@@ -35,6 +35,10 @@ inline orbit::config::EventEngine test_engine() {
 inline orbit::config::ServerConfig server_config() {
     orbit::config::ServerConfig cfg;
     cfg.engine = test_engine();
+    // One event loop, not the default "one per CPU": per-loop behaviour stays
+    // deterministic and a CI runner does not start dozens of threads per
+    // test. Multi-loop behaviour has its own tests (test_event_loops_e2e).
+    cfg.event_loops = 1;
     return cfg;
 }
 
