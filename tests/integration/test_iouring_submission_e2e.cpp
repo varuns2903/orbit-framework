@@ -41,9 +41,14 @@ long get(CURL* curl, const std::string& path, std::string* body) {
 
 TEST(IoUringSubmissionTest, ResponsesFromThreadsThatExitAreDelivered) {
     orbit::config::ServerConfig cfg = orbit::test::server_config();
+    // Like the rest of the suite, io_uring is used when the run selects it
+    // (ORBIT_TEST_ENGINE=iouring: the coverage job's io_uring pass). The
+    // valgrind run uses epoll; valgrind cannot follow io_uring's shared rings.
+    if (cfg.engine != orbit::config::EventEngine::IoUring) {
+        GTEST_SKIP() << "run with ORBIT_TEST_ENGINE=iouring";
+    }
     cfg.host = "127.0.0.1";
     cfg.port = kPort;
-    cfg.engine = orbit::config::EventEngine::IoUring;
     orbit::server::App app(cfg);
     app.get("/ok", [](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
         HttpResponse res;
