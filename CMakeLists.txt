@@ -227,6 +227,7 @@ set(SERVER_SOURCES
     src/http/Http2Session.cpp
     src/routing/Router.cpp
     src/server/App.cpp
+    src/server/Scheduler.cpp
     src/middleware/StaticFiles.cpp
     src/middleware/Compress.cpp
     src/middleware/JwtAuth.cpp

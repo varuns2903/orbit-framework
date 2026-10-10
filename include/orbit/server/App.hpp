@@ -5,6 +5,7 @@
 
 #include <orbit/server/Listener.hpp>
 #include <orbit/server/EventLoop.hpp>
+#include <orbit/server/Timer.hpp>
 #include <orbit/routing/Router.hpp>
 #include <orbit/routing/HandlerWrapper.hpp>
 #include <orbit/config/Config.hpp>
@@ -16,10 +17,14 @@
 namespace orbit::server { class QuicConnectionManager; }
 #endif
 #include <atomic>
+#include <chrono>
+#include <functional>
 #include <memory>
 #include <mutex>
 
 namespace orbit::server {
+
+class Scheduler; // src/server/Scheduler.hpp
 
 /**
  * @brief The main application class for the Orbit Framework.
@@ -264,6 +269,46 @@ public:
      */
     App& enable_metrics(const std::string& path = "/metrics");
 
+    // Lifecycle and timers
+    /**
+     * @brief Runs @p hook once the server is up: listeners bound, worker
+     *        pool and timers running, just before the event loops start
+     *        serving. On a worker thread, so it may block or be a coroutine
+     *        (warm a cache, connect a pool, run migrate_sync()).
+     *
+     * Hooks run in the order added. One that throws is logged and the
+     * others still run; call app.stop() or app.shutdown() from a hook to
+     * abort start-up instead.
+     */
+    App& on_start(std::function<void(App&)> hook);
+
+    /**
+     * @brief Runs @p hook once when the server stops: at the first
+     *        shutdown() (or SIGTERM/SIGINT) before connections drain, at
+     *        stop(), or when listen() returns. Only for a server that
+     *        started. Runs on the thread that stops the server, which may be
+     *        the event loop: keep it short (flush a queue, deregister).
+     */
+    App& on_stop(std::function<void(App&)> hook);
+
+    /**
+     * @brief Calls @p callback every @p interval, on a worker thread, from
+     *        when the server starts (or now, if it is running) until it
+     *        stops or the handle is cancelled.
+     *
+     * Runs never overlap: a tick that comes while the previous run is still
+     * going is skipped. An exception from the callback is logged.
+     *
+     * @code
+     * auto heartbeat = app.run_every(std::chrono::seconds(15), [&hub] { hub.ping(); });
+     * @endcode
+     */
+    TimerHandle run_every(std::chrono::milliseconds interval, std::function<void()> callback);
+
+    /// Calls @p callback once, @p delay after the server starts (or after
+    /// now, if it is running), on a worker thread.
+    TimerHandle run_after(std::chrono::milliseconds delay, std::function<void()> callback);
+
     // OpenAPI & Swagger UI
     /**
      * @brief Enables OpenAPI documentation and Swagger UI.
@@ -365,6 +410,13 @@ private:
     // its workers joined, before them: queued handlers hold connections that
     // use a loop's proactor.
     std::unique_ptr<concurrency::ThreadPool> thread_pool_;
+    // Declared after the pool, so it stops before the pool goes away.
+    std::unique_ptr<Scheduler> scheduler_;
+    std::vector<std::function<void(App&)>> start_hooks_;
+    std::vector<std::function<void(App&)>> stop_hooks_;
+    std::atomic<bool> started_{false};
+    std::atomic<bool> stop_hooks_ran_{false};
+    void run_stop_hooks();
     // listen() creates the loops on the server thread while stop() may run
     // on any thread (a test, a signal, an admin endpoint).
     mutable std::mutex loop_mutex_;
