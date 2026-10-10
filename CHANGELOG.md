@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`<orbit/orbit.hpp>` and shorter names** (#211): one include for a
+  typical app (the server, routing, built-in middleware, WebSockets, the
+  test client — not the database clients or ORM, which stay separate), and
+  aliases in `namespace orbit` for the names a handler signature repeats:
+  `App`, `Request`, `Response`, `Status`, `Method`,
+  `Writer` (`std::shared_ptr<ResponseWriter>`), `RouteHandler`,
+  `Middleware`, `json`. Each is the exact same type as its namespaced
+  spelling, so the two mix freely. Also `res.json(body, status)` (sets both
+  at once) and `HttpResponse::error(status, message)` (a JSON `{"error":
+  ...}` body), the shapes most handlers write by hand.
 - **`orbit::http::RequestContext` and `HttpRequest::set/get/ensure<T>()`**
   (#202): type-indexed per-request storage, so a middleware that computes
   something for later middleware or the handler (the authenticated user, a

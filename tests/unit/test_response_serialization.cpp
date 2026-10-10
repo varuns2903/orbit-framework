@@ -164,3 +164,38 @@ TEST(ResponseSerializationTest, HttpDateIsImfFixdate) {
     const std::time_t after = std::time(nullptr);
     EXPECT_TRUE(now == orbit::http::format_http_date(before) || now == orbit::http::format_http_date(after)) << now;
 }
+
+// --- json(j, status) and error(status, msg) (#211) ---
+
+TEST(ResponseSerializationTest, JsonWithStatusSetsBothAtOnce) {
+    nlohmann::json body_true = {{"ok", true}};
+    orbit::http::HttpResponse lvalue;
+    lvalue.json(body_true, orbit::http::HttpStatus::Created);
+    EXPECT_EQ(lvalue.status_code, orbit::http::HttpStatus::Created);
+    EXPECT_EQ(lvalue.body, body_true.dump());
+    EXPECT_EQ(lvalue.headers.at("Content-Type"), "application/json");
+
+    nlohmann::json body_false = {{"ok", false}};
+    orbit::http::HttpResponse rvalue = orbit::http::HttpResponse().json(body_false, orbit::http::HttpStatus::Accepted);
+    EXPECT_EQ(rvalue.status_code, orbit::http::HttpStatus::Accepted);
+    EXPECT_EQ(rvalue.body, body_false.dump());
+}
+
+TEST(ResponseSerializationTest, ErrorBuildsAJsonErrorBody) {
+    orbit::http::HttpResponse res = orbit::http::HttpResponse::error(orbit::http::HttpStatus::NotFound,
+                                                                     "task not found");
+    EXPECT_EQ(res.status_code, orbit::http::HttpStatus::NotFound);
+    EXPECT_EQ(res.headers.at("Content-Type"), "application/json");
+    auto parsed = nlohmann::json::parse(res.body);
+    EXPECT_EQ(parsed["error"], "task not found");
+}
+
+// A quote or backslash in the message stays valid JSON (built with
+// nlohmann, not concatenated; same bug class as #188).
+TEST(ResponseSerializationTest, ErrorMessageWithSpecialCharactersStaysValidJson) {
+    orbit::http::HttpResponse res = orbit::http::HttpResponse::error(
+        orbit::http::HttpStatus::BadRequest, R"(bad "field" with a \ in it)");
+    auto parsed = nlohmann::json::parse(res.body, nullptr, false);
+    ASSERT_FALSE(parsed.is_discarded()) << res.body;
+    EXPECT_EQ(parsed["error"], R"(bad "field" with a \ in it)");
+}
