@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attributes (`set_attr`/`attr`) for keys only known at runtime.
 - **Typed route segments and `app.validate_routes()`** (#201): `{id:int}`
   and `{id:uuid}` constrain a path segment, so a value that doesn't fit
-  means the route doesn't match (falls through, eventually to 404) instead
-  of reaching the handler as unparsed text. `{name}` (or `{name:str}`) is
-  the same as `:name`. `req.param<T>(name)` parses any parameter as `T`
+  means the route doesn't match: it falls through to the next candidate,
+  and only to 404 if none matches — instead of reaching the handler as
+  unparsed text. `{name}` (or `{name:str}`) is the same as `:name`.
+  `req.param<T>(name)` parses any parameter as `T`
   (`std::string`, `bool`, or an integral/floating-point type), returning
   `std::nullopt` if it is absent or doesn't parse. `app.validate_routes()`
   (called automatically by `listen()`, which refuses to start if it finds
