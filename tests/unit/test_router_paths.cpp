@@ -5,6 +5,7 @@
 #include <orbit/http/HttpResponse.hpp>
 #include <orbit/http/ResponseWriter.hpp>
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -683,6 +684,24 @@ TEST(RouterTypedSegmentsTest, IntConstraintAcceptsOnlyIntegers) {
     EXPECT_EQ(decimal->last().status_code, HttpStatus::NotFound);
 }
 
+// {id:int} accepts the type's whole 64-bit range, not only what fits a
+// (typically 32-bit) C++ int: req.param<T> for the route-matched value
+// needs a T at least as wide (int64_t) to never see nullopt (#254 review).
+TEST(RouterTypedSegmentsTest, IntConstraintAcceptsValuesOutside32BitRange) {
+    Router r;
+    r.get("/tasks/{id:int}", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
+        HttpResponse res;
+        auto narrow = req.param<int>("id");
+        auto wide = req.param<std::int64_t>("id");
+        res.send((narrow ? "int:" + std::to_string(*narrow) : std::string("int:nullopt")) + " " +
+                 (wide ? "int64_t:" + std::to_string(*wide) : std::string("int64_t:nullopt")));
+        w->send(std::move(res));
+    });
+    auto res = dispatch(r, HttpMethod::GET, "/tasks/99999999999"); // the route matches: fits a 64-bit "int"
+    EXPECT_EQ(res->last().status_code, HttpStatus::OK);
+    EXPECT_EQ(body_of(res), "int:nullopt int64_t:99999999999");
+}
+
 TEST(RouterTypedSegmentsTest, UuidConstraintAcceptsOnlyCanonicalUuids) {
     Router r;
     r.get("/widgets/{id:uuid}", echo_params());
@@ -747,6 +766,29 @@ TEST(RouterTypedSegmentsTest, OpenApiShowsTypedSegmentsWithoutTheirType) {
     EXPECT_NE(spec.find("\"/widgets/{id}\""), std::string::npos) << spec;
     EXPECT_EQ(spec.find(":int"), std::string::npos) << spec;
     EXPECT_EQ(spec.find(":uuid"), std::string::npos) << spec;
+}
+
+// The router dispatches /tasks/{id:int} and /tasks/{id:uuid} separately
+// (different patterns, tried in order), but OpenAPI has no way to express
+// two shapes of the same {id}, so they collapse to one published operation
+// (the most recently registered) with a warning logged (#254 review).
+TEST(RouterTypedSegmentsTest, DifferentlyTypedSegmentsCollapseInOpenApiWithAWarning) {
+    orbit::openapi::OpenApiRegistry registry;
+    orbit::openapi::RouteMetadata int_meta;
+    int_meta.summary = "numeric id";
+    orbit::openapi::RouteMetadata uuid_meta;
+    uuid_meta.summary = "uuid id";
+
+    testing::internal::CaptureStdout();
+    registry.register_route(HttpMethod::GET, "/tasks/{id:int}", int_meta);
+    registry.register_route(HttpMethod::GET, "/tasks/{id:uuid}", uuid_meta);
+    std::string log = testing::internal::GetCapturedStdout();
+    EXPECT_NE(log.find("/tasks/{id:uuid}"), std::string::npos) << log;
+    EXPECT_NE(log.find("/tasks/{id}"), std::string::npos) << log;
+
+    std::string spec = registry.generate_swagger_json("t", "1");
+    EXPECT_NE(spec.find("uuid id"), std::string::npos) << "the later registration's metadata is kept: " << spec;
+    EXPECT_EQ(spec.find("numeric id"), std::string::npos) << spec;
 }
 
 // --- Router::validate_routes() (#201) ---

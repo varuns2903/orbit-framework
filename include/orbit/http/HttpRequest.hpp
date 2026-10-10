@@ -155,16 +155,20 @@ struct HttpRequest {
     }
 
     /**
-     * @brief A path parameter (from `params`, or `query`) parsed as `T`.
+     * @brief A path parameter (from `params`; not `query`) parsed as `T`.
      * @return The value, or std::nullopt if @p name is absent or its text
      *         does not parse as `T` (trailing characters included).
      *
      * A route pattern that constrains the segment's type (`{id:int}`)
-     * already guarantees the text parses, so `param<int>("id")` there is
-     * never null for a request the route matched; `param` is just as
-     * useful for an untyped `:name` segment or a query parameter, where it
+     * already guarantees the text parses as that type's full range, so
+     * `param<std::int64_t>("id")` there is never null for a request the
+     * route matched — `param<T>` for a narrower `T` (plain `int`, say)
+     * still can be, for a value the route accepted but that overflows `T`.
+     * `param` is just as useful for an untyped `:name` segment, where it
      * replaces `params.at(name)` plus a hand-written `std::stoi` (and the
-     * try/catch an invalid one needs).
+     * try/catch an invalid one needs). It does not read `query`; copy a
+     * value from there into `params` first if you want the same parsing
+     * for it.
      *
      * @code
      * app.get("/tasks/:id", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {

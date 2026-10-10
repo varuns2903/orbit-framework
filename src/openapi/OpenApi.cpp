@@ -1,4 +1,5 @@
 #include <orbit/openapi/OpenApi.hpp>
+#include <orbit/utils/Logger.hpp>
 #include <sstream>
 #include <regex>
 
@@ -11,10 +12,23 @@ void OpenApiRegistry::register_route(http::HttpMethod method, const std::string&
     swagger_path = std::regex_replace(swagger_path, std::regex("/\\*([^/]+)$"), "/{$1}");
     swagger_path = std::regex_replace(swagger_path, std::regex("/\\*$"), "/{path}");
     // A typed segment (/tasks/{id:int}) is OpenAPI's {id}; the type belongs
-    // to Orbit's route matching, not the published path template.
+    // to Orbit's route matching, not the published path template. Two
+    // routes that differ only in their type (/tasks/{id:int} and
+    // /tasks/{id:uuid}) are dispatched separately by the router but
+    // normalize to the same OpenAPI path here; OpenAPI has no way to
+    // express "this path, but only for one of two shapes of {id}", so one
+    // operation silently replaces the other below. Rare (same literal
+    // param name, same method, differing only by type), but worth a
+    // pointer to the log when it happens.
     swagger_path = std::regex_replace(swagger_path, std::regex("\\{([^:}]+):[^}]+\\}"), "{$1}");
     std::lock_guard<std::mutex> lock(mutex_);
-    paths_[swagger_path].methods[method] = meta;
+    auto& methods = paths_[swagger_path].methods;
+    if (methods.find(method) != methods.end()) {
+        LOG_WARN("OpenAPI: " << path << " normalizes to the already-registered " << swagger_path
+                 << " for this method; the published spec keeps only the most recently registered operation "
+                 << "(the router still dispatches both routes separately)");
+    }
+    methods[method] = meta;
 }
 
 void OpenApiRegistry::register_schema(const std::string& name, const std::string& json_schema_body) {
