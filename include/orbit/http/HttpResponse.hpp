@@ -187,7 +187,25 @@ public:
      */
     HttpResponse& json(const nlohmann::json& j) & { set_body(j.dump(), "application/json"); return *this; }
     HttpResponse&& json(const nlohmann::json& j) && { set_body(j.dump(), "application/json"); return std::move(*this); }
-    
+
+    /// json(j) and status(code) together: `res.json(obj, HttpStatus::Created)`.
+    HttpResponse& json(const nlohmann::json& j, HttpStatus code) & { return status(code).json(j); }
+    HttpResponse&& json(const nlohmann::json& j, HttpStatus code) && { return std::move(*this).status(code).json(j); }
+
+    /**
+     * @brief A JSON error response, `{"error": message}`, with @p code.
+     *
+     * The shape every app ends up writing by hand for its own error
+     * responses (a route handler's failure, a middleware's rejection):
+     *
+     * @code
+     * writer->send(HttpResponse::error(HttpStatus::NotFound, "task not found"));
+     * @endcode
+     */
+    static HttpResponse error(HttpStatus code, const std::string& message) {
+        return HttpResponse().json(nlohmann::json{{"error", message}}, code);
+    }
+
     /**
      * @brief Sets the response body as HTML.
      * @param h The HTML string content.

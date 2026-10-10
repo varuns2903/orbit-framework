@@ -111,6 +111,45 @@ curl http://localhost:8080
 curl http://localhost:8080/api/status
 ```
 
+### One Include, Shorter Names
+
+`<orbit/orbit.hpp>` pulls in the server, routing, the built-in middleware,
+WebSockets and the test client in one include (everything except the
+database clients and ORM, which stay separate so apps that don't use them
+don't pay for their dependencies: `<orbit/database/*.hpp>`,
+`<orbit/orm/*.hpp>`). It also defines short aliases inside `namespace
+orbit` — `App`, `Request`, `Response`, `Status`, `Method`, `Writer`
+(`std::shared_ptr<ResponseWriter>`), `RouteHandler`, `Middleware`, `json` —
+for the namespaced types every handler signature repeats. The example above,
+written with them:
+
+```cpp
+#include <orbit/orbit.hpp>
+
+int main() {
+    orbit::App app(orbit::config::ServerConfig{.port = 8080});
+
+    app.get("/tasks/:id", [](orbit::Request& req, orbit::Writer w) {
+        w->send(orbit::Response::error(orbit::Status::NotFound, "no task " + req.params["id"]));
+    });
+
+    app.get("/api/status", [](orbit::Request&, orbit::Writer w) {
+        w->send(orbit::Response().json(orbit::json{{"status", "ok"}}, orbit::Status::OK));
+    });
+
+    app.listen();
+}
+```
+
+An alias is the exact same type as its full name (`orbit::App` *is*
+`orbit::server::App`), so the two spellings mix freely in one codebase;
+nothing stops using `orbit::server::App` instead, or together with the
+short names, as earlier examples in this guide do.
+
+`Response::error(status, message)` and `Response().json(body, status)` are
+the one-line shapes most handlers end up writing by hand: a JSON `{"error":
+...}` body with its status, and a JSON body plus status set together.
+
 ## Configuration Files
 
 Settings can live in a JSON file, be overridden by `ORBIT_*` environment
