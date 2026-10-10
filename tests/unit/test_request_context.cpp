@@ -120,6 +120,54 @@ TEST(RequestContextTest, SharedPtrAndPointerValuesWork) {
     EXPECT_EQ(**ctx.get<std::shared_ptr<int>>(), 10);
 }
 
+// erase() releases the value in place: it must not rely on self-move
+// assignment to clear a std::any (a no-op in libstdc++, confirmed by hand:
+// a.operator=(std::move(a)) left a std::any<shared_ptr<int>> alive, with
+// its use_count unchanged, when the implementation was "swap with the last
+// live slot, then shrink" and the erased type happened to be in that slot).
+TEST(RequestContextTest, EraseReleasesAHeldSharedPtrEvenFromTheLastSlotUsed) {
+    RequestContext ctx;
+    auto shared = std::make_shared<int>(1);
+    ASSERT_EQ(shared.use_count(), 1);
+    ctx.set(shared); // now the only (and so "last") slot in use
+    EXPECT_EQ(shared.use_count(), 2);
+    EXPECT_TRUE(ctx.erase<std::shared_ptr<int>>());
+    EXPECT_EQ(shared.use_count(), 1) << "the context's copy must be released, not left alive in a dead slot";
+}
+
+// A pointer get() already returned for one type stays valid: setting more
+// types (including past the inline capacity, into the overflow storage),
+// and erasing a *different* type, must never relocate it.
+TEST(RequestContextTest, PointersStayValidAcrossOtherSetAndEraseCalls) {
+    struct A { int v = 1; };
+    struct B { int v = 2; };
+    struct C { int v = 3; };
+    struct D { int v = 4; };
+    struct E { int v = 5; };
+    RequestContext ctx;
+    ctx.set(A{10});
+    A* a = ctx.get<A>();
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->v, 10);
+
+    ctx.set(B{});
+    ctx.set(C{});
+    EXPECT_TRUE(ctx.erase<B>()); // erasing a slot before A's must not move A
+    EXPECT_EQ(a->v, 10);
+    EXPECT_EQ(a, ctx.get<A>()) << "same address";
+
+    ctx.set(D{});
+    ctx.set(E{}); // the 5th distinct type still in use: grows the overflow
+    EXPECT_EQ(a->v, 10);
+    EXPECT_EQ(a, ctx.get<A>());
+
+    // The slot erase<B>() freed is reused by the next new type, not left idle.
+    struct F { int v = 6; };
+    ctx.set(F{});
+    EXPECT_EQ(ctx.get<F>()->v, 6);
+    EXPECT_EQ(a->v, 10);
+}
+
 TEST(RequestContextTest, NamedAttributesAreSeparateFromTypedStorage) {
     RequestContext ctx;
     EXPECT_EQ(ctx.attr("tenant"), nullptr);

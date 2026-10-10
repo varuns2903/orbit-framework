@@ -2,12 +2,13 @@
 #include <orbit/legacy_namespaces.hpp>
 #include <any>
 #include <array>
+#include <deque>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <typeindex>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 namespace orbit::http {
 
@@ -41,13 +42,21 @@ namespace orbit::http {
  * The first few distinct types used (4, kept inline) cost no heap
  * allocation beyond whatever `std::any` itself needs to hold the value
  * (none for a value that fits its small-object buffer: a pointer, a
- * `shared_ptr`, a small struct). A fifth distinct type moves everything
- * into a heap-allocated overflow list.
+ * `shared_ptr`, a small struct). A fifth distinct type moves into a
+ * heap-allocated overflow list, grown one slot at a time (`std::deque`, not
+ * `std::vector`: a pointer or reference once returned by `get`/`ensure`
+ * stays valid for the rest of the request, including across later `set`,
+ * `erase` or `ensure` calls for *other* types — a growing `vector` would
+ * invalidate it on reallocation). A slot a type was `erase`d from is
+ * reused by the next type that needs one, rather than left to grow the
+ * storage further.
  *
  * `T` must be copy-constructible (a `std::any` requirement), as most
  * context values are: an id, a small struct, a `shared_ptr` to something
  * with its own lifetime (a DB transaction, say). A move-only type does not
- * fit here; wrap it in a `shared_ptr` or `unique_ptr` instead.
+ * fit here; wrap it in a `shared_ptr` instead. `T = std::any` itself is
+ * rejected at compile time: assigning it into the slot's own `std::any`
+ * would merge the two rather than nest one inside the other.
  *
  * Not thread-safe: as with the rest of `HttpRequest`, only the thread
  * currently handling the request should read or write it.
@@ -57,6 +66,9 @@ public:
     /// Sets (replacing any previous value) and returns a reference to it.
     template <typename T>
     T& set(T value) {
+        static_assert(!std::is_same_v<T, std::any>,
+                     "RequestContext::set<std::any>() is not supported: assigning an any into the slot's "
+                     "own any merges them instead of nesting one inside the other");
         Slot& slot = slot_for(std::type_index(typeid(T)));
         slot.value = std::move(value);
         return *std::any_cast<T>(&slot.value);
@@ -88,24 +100,16 @@ public:
         return set<T>(T(std::forward<Args>(args)...));
     }
 
-    /// Removes the value for `T`, if any. Returns whether one was removed.
+    /// Removes the value for `T`, if any, in place (every other stored
+    /// value keeps its address). Returns whether one was removed.
     template <typename T>
     bool erase() {
-        const auto key = std::type_index(typeid(T));
-        for (size_t i = 0; i < inline_used_; ++i) {
-            if (inline_[i].key == key) {
-                inline_[i] = std::move(inline_[inline_used_ - 1]);
-                --inline_used_;
-                return true;
-            }
-        }
-        for (auto it = overflow_.begin(); it != overflow_.end(); ++it) {
-            if (it->key == key) {
-                overflow_.erase(it);
-                return true;
-            }
-        }
-        return false;
+        Slot* slot = find(std::type_index(typeid(T)));
+        if (!slot) return false;
+        slot->value.reset();
+        slot->key = std::type_index(typeid(void));
+        slot->used = false;
+        return true;
     }
 
     // --- Named attributes, for interop or keys only known at runtime ---
@@ -123,35 +127,49 @@ private:
     struct Slot {
         std::type_index key{typeid(void)};
         std::any value;
+        bool used = false;
     };
 
     static constexpr size_t kInlineCapacity = 4;
 
     Slot* find(std::type_index key) {
-        for (size_t i = 0; i < inline_used_; ++i) {
-            if (inline_[i].key == key) return &inline_[i];
+        for (auto& slot : inline_) {
+            if (slot.used && slot.key == key) return &slot;
         }
         for (auto& slot : overflow_) {
-            if (slot.key == key) return &slot;
+            if (slot.used && slot.key == key) return &slot;
         }
         return nullptr;
     }
     const Slot* find(std::type_index key) const { return const_cast<RequestContext*>(this)->find(key); }
 
+    // A slot for @p key: its own if already set, else a reused erased slot
+    // or a fresh one. Never moves another slot's contents, so every
+    // pointer or reference this class has already handed out stays valid.
     Slot& slot_for(std::type_index key) {
         if (Slot* existing = find(key)) return *existing;
-        if (inline_used_ < inline_.size()) {
-            Slot& slot = inline_[inline_used_++];
-            slot.key = key;
-            return slot;
+        for (auto& slot : inline_) {
+            if (!slot.used) {
+                slot.key = key;
+                slot.used = true;
+                return slot;
+            }
         }
-        overflow_.push_back(Slot{key, {}});
+        for (auto& slot : overflow_) {
+            if (!slot.used) {
+                slot.key = key;
+                slot.used = true;
+                return slot;
+            }
+        }
+        // deque::push_back never invalidates references to existing
+        // elements (only iterators), unlike vector on reallocation.
+        overflow_.push_back(Slot{key, {}, true});
         return overflow_.back();
     }
 
     std::array<Slot, kInlineCapacity> inline_{};
-    size_t inline_used_ = 0;
-    std::vector<Slot> overflow_;
+    std::deque<Slot> overflow_;
     std::unordered_map<std::string, std::string> attrs_;
 };
 
