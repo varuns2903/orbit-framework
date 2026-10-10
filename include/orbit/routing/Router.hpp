@@ -164,6 +164,20 @@ public:
 
     bool has_ws_route(const std::string& path) const;
 
+    /**
+     * @brief Finds routes registered more than once: the same HTTP method
+     *        and exact path pattern (text, not matching behaviour) added
+     *        twice, which silently keeps only one of them (the last
+     *        registration for a static path, the first match for a dynamic
+     *        one) with no warning otherwise.
+     *
+     * @return One line per duplicated method+pattern ("GET /tasks/{id}
+     *         registered 2 times"), empty if there are none. Call this
+     *         yourself to check without starting a server; App::listen()
+     *         calls it and refuses to start if it is non-empty.
+     */
+    std::vector<std::string> validate_routes() const;
+
 private:
     // Error handling for an exception from a route, middleware or (later,
     // through the writer's error sink) an asynchronous handler.
@@ -189,13 +203,17 @@ private:
     void mark_stream_route(http::HttpMethod method, const std::string& full_path);
     std::vector<std::string> split_path(std::string_view path) const;
 
-    // Matches request segments against a route pattern of literal,
-    // ":param" and a trailing "*" / "*name" segment. Fills @p params and
-    // returns the number of literal segments matched, or -1 for no match.
+    // Matches request segments against a route pattern of literal, ":param",
+    // "{param}" / "{param:type}" (typed; see segment_matches_type) and a
+    // trailing "*" / "*name" segment. Fills @p params and returns the number
+    // of literal segments matched, or -1 for no match (including a typed
+    // segment whose value does not fit its type).
     static int match_segments(const std::vector<std::string>& pattern, const std::vector<std::string>& request,
                               std::unordered_map<std::string, std::string>* params);
     static bool is_wildcard(const std::string& segment) { return !segment.empty() && segment[0] == '*'; }
-    
+    Router* root() { return parent_ ? parent_ : this; }
+    const Router* root() const { return parent_ ? parent_ : this; }
+
     std::string prefix_;
     Router* parent_{nullptr};
     std::shared_ptr<openapi::OpenApiRegistry> openapi_;
@@ -203,14 +221,18 @@ private:
     ErrorHandler error_handler_;
     std::shared_ptr<ErrorScope> error_scope_; // groups only
     RouteHandler not_found_handler_;
-    
+
     std::unordered_map<std::string, StaticRoute> routes_;
     std::unordered_map<std::string, WsRoute> ws_routes_;
     std::vector<DynamicRoute> dynamic_routes_;
     std::vector<Middleware> middlewares_;
-    
+
     std::unordered_set<std::string> stream_routes_;
     std::vector<DynamicRoute> dynamic_stream_routes_;
+
+    // Registrations per "METHOD full-pattern-text" key (root router only;
+    // see root()), for validate_routes().
+    std::unordered_map<std::string, int> registration_counts_;
 };
 
 } // namespace routing

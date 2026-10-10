@@ -642,3 +642,153 @@ TEST(RouterWildcardTest, OpenApiShowsWildcardsAsPathParameters) {
     EXPECT_NE(spec.find("\"/users/{id}\""), std::string::npos) << spec;
     EXPECT_EQ(spec.find('*'), std::string::npos) << "no literal * in the spec: " << spec;
 }
+
+// --- Typed route segments (#201) ---
+
+namespace {
+
+// Replies with every captured param, "name=value" one per line, so a test
+// can see exactly what the router extracted.
+RouteHandler echo_params() {
+    return [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
+        std::vector<std::string> pairs;
+        for (const auto& [k, v] : req.params) pairs.push_back(k + "=" + v);
+        std::sort(pairs.begin(), pairs.end());
+        std::string body;
+        for (auto& p : pairs) body += p + "\n";
+        HttpResponse res;
+        res.send(body);
+        w->send(std::move(res));
+    };
+}
+
+} // namespace
+
+TEST(RouterTypedSegmentsTest, UntypedBracesMatchAnyNonEmptySegment) {
+    Router r;
+    r.get("/tasks/{id}", echo_params());
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/tasks/anything-at-all")), "id=anything-at-all\n");
+}
+
+TEST(RouterTypedSegmentsTest, IntConstraintAcceptsOnlyIntegers) {
+    Router r;
+    r.get("/tasks/{id:int}", echo_params());
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/tasks/42")), "id=42\n");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/tasks/-7")), "id=-7\n");
+    // Doesn't parse as int: this route doesn't match, so there's no route
+    // at all for it here (no not_found handler registered) -> 404.
+    auto bad = dispatch(r, HttpMethod::GET, "/tasks/abc");
+    EXPECT_EQ(bad->last().status_code, HttpStatus::NotFound);
+    auto decimal = dispatch(r, HttpMethod::GET, "/tasks/4.2");
+    EXPECT_EQ(decimal->last().status_code, HttpStatus::NotFound);
+}
+
+TEST(RouterTypedSegmentsTest, UuidConstraintAcceptsOnlyCanonicalUuids) {
+    Router r;
+    r.get("/widgets/{id:uuid}", echo_params());
+    const std::string uuid = "123e4567-e89b-12d3-a456-426614174000";
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/widgets/" + uuid)), "id=" + uuid + "\n");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/widgets/123E4567-E89B-12D3-A456-426614174000")),
+              "id=123E4567-E89B-12D3-A456-426614174000\n")
+        << "hex digits are matched case-insensitively";
+    EXPECT_EQ(dispatch(r, HttpMethod::GET, "/widgets/not-a-uuid")->last().status_code, HttpStatus::NotFound);
+    EXPECT_EQ(dispatch(r, HttpMethod::GET, "/widgets/42")->last().status_code, HttpStatus::NotFound);
+}
+
+// str is the same as no type at all: any non-empty segment.
+TEST(RouterTypedSegmentsTest, StrConstraintIsTheDefault) {
+    Router r;
+    r.get("/pages/{slug:str}", echo_params());
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/pages/hello-world")), "slug=hello-world\n");
+}
+
+// A type mismatch on one route falls through to the next candidate, as an
+// unmatched literal segment already does.
+TEST(RouterTypedSegmentsTest, TypeMismatchFallsThroughToTheNextRoute) {
+    Router r;
+    r.get("/items/{id:int}", [](HttpRequest&, std::shared_ptr<ResponseWriter> w) {
+        HttpResponse res;
+        res.send("numeric");
+        w->send(std::move(res));
+    });
+    r.get("/items/:slug", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
+        HttpResponse res;
+        res.send("slug:" + req.params["slug"]);
+        w->send(std::move(res));
+    });
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/items/42")), "numeric");
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/items/widget")), "slug:widget");
+}
+
+TEST(RouterTypedSegmentsTest, UnknownTypeThrowsAtRegistration) {
+    Router r;
+    EXPECT_THROW(r.get("/x/{id:money}", reply("x")), std::invalid_argument);
+}
+
+TEST(RouterTypedSegmentsTest, EmptyNameThrowsAtRegistration) {
+    Router r;
+    EXPECT_THROW(r.get("/x/{:int}", reply("x")), std::invalid_argument);
+    EXPECT_THROW(r.get("/x/{}", reply("x")), std::invalid_argument);
+}
+
+TEST(RouterTypedSegmentsTest, TypedSegmentWorksInAGroup) {
+    Router r;
+    r.group("/api", [](Router& api) { api.get("/tasks/{id:int}", echo_params()); });
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/api/tasks/7")), "id=7\n");
+    EXPECT_EQ(dispatch(r, HttpMethod::GET, "/api/tasks/nope")->last().status_code, HttpStatus::NotFound);
+}
+
+TEST(RouterTypedSegmentsTest, OpenApiShowsTypedSegmentsWithoutTheirType) {
+    orbit::openapi::OpenApiRegistry registry;
+    registry.register_route(HttpMethod::GET, "/tasks/{id:int}", {});
+    registry.register_route(HttpMethod::GET, "/widgets/{id:uuid}", {});
+    std::string spec = registry.generate_swagger_json("t", "1");
+    EXPECT_NE(spec.find("\"/tasks/{id}\""), std::string::npos) << spec;
+    EXPECT_NE(spec.find("\"/widgets/{id}\""), std::string::npos) << spec;
+    EXPECT_EQ(spec.find(":int"), std::string::npos) << spec;
+    EXPECT_EQ(spec.find(":uuid"), std::string::npos) << spec;
+}
+
+// --- Router::validate_routes() (#201) ---
+
+TEST(RouterValidateRoutesTest, CleanRouterHasNoProblems) {
+    Router r;
+    r.get("/a", reply("a"));
+    r.post("/a", reply("a-post"));
+    r.get("/b/:id", reply("b"));
+    EXPECT_TRUE(r.validate_routes().empty());
+}
+
+TEST(RouterValidateRoutesTest, DuplicateStaticRouteIsReported) {
+    Router r;
+    r.get("/dup", reply("1"));
+    r.get("/dup", reply("2"));
+    auto problems = r.validate_routes();
+    ASSERT_EQ(problems.size(), 1u);
+    EXPECT_EQ(problems[0], "GET /dup registered 2 times");
+    // The later registration wins, as before (validate_routes only reports;
+    // it does not itself change matching behaviour).
+    EXPECT_EQ(body_of(dispatch(r, HttpMethod::GET, "/dup")), "2");
+}
+
+TEST(RouterValidateRoutesTest, SameTextRegisteredThreeTimesCountsAllThree) {
+    Router r;
+    r.get("/x", reply("1"));
+    r.get("/x", reply("2"));
+    r.get("/x", reply("3"));
+    auto problems = r.validate_routes();
+    ASSERT_EQ(problems.size(), 1u);
+    EXPECT_EQ(problems[0], "GET /x registered 3 times");
+}
+
+TEST(RouterValidateRoutesTest, MultipleDuplicatesAreSortedForStableOutput) {
+    Router r;
+    r.post("/z", reply("1"));
+    r.post("/z", reply("2"));
+    r.get("/a", reply("1"));
+    r.get("/a", reply("2"));
+    auto problems = r.validate_routes();
+    ASSERT_EQ(problems.size(), 2u);
+    EXPECT_EQ(problems[0], "GET /a registered 2 times");
+    EXPECT_EQ(problems[1], "POST /z registered 2 times");
+}

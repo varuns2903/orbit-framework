@@ -10,6 +10,9 @@ void OpenApiRegistry::register_route(http::HttpMethod method, const std::string&
     std::string swagger_path = std::regex_replace(path, std::regex("/:([^/]+)"), "/{$1}");
     swagger_path = std::regex_replace(swagger_path, std::regex("/\\*([^/]+)$"), "/{$1}");
     swagger_path = std::regex_replace(swagger_path, std::regex("/\\*$"), "/{path}");
+    // A typed segment (/tasks/{id:int}) is OpenAPI's {id}; the type belongs
+    // to Orbit's route matching, not the published path template.
+    swagger_path = std::regex_replace(swagger_path, std::regex("\\{([^:}]+):[^}]+\\}"), "{$1}");
     std::lock_guard<std::mutex> lock(mutex_);
     paths_[swagger_path].methods[method] = meta;
 }

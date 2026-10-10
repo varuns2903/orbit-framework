@@ -314,6 +314,15 @@ App& App::enable_openapi(const std::string& title, const std::string& version, c
 }
 
 void App::listen() {
+    // Fail fast, before any socket is touched: a route registered twice
+    // (the same method and exact pattern text) silently keeps only one of
+    // the two, with no other warning (#201).
+    if (auto problems = router_.validate_routes(); !problems.empty()) {
+        std::string message = "duplicate routes:";
+        for (const auto& problem : problems) message += "\n  " + problem;
+        throw std::invalid_argument(message);
+    }
+
     // Signals raised before this App started are not for it.
     seen_signal_seq_ = g_signal_seq.load(std::memory_order_acquire);
 
