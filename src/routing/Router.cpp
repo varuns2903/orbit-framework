@@ -1,10 +1,62 @@
 #include <orbit/routing/Router.hpp>
 #include <orbit/utils/Logger.hpp>
+#include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 
 namespace orbit::routing {
+
+namespace {
+
+// Whether a "{name:type}" segment's type constraint is one Orbit knows
+// (checked once, at registration) and whether a value fits it (checked on
+// every match). An empty type, or "str", matches any non-empty segment
+// (split_path() never produces an empty one), same as untyped ":name".
+bool is_known_segment_type(std::string_view type) {
+    return type.empty() || type == "str" || type == "int" || type == "uuid";
+}
+
+bool segment_matches_type(std::string_view type, std::string_view value) {
+    if (type.empty() || type == "str") return true;
+    if (type == "int") {
+        long long n = 0;
+        auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), n);
+        return ec == std::errc() && ptr == value.data() + value.size();
+    }
+    if (type == "uuid") {
+        // 8-4-4-4-12 hex digits (RFC 9562 textual form).
+        if (value.size() != 36) return false;
+        for (size_t i = 0; i < value.size(); ++i) {
+            if (i == 8 || i == 13 || i == 18 || i == 23) {
+                if (value[i] != '-') return false;
+            } else if (!std::isxdigit(static_cast<unsigned char>(value[i]))) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false; // unreachable: is_known_segment_type() rejects this at registration
+}
+
+// "{name}" or "{name:type}" split into name and type ("" for untyped); null
+// if @p segment is not a typed-segment token at all.
+struct TypedSegment {
+    std::string_view name;
+    std::string_view type;
+};
+std::optional<TypedSegment> parse_typed_segment(std::string_view segment) {
+    if (segment.size() < 2 || segment.front() != '{' || segment.back() != '}') return std::nullopt;
+    std::string_view inner = segment.substr(1, segment.size() - 2);
+    size_t colon = inner.find(':');
+    if (colon == std::string_view::npos) return TypedSegment{inner, {}};
+    return TypedSegment{inner.substr(0, colon), inner.substr(colon + 1)};
+}
+
+} // namespace
 
 std::string Router::make_route_key(http::HttpMethod method, std::string_view path) const {
     std::string method_str;
@@ -52,7 +104,10 @@ int Router::match_segments(const std::vector<std::string>& pattern, const std::v
             return literals;
         }
         if (i >= request.size()) return -1;
-        if (seg[0] == ':') {
+        if (auto typed = parse_typed_segment(seg)) {
+            if (!segment_matches_type(typed->type, request[i])) return -1;
+            if (params) (*params)[std::string(typed->name)] = request[i];
+        } else if (seg[0] == ':') {
             if (params) (*params)[seg.substr(1)] = request[i];
         } else if (seg != request[i]) {
             return -1;
@@ -121,7 +176,22 @@ void Router::add_route_with_meta(http::HttpMethod method, const std::string& pat
         if (is_wildcard(segments[i]) && i + 1 != segments.size()) {
             throw std::invalid_argument("a wildcard (*) must be the last segment of a route: " + full_path);
         }
+        if (auto typed = parse_typed_segment(segments[i])) {
+            if (typed->name.empty()) {
+                throw std::invalid_argument("a typed segment needs a name, e.g. {id} or {id:int}: " + full_path);
+            }
+            if (!is_known_segment_type(typed->type)) {
+                throw std::invalid_argument("unknown type \"" + std::string(typed->type) +
+                                            "\" (expected int, uuid or str) in " + full_path);
+            }
+        }
     }
+
+    // One count per exact method+pattern text, for validate_routes(): a
+    // route registered twice silently keeps only one of the two (the
+    // last, for a static path; the first match, for a dynamic one), with
+    // no warning otherwise.
+    ++root()->registration_counts_[make_route_key(method, full_path)];
 
     // Register to OpenAPI registry
     openapi_->register_route(method, full_path, meta);
@@ -140,7 +210,8 @@ void Router::add_route_with_meta(http::HttpMethod method, const std::string& pat
         h(req, writer);
     };
 
-    if (full_path.find(':') != std::string::npos || full_path.find('*') != std::string::npos) {
+    if (full_path.find(':') != std::string::npos || full_path.find('*') != std::string::npos ||
+        full_path.find('{') != std::string::npos) {
         DynamicRoute dr;
         dr.method = method;
         dr.path_segments = std::move(segments);
@@ -235,7 +306,8 @@ void Router::add_stream_route(http::HttpMethod method, const std::string& path, 
 }
 
 void Router::mark_stream_route(http::HttpMethod method, const std::string& full_path) {
-    if (full_path.find(':') != std::string::npos || full_path.find('*') != std::string::npos) {
+    if (full_path.find(':') != std::string::npos || full_path.find('*') != std::string::npos ||
+        full_path.find('{') != std::string::npos) {
         DynamicRoute dr;
         dr.method = method;
         dr.path_segments = split_path(full_path);
@@ -478,6 +550,17 @@ void Router::handle_exception(std::exception_ptr error, http::HttpRequest& reque
 
 void Router::RouteBuilder::handler(RouteHandler h) {
     router_.add_route_with_meta(method_, path_, std::move(mws_), meta_, std::move(h));
+}
+
+std::vector<std::string> Router::validate_routes() const {
+    std::vector<std::string> problems;
+    for (const auto& [key, count] : root()->registration_counts_) {
+        if (count > 1) {
+            problems.push_back(key + " registered " + std::to_string(count) + " times");
+        }
+    }
+    std::sort(problems.begin(), problems.end());
+    return problems;
 }
 
 } // namespace routing

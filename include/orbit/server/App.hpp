@@ -258,6 +258,11 @@ public:
     /// The router every request goes through (orbit::testing::Client uses it).
     const routing::Router& router() const { return router_; }
 
+    /// Router::validate_routes(), to check for duplicate routes without
+    /// calling listen() (which throws std::invalid_argument on its own if
+    /// any are found).
+    std::vector<std::string> validate_routes() const { return router_.validate_routes(); }
+
     // Metrics
     /**
      * @brief Enables Prometheus metrics endpoint.

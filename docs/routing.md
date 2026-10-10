@@ -25,6 +25,44 @@ app.get("/users/:id", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) 
 });
 ```
 
+### Typed Parameters
+
+`{name:type}` constrains a segment to a type, so a value that doesn't fit
+means **this route doesn't match** — it falls through to the next route, and
+on to 404 if nothing else matches — instead of reaching the handler as text
+that then fails to parse:
+
+```cpp
+app.get("/tasks/{id:int}", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+    // int64_t, not int: {id:int} accepts the type's full 64-bit range, so a
+    // narrower T (plain int, say) could still overflow and come back nullopt
+    // for a value the route itself already accepted.
+    std::int64_t id = *req.param<std::int64_t>("id"); // always parses: the route already checked
+    res->send(HttpResponse().send("Task " + std::to_string(id)));
+});
+```
+
+- `int`: an optional leading `-`, then digits, parseable as a 64-bit integer
+  (use `std::int64_t`, or wider, with `param<T>` to get the same guarantee —
+  a narrower `T` can still see a value the route accepted overflow it).
+- `uuid`: the canonical 8-4-4-4-12 hex form, hyphens included, hex digits
+  matched case-insensitively.
+- `str`, or no type (`{name}`): any non-empty segment, the same as `:name`.
+- An unknown type (`{id:money}`) throws `std::invalid_argument` when the
+  route is registered, not at request time.
+- `req.param<T>(name)` parses anything in `req.params` — a typed segment or
+  a plain `:name` — as `T` (`std::string`, `bool`, or an integral or
+  floating-point type), returning `std::nullopt` if it is absent or does
+  not parse. It does not read `req.query`. For a `{id:int}` segment and a
+  `T` at least as wide as that type's range (`std::int64_t` for `int`), it
+  never returns `std::nullopt` for a request the route matched; for a
+  plain `:id` it replaces a hand-written `std::stoi` plus `try`/`catch`.
+
+A typed and an untyped pattern for the same position can coexist; routes are
+still tried in registration order, so put the more specific one first if
+both could match the same request (see `app.validate_routes()` below for
+catching an exact duplicate).
+
 ## Wildcards
 
 A `*` as the **last** segment matches the rest of the path, zero or more
@@ -69,6 +107,28 @@ app.not_found([](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
     res->send(std::move(out));
 });
 ```
+
+## Catching Duplicate Routes
+
+The same method and exact path pattern registered twice is almost always a
+mistake, and it fails silently: for a static path, the later registration
+quietly replaces the earlier one; for a dynamic one (`:id`, `{id:int}`,
+`*`), the first one keeps matching and the second is never reached. Neither
+warns.
+
+`app.listen()` calls `app.validate_routes()` before binding any socket and
+refuses to start (`std::invalid_argument`, listing every duplicate) if it
+finds one. Call `validate_routes()` yourself to check without starting a
+server, e.g. in a test:
+
+```cpp
+EXPECT_TRUE(app.validate_routes().empty());
+```
+
+It only catches an *exact* duplicate (identical method and pattern text);
+two patterns that could overlap at request time (`:id` and `{id:int}` for
+the same position) are not flagged, since the router's "first match in
+registration order" rule already makes that well-defined.
 
 ## Route Grouping
 

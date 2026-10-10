@@ -3,10 +3,13 @@
 #ifdef _WIN32
 #undef DELETE
 #endif
+#include <charconv>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <orbit/http/json.hpp>
 #include <orbit/http/MultipartForm.hpp>
@@ -23,6 +26,27 @@ namespace orbit::http {
  * @brief Represents standard HTTP methods.
  */
 enum class HttpMethod { GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD, UNKNOWN };
+
+/// Parses @p text as T (see HttpRequest::param); null if it does not parse
+/// as a T with nothing left over.
+template <typename T>
+std::optional<T> parse_param(const std::string& text) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        return text;
+    } else if constexpr (std::is_same_v<T, bool>) {
+        if (text == "true" || text == "1") return true;
+        if (text == "false" || text == "0") return false;
+        return std::nullopt;
+    } else if constexpr (std::is_integral_v<T> || std::is_floating_point_v<T>) {
+        T value{};
+        const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (ec != std::errc() || ptr != text.data() + text.size()) return std::nullopt;
+        return value;
+    } else {
+        static_assert(!sizeof(T), "HttpRequest::param<T>() supports std::string, bool, and integral or "
+                                  "floating-point T");
+    }
+}
 
 /**
  * @brief Represents an incoming HTTP request.
@@ -128,6 +152,37 @@ struct HttpRequest {
         if (body.empty()) return nlohmann::json::object();
         json_body = nlohmann::json::parse(body, nullptr, false); // false = no exceptions
         return json_body;
+    }
+
+    /**
+     * @brief A path parameter (from `params`; not `query`) parsed as `T`.
+     * @return The value, or std::nullopt if @p name is absent or its text
+     *         does not parse as `T` (trailing characters included).
+     *
+     * A route pattern that constrains the segment's type (`{id:int}`)
+     * already guarantees the text parses as that type's full range, so
+     * `param<std::int64_t>("id")` there is never null for a request the
+     * route matched — `param<T>` for a narrower `T` (plain `int`, say)
+     * still can be, for a value the route accepted but that overflows `T`.
+     * `param` is just as useful for an untyped `:name` segment, where it
+     * replaces `params.at(name)` plus a hand-written `std::stoi` (and the
+     * try/catch an invalid one needs). It does not read `query`; copy a
+     * value from there into `params` first if you want the same parsing
+     * for it.
+     *
+     * @code
+     * app.get("/tasks/:id", [](HttpRequest& req, std::shared_ptr<ResponseWriter> w) {
+     *     auto id = req.param<int>("id");
+     *     if (!id) { w->send(HttpResponse().status(HttpStatus::NotFound)); return; }
+     *     // ...
+     * });
+     * @endcode
+     */
+    template <typename T>
+    std::optional<T> param(const std::string& name) const {
+        auto it = params.find(name);
+        if (it == params.end()) return std::nullopt;
+        return parse_param<T>(it->second);
     }
 
     /**
