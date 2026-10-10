@@ -3,6 +3,7 @@
 #include <any>
 #include <array>
 #include <deque>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -136,8 +137,10 @@ private:
         for (auto& slot : inline_) {
             if (slot.used && slot.key == key) return &slot;
         }
-        for (auto& slot : overflow_) {
-            if (slot.used && slot.key == key) return &slot;
+        if (overflow_) {
+            for (auto& slot : *overflow_) {
+                if (slot.used && slot.key == key) return &slot;
+            }
         }
         return nullptr;
     }
@@ -155,7 +158,12 @@ private:
                 return slot;
             }
         }
-        for (auto& slot : overflow_) {
+        // A default-constructed std::deque allocates (libstdc++: a map
+        // array and a node) even while empty, unlike std::vector; built
+        // only once a 5th distinct type actually needs it, so a request
+        // that never grows past the inline slots still allocates nothing.
+        if (!overflow_) overflow_.emplace();
+        for (auto& slot : *overflow_) {
             if (!slot.used) {
                 slot.key = key;
                 slot.used = true;
@@ -164,12 +172,12 @@ private:
         }
         // deque::push_back never invalidates references to existing
         // elements (only iterators), unlike vector on reallocation.
-        overflow_.push_back(Slot{key, {}, true});
-        return overflow_.back();
+        overflow_->push_back(Slot{key, {}, true});
+        return overflow_->back();
     }
 
     std::array<Slot, kInlineCapacity> inline_{};
-    std::deque<Slot> overflow_;
+    std::optional<std::deque<Slot>> overflow_;
     std::unordered_map<std::string, std::string> attrs_;
 };
 
