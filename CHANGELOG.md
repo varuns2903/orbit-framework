@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`orbit::http::RequestContext` and `HttpRequest::set/get/ensure<T>()`**
+  (#202): type-indexed per-request storage, so a middleware that computes
+  something for later middleware or the handler (the authenticated user, a
+  tenant, timing) has somewhere typed to put it, without a new fixed
+  `HttpRequest` field or a global. `req.context` also has named string
+  attributes (`set_attr`/`attr`) for keys only known at runtime.
 - **`orbit::testing::Client`** (#203): call an application's routes
   in-process, without `listen()` or sockets, through the full middleware
   chain, routing and error handling. Fluent requests
