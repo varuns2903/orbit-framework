@@ -250,6 +250,9 @@ public:
      */
     openapi::OpenApiRegistry& openapi() { return router_.openapi(); }
 
+    /// The router every request goes through (orbit::testing::Client uses it).
+    const routing::Router& router() const { return router_; }
+
     // Metrics
     /**
      * @brief Enables Prometheus metrics endpoint.

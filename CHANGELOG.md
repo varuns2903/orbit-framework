@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`orbit::testing::Client`** (#203): call an application's routes
+  in-process, without `listen()` or sockets, through the full middleware
+  chain, routing and error handling. Fluent requests
+  (`client.post("/x").json(...).send()`), a cookie jar for sessions,
+  coroutine handlers, and chunked/SSE responses collected as chunks. See
+  [docs/testing.md](docs/testing.md).
 - **Migrations without HTTP** (#195): `MigrationRunner<Db>::run(db, dir)`
   returns an `Awaitable<MigrationResult>` (applied files, error, summary),
   and `orbit::orm::migrate_sync(conninfo, dir)` migrates at start-up, before
