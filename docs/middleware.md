@@ -21,6 +21,50 @@ app.use(logger);
 app.use(orbit::middleware::cors());
 ```
 
+## Passing Typed Values Between Middleware
+
+A middleware that computes something for later middleware or the handler —
+the authenticated user, a tenant, timing — has nowhere typed to put it
+beyond the few fixed `HttpRequest` fields (`user`, `session`,
+`request_id`). `req.set<T>(value)` / `req.get<T>()` / `req.ensure<T>(args...)`
+give it one, keyed by type, with no header or global needed:
+
+```cpp
+struct AuthInfo {
+    std::string user_id;
+    std::vector<std::string> roles;
+};
+
+app.use([](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+    auto token = req.headers.find("Authorization");
+    if (token == req.headers.end()) {
+        res->send(HttpResponse().status(HttpStatus::Unauthorized).send("no token"));
+        return false;
+    }
+    req.set(AuthInfo{verify(token->second)});
+    return true;
+});
+
+app.get("/me", [](HttpRequest& req, std::shared_ptr<ResponseWriter> res) {
+    AuthInfo* auth = req.get<AuthInfo>(); // the middleware above ran first
+    res->send(HttpResponse().send(auth->user_id));
+});
+```
+
+- At most one value per type. `set` replaces any earlier one.
+- `get<T>()` returns `nullptr` if nothing was set; `ensure<T>(args...)`
+  constructs and stores one only if there is none yet, and always returns
+  the same reference afterwards.
+- `T` must be copy-constructible, as `std::any` requires. Wrap a move-only
+  resource (a DB transaction handle) in a `shared_ptr` first.
+- Storing the first four distinct types costs no heap allocation beyond
+  whatever `std::any` itself needs for the value (none for a pointer, a
+  `shared_ptr`, or another small type).
+- `req.context` is the `orbit::http::RequestContext` these forward to, for
+  code that takes a context by itself. It also has named string attributes
+  (`req.context.set_attr("tenant", id)` / `.attr("tenant")`) for keys only
+  known at runtime.
+
 ## Sessions
 
 `orbit::middleware::session()` gives every client a session and exposes it as

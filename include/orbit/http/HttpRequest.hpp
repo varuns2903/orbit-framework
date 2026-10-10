@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <orbit/http/json.hpp>
 #include <orbit/http/MultipartForm.hpp>
+#include <orbit/http/RequestContext.hpp>
 #include <orbit/utils/CaseInsensitive.hpp>
 
 namespace orbit::middleware {
@@ -44,6 +45,34 @@ struct HttpRequest {
     std::string trace_id;   ///< W3C trace id (32 hex), set by middleware::tracing()
     std::string span_id;    ///< This request's span id (16 hex), set by middleware::tracing()
     nlohmann::json user; // Populated by JwtAuth middleware
+
+    /**
+     * @brief Type-indexed storage for values middleware computes for later
+     *        middleware or the handler (a tenant, a DB transaction, timing)
+     *        with no fixed HttpRequest field or global needed. See
+     *        RequestContext; `set`/`get`/`ensure` below forward to it.
+     */
+    RequestContext context;
+
+    /// context.set<T>(value): see RequestContext::set.
+    template <typename T>
+    T& set(T value) {
+        return context.set<T>(std::move(value));
+    }
+    /// context.get<T>(): see RequestContext::get.
+    template <typename T>
+    T* get() {
+        return context.get<T>();
+    }
+    template <typename T>
+    const T* get() const {
+        return context.get<T>();
+    }
+    /// context.ensure<T>(args...): see RequestContext::ensure.
+    template <typename T, typename... Args>
+    T& ensure(Args&&... args) {
+        return context.ensure<T>(std::forward<Args>(args)...);
+    }
 
     mutable nlohmann::json json_body; // Cached parsed JSON
 
