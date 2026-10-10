@@ -83,7 +83,11 @@ static std::string closest_flag(const std::string& arg) {
 }
 
 ServerConfig ServerConfig::parse(int argc, char* argv[], ParseMode mode) {
-    ServerConfig cfg;
+    return parse(argc, argv, ServerConfig{}, mode);
+}
+
+ServerConfig ServerConfig::parse(int argc, char* argv[], ServerConfig base, ParseMode mode) {
+    ServerConfig cfg = std::move(base);
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];

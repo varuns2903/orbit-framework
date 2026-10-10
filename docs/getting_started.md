@@ -111,6 +111,46 @@ curl http://localhost:8080
 curl http://localhost:8080/api/status
 ```
 
+## Configuration Files
+
+Settings can live in a JSON file, be overridden by `ORBIT_*` environment
+variables (containers, CI), and then by command-line flags:
+
+```json
+{
+  // Comments are allowed.
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0",
+    "worker_threads": "auto",
+    "header_timeout": 5,
+    "engine": "auto"
+  },
+  "database": { "url": "postgres://localhost/app", "pool_size": 8 }
+}
+```
+
+```cpp
+#include <orbit/config/ConfigFile.hpp>
+
+int main(int argc, char* argv[]) {
+    auto cfg = orbit::config::Config::load("orbit.json", argc, argv);
+    orbit::server::App app(cfg.server);
+    std::string db_url = cfg.section("database").value("url", "");
+    // ...
+}
+```
+
+- `server` keys are the `ServerConfig` field names; durations are in
+  seconds; `worker_threads` and `event_loops` take `"auto"`; `engine` is
+  `"epoll"`, `"iouring"` or `"auto"`; `http_version` is `"1.1"`, `"2"` or `"3"`.
+- `ORBIT_PORT=9000`, `ORBIT_LOG_LEVEL=DEBUG` and the like set server keys;
+  `ORBIT_DATABASE__URL=...` (a double underscore between levels) sets any
+  path, so application sections can be overridden too. Values that parse as
+  JSON (numbers, `true`) are used as such.
+- Validation is strict: an unknown server key or a value of the wrong type
+  stops start-up with `orbit::config::ConfigError`, naming the file and key
+  (`orbit.json: server.port: expected a whole number from 0 to 65535, not "80"`).
 ## Start-Up, Shutdown and Timers
 
 Code that should run once the server is up, or as it stops, goes in hooks;

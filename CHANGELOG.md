@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drain. `app.run_every(interval, fn)` and `app.run_after(delay, fn)` run
   callbacks on the worker pool, never overlapping, and return a cancellable
   `TimerHandle`.
+- **Configuration files** (#204): `orbit::config::Config::load("orbit.json",
+  argc, argv)` reads a JSON file (comments allowed), applies `ORBIT_*`
+  environment variables (`ORBIT_PORT`, `ORBIT_DATABASE__URL`) and then the
+  command-line flags. The `server` section becomes a strictly validated
+  `ServerConfig` (unknown keys and bad values name the key path); other
+  sections are the application's (`cfg.section("database")`).
+  `ServerConfig::parse()` gains an overload that applies flags on top of a
+  base configuration.
 - **Migrations without HTTP** (#195): `MigrationRunner<Db>::run(db, dir)`
   returns an `Awaitable<MigrationResult>` (applied files, error, summary),
   and `orbit::orm::migrate_sync(conninfo, dir)` migrates at start-up, before
